@@ -1,0 +1,40 @@
+# ---------- Python ----------
+# Virtual environment: a private copy of Python + packages for this project.
+# Never committed - each developer recreates it from requirements.txt.
+.venv/
+venv/
+env/
+
+# Compiled bytecode Python generates automatically when it imports your files.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------- Secrets ----------
+# Real credentials live here. .env.example (the template, no real values) IS committed.
+.env
+.env.*
+!.env.example
+
+# ---------- Node / Next.js (frontend, added later) ----------
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# ---------- Editors / OS ----------
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
