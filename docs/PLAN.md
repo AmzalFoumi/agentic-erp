@@ -8,7 +8,7 @@
 | Gate | What | Status |
 |---|---|---|
 | 0 | Plan, repo, branch, push | ✅ done — commit `4d25463`, pushed to `AmzalFoumi/agentic-erp`, working on `dev` |
-| 1 | Python environment and dependencies | ⬜ not started |
+| 1 | Python environment and dependencies | ✅ done — `.venv` at `backend/.venv`, 53 packages installed, `mcp==2.0.0` verified |
 | 2 | Hosted Postgres on Supabase | ⬜ not started |
 | 3 | Models, exceptions, first migration | ⬜ not started |
 | 4 | The service layer | ⬜ not started |
@@ -159,6 +159,33 @@ If a command fails, the developer pastes the output and the agent diagnoses it.
   what `requirements.txt` is for, and pinned vs unpinned versions.
 - Verify (developer runs): `pip list` shows the packages; `python -c "import fastapi, mcp"` exits
   silently.
+
+### Outcome (2026-07-29)
+
+All versions were checked against PyPI on the day and pinned exactly: `fastapi==0.141.0`,
+`uvicorn[standard]==0.52.0`, `sqlalchemy==2.0.51`, `psycopg[binary]==3.3.4`, `alembic==1.18.5`,
+`pydantic-settings==2.14.2`, `mcp==2.0.0`, `pytest==9.1.1`, `httpx==0.28.1`. Install was clean;
+53 packages total. `from mcp.server import MCPServer` confirmed against the installed 2.0.0.
+
+**MCP 2.0 note.** The 2026-07-28 MCP specification was finalised the day before this gate, and
+`mcp` 2.0.0 shipped with it — a major SDK rework. The spec removes the `initialize` handshake and
+protocol-level sessions (the `Mcp-Session-Id` header), making the protocol stateless so servers can
+sit behind a load balancer without sticky routing; it also adds Multi Round-Trip Requests, letting
+a tool ask the user a question mid-call. None of this changes our design: we run over **stdio**,
+which never had transport sessions, and our state was always in Postgres. It matters if we later
+host the MCP server over HTTP.
+
+We took the one-day-old major version deliberately. Unlike the ThunderID decision, the blast radius
+is tiny — `mcp` is imported by exactly one file (Gate 6) and the fallback is a one-line re-pin to
+`mcp==1.29.0`. Note that `mcp` 2.0 depends on `httpx2`, so both `httpx` and `httpx2` are installed;
+they are different packages, not a conflict.
+
+## Standing rule: verify against current docs at every gate
+
+At the start of each gate, fetch current documentation and released versions rather than relying on
+the agent's training data. This gate is the proof: the MCP spec and SDK both changed within 24
+hours of the work, and five of nine version pins written from memory were wrong before being
+checked against PyPI.
 
 ## Gate 2 — Hosted Postgres on Supabase
 
