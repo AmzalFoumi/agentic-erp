@@ -33,15 +33,15 @@ collapses into an ordinary web app.
 
 ## Layout
 
-| Path | What lives here |
-|---|---|
-| `backend/core/` | Config, database connection, ORM models, shared exceptions |
-| `backend/services/` | **The business logic.** Framework-free, written once |
-| `backend/api/` | FastAPI routes — thin adapter, calls `services/` |
-| `backend/mcp_server/` | MCP tools — thin adapter, calls `services/` |
-| `backend/tests/` | pytest, mostly against `services/` directly |
-| `frontend/` | Next.js UI (scaffolded in a later pass) |
-| `docs/PLAN.md` | The build plan and its stop gates — the source of truth |
+| Path                  | What lives here                                            |
+| --------------------- | ---------------------------------------------------------- |
+| `backend/core/`       | Config, database connection, ORM models, shared exceptions |
+| `backend/services/`   | **The business logic.** Framework-free, written once       |
+| `backend/api/`        | FastAPI routes — thin adapter, calls `services/`           |
+| `backend/mcp_server/` | MCP tools — thin adapter, calls `services/`                |
+| `backend/tests/`      | pytest, mostly against `services/` directly                |
+| `frontend/`           | Next.js UI (scaffolded in a later pass)                    |
+| `docs/PLAN.md`        | The build plan and its stop gates — the source of truth    |
 
 ## Stack
 
@@ -50,5 +50,4 @@ Next.js (later)
 
 ## Status
 
-Under construction. See [`docs/PLAN.md`](docs/PLAN.md) for the gate-by-gate build plan and current
-progress.
+Under construction.

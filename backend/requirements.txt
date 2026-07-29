@@ -1,0 +1,67 @@
+# Python dependencies for the backend.
+#
+# This file is the *recipe* for the virtual environment. It is committed to git;
+# the environment it builds (.venv/) is not. Anyone cloning this repo runs
+# `pip install -r requirements.txt` and gets the exact same set of packages.
+#
+# `==` pins an exact version. We pin everything so that a build today and a
+# build in six months are identical - the single most common source of
+# "it works on my machine" is an unpinned dependency quietly upgrading.
+#
+# Verified against PyPI on 2026-07-29.
+
+# ---------- Web framework (the api/ adapter) ----------
+
+# FastAPI turns plain Python functions into HTTP endpoints. It reads your type
+# hints at runtime to validate incoming JSON and to generate the interactive
+# docs at /docs. Requires Python 3.10+; we are on 3.12.4.
+fastapi==0.141.0
+
+# The actual web server that runs the FastAPI app. FastAPI describes the app;
+# uvicorn is the process that listens on a port. [standard] pulls in optional
+# speed-ups and the file-watcher that powers `--reload`.
+uvicorn[standard]==0.52.0
+
+# ---------- Database (core/) ----------
+
+# SQLAlchemy is the ORM: it maps Python classes to SQL tables, so we write
+# `session.get(Product, 1)` instead of hand-writing SELECT statements.
+# The 2.x style is quite different from 1.x - when reading tutorials online,
+# check they are 2.0-era.
+sqlalchemy==2.0.51
+
+# The Postgres driver. SQLAlchemy speaks SQL; psycopg speaks to the actual
+# server over the network. [binary] ships precompiled, so no C compiler is
+# needed on Windows.
+psycopg[binary]==3.3.4
+
+# Alembic generates and applies database migrations - versioned, ordered
+# scripts that evolve the schema. Written by the SQLAlchemy author.
+alembic==1.18.5
+
+# ---------- Configuration ----------
+
+# Reads settings from a .env file into a typed Python object, so a missing or
+# malformed setting fails loudly at startup rather than mysteriously later.
+pydantic-settings==2.14.2
+
+# ---------- MCP (the mcp_server/ adapter) ----------
+
+# The MCP Python SDK - exposes our service functions as tools an AI agent can
+# call. Server class is `MCPServer` (older tutorials show `FastMCP`).
+#
+# NOTE: 2.0.0 was released 2026-07-28, implementing the finalised 2026-07-28
+# spec (no initialize handshake, no protocol-level sessions). It is a major
+# rework and is one day old at the time of writing. We are on it deliberately
+# to match current docs; nothing imports it until Gate 6. If it proves rough,
+# the fallback is the previous stable line: mcp==1.29.0
+mcp==2.0.0
+
+# ---------- Testing ----------
+
+# The test runner. Finds files named test_*.py and functions named test_*.
+pytest==9.1.1
+
+# An HTTP client. FastAPI's test client is built on it, so it is what we use to
+# call our own API from inside a test without starting a real server.
+httpx==0.28.1

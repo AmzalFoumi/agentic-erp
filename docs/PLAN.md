@@ -7,8 +7,8 @@
 
 | Gate | What | Status |
 |---|---|---|
-| 0 | Plan, repo, branch, push | 🔨 in progress |
-| 1 | Python environment and dependencies | ⬜ not started |
+| 0 | Plan, repo, branch, push | ✅ done — commit `4d25463`, pushed to `AmzalFoumi/agentic-erp`, working on `dev` |
+| 1 | Python environment and dependencies | ✅ done — `.venv` at `backend/.venv`, 53 packages installed, `mcp==2.0.0` verified |
 | 2 | Hosted Postgres on Supabase | ⬜ not started |
 | 3 | Models, exceptions, first migration | ⬜ not started |
 | 4 | The service layer | ⬜ not started |
@@ -58,6 +58,41 @@ needed; **Vercel** is authorized and will matter at deploy time.
 MCPServer`. `FastMCP` still works as an alias, but most tutorials online show the old name — this
 project uses the current one.
 
+## Decision: authentication (2026-07-29)
+
+**Supabase is used for Postgres only** — not Auth, Storage, or Realtime. The backend connects with
+SQLAlchemy over a plain connection string, so the database stays portable (swap the string for Neon
+or RDS and nothing else changes).
+
+**The auth provider choice is deferred; the design for it is not.**
+
+Human auth and agent auth are different problems. Human auth is commoditized (Supabase Auth, Clerk,
+Auth0). Agent auth — an AI acting *on behalf of* a person, with a subset of their permissions and a
+clear accountability trail — is unsettled and actively churning. **WSO2 ThunderID**
+(<https://github.com/asgardeo/thunder>, announced May 2026) targets exactly that, with RBAC spanning
+humans, agents and workloads, and is being contributed to the OpenWallet Foundation. It is also two
+months old with no GA declaration, which makes it a poor first dependency for this project today.
+
+Also note: while the MCP server runs over **stdio locally**, the agent runs as the developer and
+there is no auth question to answer. It only appears when the MCP server goes remote.
+
+**What we do now, from Gate 3/4 onward:**
+
+- Every service function takes an `actor` as its second argument, after `session`.
+- `core/exceptions.py` includes `PermissionDeniedError`.
+- Permission checks live in `services/` (`actor.can("inventory:adjust")`), never in the adapters.
+- Models carry `created_by` / `updated_by` audit columns.
+- A `SystemActor` with full permissions is used until a real provider is wired in.
+
+Services never learn *how* someone authenticated — only who they are and what they may do. FastAPI
+will derive the `Actor` from a JWT; MCP will derive it from its session context. Both hand the
+service the same object, so adopting a provider later is a change to two adapter files rather than
+a rewrite. The audit columns are wanted regardless — an ERP needs "who adjusted this stock?".
+
+**Re-evaluate ThunderID in ~6 months** (around Q1 2027), once it has a GA release, if agent-identity
+governance becomes central. Otherwise Supabase Auth is the pragmatic default, since the project is
+already provisioned and it integrates with Postgres row-level security.
+
 ---
 
 ## How execution works: stop gates
@@ -72,6 +107,28 @@ Work proceeds in **gated stages**. At the end of every gate the agent will:
 5. **Hand over for a manual `git commit`.** The agent shows the suggested command; the developer
    runs it. The agent does not commit.
 6. **Wait for "continue."** Nothing resumes until then.
+
+## Division of labour: who runs what
+
+**The developer runs every command that controls Python itself or the repository.** The agent
+explains each command — what it does, what output to expect, what a failure looks like — and then
+waits. Learning the toolchain by typing it is the point.
+
+Developer-run (agent explains, never executes):
+
+- **Environment:** creating and activating the virtualenv, `deactivate`
+- **Packages:** `pip install`, `pip uninstall`, `pip freeze`, `pip list`, any dependency change
+- **Running the app:** `uvicorn ...`, `python -m mcp_server.server`, `pytest`
+- **Migrations:** `alembic revision`, `alembic upgrade head`
+- **Git:** `add`, `commit`, `push`, `checkout` — and any `gh` command
+
+Agent-run:
+
+- Writing and editing files
+- Read-only inspection (`git status`, `git log`, reading files, searching)
+- Supabase MCP tools (creating the project, `list_tables`, `execute_sql`, `get_advisors`)
+
+If a command fails, the developer pastes the output and the agent diagnoses it.
 
 ---
 
@@ -94,11 +151,41 @@ Work proceeds in **gated stages**. At the end of every gate the agent will:
 
 ## Gate 1 — Python environment and dependencies
 
-- `backend/requirements.txt`: `fastapi`, `uvicorn[standard]`, `sqlalchemy`, `psycopg[binary]`,
-  `pydantic-settings`, `alembic`, `mcp`, `pytest`, `httpx`
-- Virtualenv at `backend/.venv`, packages installed into it.
-- **Concept taught:** what a venv is, how to activate it on Windows, what `requirements.txt` is for.
-- Verify: `pip list` shows the packages; `python -c "import fastapi, mcp"` succeeds.
+- Agent writes `backend/requirements.txt`: `fastapi`, `uvicorn[standard]`, `sqlalchemy`,
+  `psycopg[binary]`, `pydantic-settings`, `alembic`, `mcp`, `pytest`, `httpx` — with a comment
+  explaining what each package is for.
+- **Developer runs** the venv creation, activation, and `pip install -r requirements.txt`.
+- **Concept taught:** what a venv is, how to activate it on Windows (PowerShell vs Git Bash differ),
+  what `requirements.txt` is for, and pinned vs unpinned versions.
+- Verify (developer runs): `pip list` shows the packages; `python -c "import fastapi, mcp"` exits
+  silently.
+
+### Outcome (2026-07-29)
+
+All versions were checked against PyPI on the day and pinned exactly: `fastapi==0.141.0`,
+`uvicorn[standard]==0.52.0`, `sqlalchemy==2.0.51`, `psycopg[binary]==3.3.4`, `alembic==1.18.5`,
+`pydantic-settings==2.14.2`, `mcp==2.0.0`, `pytest==9.1.1`, `httpx==0.28.1`. Install was clean;
+53 packages total. `from mcp.server import MCPServer` confirmed against the installed 2.0.0.
+
+**MCP 2.0 note.** The 2026-07-28 MCP specification was finalised the day before this gate, and
+`mcp` 2.0.0 shipped with it — a major SDK rework. The spec removes the `initialize` handshake and
+protocol-level sessions (the `Mcp-Session-Id` header), making the protocol stateless so servers can
+sit behind a load balancer without sticky routing; it also adds Multi Round-Trip Requests, letting
+a tool ask the user a question mid-call. None of this changes our design: we run over **stdio**,
+which never had transport sessions, and our state was always in Postgres. It matters if we later
+host the MCP server over HTTP.
+
+We took the one-day-old major version deliberately. Unlike the ThunderID decision, the blast radius
+is tiny — `mcp` is imported by exactly one file (Gate 6) and the fallback is a one-line re-pin to
+`mcp==1.29.0`. Note that `mcp` 2.0 depends on `httpx2`, so both `httpx` and `httpx2` are installed;
+they are different packages, not a conflict.
+
+## Standing rule: verify against current docs at every gate
+
+At the start of each gate, fetch current documentation and released versions rather than relying on
+the agent's training data. This gate is the proof: the MCP spec and SDK both changed within 24
+hours of the work, and five of nine version pins written from memory were wrong before being
+checked against PyPI.
 
 ## Gate 2 — Hosted Postgres on Supabase
 
@@ -118,8 +205,9 @@ Work proceeds in **gated stages**. At the end of every gate the agent will:
 
 | File | Purpose |
 |---|---|
-| `core/models.py` | ORM tables. Slice 1: `Product` (id, sku unique, name, category, unit, cost_price, sell_price, quantity_on_hand, reorder_level, timestamps) |
-| `core/exceptions.py` | `NotFoundError`, `DuplicateError`, `ValidationError` — framework-free, the shared error vocabulary both adapters translate from |
+| `core/models.py` | ORM tables. Slice 1: `Product` (id, sku unique, name, category, unit, cost_price, sell_price, quantity_on_hand, reorder_level, timestamps, `created_by`/`updated_by` audit columns) |
+| `core/exceptions.py` | `NotFoundError`, `DuplicateError`, `ValidationError`, `PermissionDeniedError` — framework-free, the shared error vocabulary both adapters translate from |
+| `core/actor.py` | The `Actor` protocol (`id`, `can(permission)`) and a `SystemActor` with full permissions, used until a real auth provider is chosen. See the auth decision above. |
 | `alembic.ini`, `alembic/` | Migrations, initialised in `backend/` |
 
 - Verify: `alembic upgrade head` creates the `products` table; confirmed with the Supabase MCP
@@ -129,9 +217,10 @@ Work proceeds in **gated stages**. At the end of every gate the agent will:
 ## Gate 4 — The service layer (the important part)
 
 - `services/products.py`: `list_products`, `get_product`, `create_product`, `update_product`,
-  `adjust_stock`. Every function takes a SQLAlchemy `Session` as its first argument, uses type
+  `adjust_stock`. Every function takes a SQLAlchemy `Session` first and an `Actor` second, uses type
   hints, and raises from `core/exceptions.py`. Real rules live here — `adjust_stock` refuses to
-  drive quantity negative; `create_product` rejects a duplicate SKU.
+  drive quantity negative; `create_product` rejects a duplicate SKU; writes check
+  `actor.can(...)` and stamp `created_by`/`updated_by`.
 - `services/inventory.py`, `suppliers.py`, `purchasing.py`: docstring + TODO, so the structure is
   visible.
 - `tests/test_products.py`: pytest against the service layer directly (no HTTP), covering the
