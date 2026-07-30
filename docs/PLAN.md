@@ -9,7 +9,7 @@
 |---|---|---|
 | 0 | Plan, repo, branch, push | ✅ done — commit `4d25463`, pushed to `AmzalFoumi/agentic-erp`, working on `dev` |
 | 1 | Python environment and dependencies | ✅ done — `.venv` at `backend/.venv`, 53 packages installed, `mcp==2.0.0` verified |
-| 2 | Hosted Postgres on Supabase | ⬜ not started |
+| 2 | Hosted Postgres on Supabase | ✅ done — project `khinbdvubrxqqalejcbp` (eu-west-3), session pooler, `PostgreSQL 17.6` verified from SQLAlchemy; `list_tables` confirms empty `public` schema |
 | 3 | Models, exceptions, first migration | ⬜ not started |
 | 4 | The service layer | ⬜ not started |
 | 5 | Adapter #1: FastAPI | ⬜ not started |
@@ -201,6 +201,28 @@ checked against PyPI.
 - Verify: a script opens a connection and prints the Postgres server version; cross-checked from
   the Supabase side with `list_tables`.
 
+### Outcome (2026-07-29)
+
+Supabase project **`agentic-erp`** created via MCP — ref `khinbdvubrxqqalejcbp`, org `AmzalAgentic`,
+region **eu-west-3** (Paris, nearest available to Morocco), status `ACTIVE_HEALTHY`. `get_cost`
+returned **$0/month**; free tier, so no confirmation escalation was needed.
+
+Docs verified on the day (Supabase "Connect to your database" + "Using SQLAlchemy with Supabase",
+pydantic-settings `SettingsConfigDict`). Two points confirmed rather than assumed:
+
+- The **session pooler** (`*.pooler.supabase.com`, port **5432**) is the right choice. The direct
+  endpoint is IPv6-only on the free plan; the session pooler is IPv4 on every tier. Transaction mode
+  (port 6543) is the wrong one here — it does not support prepared statements, which SQLAlchemy uses
+  by default, and would need `poolclass=NullPool`.
+- SQLAlchemy requires the scheme `postgresql://`, not the `postgres://` the dashboard hands you;
+  we additionally use `postgresql+psycopg://` to select psycopg 3 over the default psycopg2.
+
+Engine tuned for the free tier: `pool_pre_ping=True` (the pooler drops idle connections; without
+this the first query after a quiet spell fails), `pool_size=5`, `max_overflow=5`, `pool_recycle=1800`.
+
+`get_session()` deliberately does **not** commit. Committing expresses business intent, so it
+belongs to `services/`, not to connection plumbing.
+
 ## Gate 3 — Models, exceptions, first migration
 
 | File | Purpose |
@@ -227,6 +249,49 @@ checked against PyPI.
   duplicate-SKU and negative-stock rules.
 - Verify: `pytest` passes.
 
+### Open item for this gate: enforce the module boundary (raised 2026-07-30)
+
+The layering — `api | mcp_server` → `services` → `core` — is currently a promise in prose. One tired
+evening adding `from fastapi import HTTPException` to `services/` kills the design silently. This
+gate is where `services/` is first written, so it is the right moment to make the rule mechanical.
+
+Proposal, **to be decided at the start of Gate 4, not before**: add `import-linter` (2.13, released
+2026-07-03, supports Python 3.10–3.14 — verified on PyPI 2026-07-30) plus two contracts in
+`pyproject.toml`:
+
+```toml
+[tool.importlinter]
+root_packages = ["core", "services", "api", "mcp_server"]
+
+[[tool.importlinter.contracts]]
+name = "Layers point downward only"
+type = "layers"
+layers = ["api | mcp_server", "services", "core"]   # `|` = siblings, independent of each other
+
+[[tool.importlinter.contracts]]
+name = "Services stay framework-free"
+type = "forbidden"
+source_modules = ["services"]
+forbidden_modules = ["fastapi", "mcp", "starlette"]
+```
+
+`lint-imports` then runs alongside `pytest`. This automates the "final invariant check" currently
+sitting at the end of Gate 6, turning it from a one-off manual grep into a build failure.
+
+Cost: one dependency, ~15 lines of config.
+
+**Settled at the same time (2026-07-30): modular monolith, not microservices.** The question was
+whether `services/` should become its own process that `api/` and `mcp_server/` call over HTTP. No:
+that buys independent scaling and deployment (not needed — one developer, one supermarket) at the
+cost of a network hop per call, serialization both ways, auth between our own components, and a
+third process that must be running before anything works. The seam stays a *module* boundary. It is
+still a real seam — if we ever outgrow the monolith, `services/` is exactly where the cut goes.
+
+**Also settled: the database is deliberately NOT swappable.** Making it so means a repository
+pattern (abstract interface in `core/`, SQLAlchemy implementation behind it, services depending only
+on the interface). That is real indirection bought to enable switching off Postgres, which will never
+happen. SQLAlchemy already abstracts the SQL dialect; that is where abstraction stops.
+
 ## Gate 5 — Adapter #1: FastAPI
 
 - `api/schemas.py` — Pydantic request/response models (`ProductCreate`, `ProductRead`, …); the
@@ -247,7 +312,50 @@ checked against PyPI.
 - Verify: `python -m mcp_server.server` starts clean; optionally register it in Claude Code's MCP
   config and ask the agent to "list all products", proving both adapters share one brain.
 - Final invariant check: `services/` contains zero references to `fastapi`, `mcp`, or
-  `HTTPException`.
+  `HTTPException`. (If the Gate 4 open item is adopted, `lint-imports` does this automatically.)
+
+### Transport decision: stdio now, HTTP later with auth (2026-07-30)
+
+The goal is for agents implemented **in the frontend** to reach these tools. A browser cannot spawn
+a child process, so stdio cannot serve them — that path needs **Streamable HTTP** transport, giving
+the MCP server a real URL.
+
+That URL pulls in the whole authorization stack. Per MCP 2026-07-28, an HTTP MCP server acts as an
+OAuth **resource server** and MUST:
+
+- answer unauthenticated requests with `401` + `WWW-Authenticate` pointing at its **Protected
+  Resource Metadata** (RFC 9728), and publish that document naming its trusted authorization servers
+- **validate the token audience on every request**, rejecting tokens not issued for this server
+- **never forward the caller's token upstream** — obtain fresh credentials for any onward hop
+  (confused-deputy defence)
+
+Clients must use OAuth 2.1 authorization code flow with mandatory PKCE/S256 (RFC 7636) and the
+`resource=` parameter (RFC 8707) binding the token to this server, and validate `iss` in the
+authorization response (RFC 9207, hardened in 2026-07-28).
+
+All of that requires an **authorization server** — precisely the decision deferred above (see
+"Decision: authentication"). We therefore cannot implement HTTP transport correctly yet.
+
+**Conclusion: Gate 6 stays on stdio, unchanged.** HTTP transport is added later, together with the
+auth provider decision. The cost of deferring is near zero because transport is the last line of the
+file — `mcp.run(transport="stdio")` becomes `mcp.run(transport="http")`. Tools, docstrings and
+service calls are identical either way. Stdio is exempt from the authorization requirements in
+practice: a client that can spawn the process already has local filesystem access, so there is no
+network attacker in the threat model.
+
+Two consequences to carry forward:
+
+- **The `actor` abstraction is now load-bearing, not speculative.** MCP 2026-07-28 removed the
+  `initialize` handshake and protocol-level sessions; client context moved into per-request `_meta`,
+  and any state that must survive a request has to be passed explicitly. "Who is asking" therefore
+  arrives with each call rather than being remembered — which is exactly what `core/actor.py` models.
+- **Connection budget changes under HTTP.** Stdio runs one MCP process per client, each with its own
+  engine (~10 connections at burst). Multiple HTTP replicas multiply that. At that point switch to
+  Supabase's **transaction** pooler (port 6543) with `poolclass=NullPool`, letting the pooler do the
+  pooling instead of the app. Not a problem today; it is why `.env.example` documents both modes.
+
+Sources: aaif.io — "The anatomy of MCP authorization" and "Migrate sessions to stateless requests
+with MCP 2026-07-28", both read 2026-07-30.
 
 ---
 
