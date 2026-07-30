@@ -65,3 +65,12 @@ pytest==9.1.1
 # An HTTP client. FastAPI's test client is built on it, so it is what we use to
 # call our own API from inside a test without starting a real server.
 httpx==0.28.1
+
+# ---------- Architecture enforcement ----------
+
+# Reads every import statement, builds the dependency graph, and fails the
+# build if services/ imports an adapter or a web framework. That rule is the
+# one the whole two-adapter design rests on; this stops it being enforced by
+# memory alone. Config lives in pyproject.toml; run `lint-imports` from
+# backend/. Verified on PyPI 2026-07-30 (2.13, released 2026-07-03).
+import-linter==2.13

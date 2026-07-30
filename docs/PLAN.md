@@ -10,8 +10,8 @@
 | 0 | Plan, repo, branch, push | ✅ done — commit `4d25463`, pushed to `AmzalFoumi/agentic-erp`, working on `dev` |
 | 1 | Python environment and dependencies | ✅ done — `.venv` at `backend/.venv`, 53 packages installed, `mcp==2.0.0` verified |
 | 2 | Hosted Postgres on Supabase | ✅ done — project `khinbdvubrxqqalejcbp` (eu-west-3), session pooler, `PostgreSQL 17.6` verified from SQLAlchemy; `list_tables` confirms empty `public` schema |
-| 3 | Models, exceptions, first migration | ⬜ not started |
-| 4 | The service layer | ⬜ not started |
+| 3 | Models, exceptions, first migration | ✅ done — commit `18545e4`; `products` + `alembic_version` both created and both with RLS enabled, confirmed by `list_tables`; `get_advisors` clean |
+| 4 | The service layer | 🟡 files written, awaiting your `pytest` + `lint-imports` run — `import-linter` adopted |
 | 5 | Adapter #1: FastAPI | ⬜ not started |
 | 6 | Adapter #2: MCP server | ⬜ not started |
 
@@ -373,6 +373,34 @@ silently-missing rows rather than errors.
 Source: Supabase docs — "RLS with custom/third-party auth" and "Third-Party Auth: Clerk", read
 2026-07-30.
 
+### Outcome (2026-07-30)
+
+Four files written: `core/models.py` (`Product`), `core/exceptions.py`, `core/actor.py`,
+`alembic.ini` + `alembic/`. Two migrations applied:
+
+- `068702c8e737` — creates `products`, then `ALTER TABLE products ENABLE ROW LEVEL SECURITY`.
+- `a1c4e7b2f019` — hand-written, enables RLS on Alembic's own `alembic_version` table. Autogenerate
+  could never have produced this: it compares *columns* against the models, RLS is not a column, and
+  `alembic_version` is not one of our models. `get_advisors` had flagged it **critical** — reading
+  that table leaks only a revision hash, but *writing* it is a denial-of-service against the
+  migration system (clear the row and the next `upgrade` tries to create tables that already exist;
+  set a hash that does not exist and Alembic refuses to run at all).
+
+Final state confirmed by `list_tables`: both tables `rls_enabled: true`, advisors clear.
+
+Two lessons worth recording, both from real failures:
+
+- **`prepend_sys_path = .` in `alembic.ini` is not boilerplate.** It was dropped while trimming the
+  stock file, and `alembic revision` then failed with `ModuleNotFoundError: No module named 'core'`.
+  The familiar rule "Python puts the current directory on `sys.path`" holds for `python` and
+  `python -c` — but for an installed **console script** (`.venv/Scripts/alembic.exe`) Python sets
+  `sys.path[0]` to the *script's* directory, not the one you are standing in. Every tool needs its
+  own fix for this: Alembic → `prepend_sys_path`; pytest → `pythonpath` in `pyproject.toml`
+  (Gate 4); `uvicorn` is fine because it is invoked as `uvicorn api.main:app` from `backend/`.
+- **`primary_key=True` on a `Mapped[int]` emits SERIAL, not IDENTITY.** A code comment claimed the
+  latter; the live schema showed `nextval('products_id_seq'::regclass)`. Opting into the newer
+  standard-SQL form would mean `mapped_column(Identity(), primary_key=True)`. SERIAL is fine here.
+
 ## Gate 4 — The service layer (the important part)
 
 - `services/products.py`: `list_products`, `get_product`, `create_product`, `update_product`,
@@ -386,13 +414,30 @@ Source: Supabase docs — "RLS with custom/third-party auth" and "Third-Party Au
   duplicate-SKU and negative-stock rules.
 - Verify: `pytest` passes.
 
-### Open item for this gate: enforce the module boundary (raised 2026-07-30)
+### Added to this gate: tests must not pollute the live database (raised 2026-07-30)
+
+Identified when re-evaluating the plan at the Gate 3 boundary. The plan says "pytest against the
+service layer directly" without saying *which database*, and we have exactly one: the live Supabase
+project. A naive test that calls `create_product` leaves that row behind permanently. Run the suite
+twice and the duplicate-SKU test starts failing against its own leftovers — a test that passes once
+and never again is worse than no test.
+
+The fix is a `conftest.py` fixture that opens a connection, begins a transaction, binds the session
+to it, yields, and **rolls back unconditionally** in teardown. The test sees its own writes; the
+database keeps none of them. (Same trick as wrapping each Jest test in a Prisma `$transaction` that
+always throws.) A dedicated test database would be the more thorough answer and is worth revisiting
+if the suite grows; rollback is the right cost/benefit today.
+
+Also in this gate: `backend/pyproject.toml`, which settles pytest's import path via `pythonpath`
+— the same `sys.path` problem that broke Alembic in Gate 3, needing a different fix per tool.
+
+### Decided: enforce the module boundary with import-linter (raised and adopted 2026-07-30)
 
 The layering — `api | mcp_server` → `services` → `core` — is currently a promise in prose. One tired
 evening adding `from fastapi import HTTPException` to `services/` kills the design silently. This
 gate is where `services/` is first written, so it is the right moment to make the rule mechanical.
 
-Proposal, **to be decided at the start of Gate 4, not before**: add `import-linter` (2.13, released
+**Adopted at the start of Gate 4.** Add `import-linter` (2.13, released
 2026-07-03, supports Python 3.10–3.14 — verified on PyPI 2026-07-30) plus two contracts in
 `pyproject.toml`:
 
@@ -415,7 +460,12 @@ forbidden_modules = ["fastapi", "mcp", "starlette"]
 `lint-imports` then runs alongside `pytest`. This automates the "final invariant check" currently
 sitting at the end of Gate 6, turning it from a one-off manual grep into a build failure.
 
-Cost: one dependency, ~15 lines of config.
+Cost: one dependency, ~15 lines of config. This also **replaces** the manual "final invariant check"
+listed at the end of Gate 6 — that grep becomes a build failure instead of a thing to remember.
+
+Note on scope: `import-linter` reads `import` statements statically. It cannot catch a rule broken
+*without* an import — a service returning an HTTP status code as a bare integer, say. It enforces
+the dependency direction, not taste. The prose rule still stands above it.
 
 **Settled at the same time (2026-07-30): modular monolith, not microservices.** The question was
 whether `services/` should become its own process that `api/` and `mcp_server/` call over HTTP. No:
@@ -428,6 +478,44 @@ still a real seam — if we ever outgrow the monolith, `services/` is exactly wh
 pattern (abstract interface in `core/`, SQLAlchemy implementation behind it, services depending only
 on the interface). That is real indirection bought to enable switching off Postgres, which will never
 happen. SQLAlchemy already abstracts the SQL dialect; that is where abstraction stops.
+
+### Outcome (2026-07-30)
+
+Written: `services/{__init__,products,inventory,suppliers,purchasing}.py`, `tests/conftest.py`,
+`tests/test_products.py`, `backend/pyproject.toml`. Deleted the now-obsolete
+`alembic/versions/.gitkeep`. Added `import-linter==2.13` to requirements.txt (verified on PyPI
+2026-07-30; released 2026-07-03, requires Python ≥3.10).
+
+`services/products.py` holds the five functions plus `get_product_by_sku` — added because an SKU is
+what a human or an agent actually has; nobody reads an autoincrement id off a shelf label. Five
+conventions are established there for every future service to copy: `session` first and `actor`
+second, everything after them keyword-only, `actor.can(...)` before every write, `actor.id` into the
+audit columns, and failure as an exception rather than a `None` the caller can forget to check.
+
+**Services commit; `get_session()` still does not.** A service function is the unit of business
+work, so it owns the commit — otherwise both adapters have to remember, and one of them eventually
+will not. The known cost: two services cannot yet be composed into one transaction. That need
+arrives in `purchasing.py`, and the answer then is a small `unit_of_work` helper, not commits
+scattered into the adapters.
+
+**The test-isolation fix that the draft plan got wrong.** A plain outer transaction would have been
+ended by the first `session.commit()` inside a service. The working version is SQLAlchemy 2.0's
+`Session(bind=connection, join_transaction_mode="create_savepoint")`: each service commit releases a
+SAVEPOINT rather than committing for real, and the fixture's unconditional outer `rollback()` still
+discards everything. Constraints and defaults behave exactly as in production; nothing survives.
+
+**Two corrections to the import-linter config drafted above.** First, `include_external_packages =
+true` is required — without it the graph contains only our own code, so a rule naming `fastapi`
+matches nothing and passes because the linter never looked, which is the worst possible failure mode
+for a guard rail. Second, `root_packages` cannot name `api` or `mcp_server` yet; a package that is
+not on disk makes `lint-imports` fail to start. Both are listed with the layer line commented out,
+to be uncommented in Gates 5 and 6. A third contract was added beyond the two proposed: `core` is
+held framework-free too, on the grounds that both adapters import it, so a web dependency there
+would be worse than one in `services`.
+
+`backend/pyproject.toml` deliberately has no `[project]` table. Dependencies stay in
+`requirements.txt` — the simpler, more tutorial-compatible route for an application rather than a
+library meant for publishing. The file is tool config only.
 
 ## Gate 5 — Adapter #1: FastAPI
 
