@@ -1,0 +1,105 @@
+# Tool configuration for the backend.
+#
+# `pyproject.toml` is Python's standardised config file (PEP 518/621). Roughly
+# the role package.json plays for tool config in Node - except that it does NOT
+# also declare dependencies here for us: those stay in requirements.txt, which
+# is the simpler and more tutorial-compatible route for an application (as
+# opposed to a library meant to be published).
+#
+# So this file contains no [project] table on purpose. It is config only.
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# The reason this file has to exist at all.
+#
+# `import core.models` works when you run python from backend/, because Python
+# puts the current directory on `sys.path`. It does NOT work under pytest,
+# which is an installed console script: Python sets sys.path[0] to the
+# directory of the *script*, somewhere in .venv/Scripts. So every `from core...`
+# in the tests would fail with ModuleNotFoundError.
+#
+# `pythonpath = ["."]` puts backend/ back on the path. It is the pytest
+# equivalent of the `prepend_sys_path = .` line already in alembic.ini, which
+# exists for exactly the same reason - alembic is also a console script.
+#
+# The "." is relative to the rootdir, which pytest sets to the directory
+# holding this file. So this only works if pytest is run from backend/.
+pythonpath = ["."]
+
+# -q keeps output to one line per test; --strict-markers turns a typo in a
+# @pytest.mark name into an error rather than a silently ignored marker.
+addopts = "-q --strict-markers"
+
+# ---------------------------------------------------------------------------
+# import-linter
+# ---------------------------------------------------------------------------
+#
+# This is the architecture rule from docs/PLAN.md, made mechanical. The rule -
+# `services/` must never import `api/` or `mcp_server/`, and must never import
+# a web framework - is the single constraint the whole design rests on, and
+# until now it was enforced by remembering it. One `from fastapi import
+# HTTPException` typed on a Friday and the MCP server can no longer reuse the
+# service, with nothing to tell us.
+#
+# `lint-imports` reads every `import` statement statically, builds the
+# dependency graph, and exits non-zero if a contract below is broken. Run it
+# from backend/:
+#
+#     lint-imports
+#
+# What it cannot do is worth being honest about: it sees imports, and nothing
+# else. A service that returns a bare `409` as an integer breaks the spirit of
+# the rule and passes every contract here. This enforces the dependency
+# direction, not taste.
+
+[tool.importlinter]
+# `api` and `mcp_server` are deliberately absent: they do not exist until
+# Gates 5 and 6, and naming a package that is not on disk makes lint-imports
+# fail to start. They get added to this list, and to the layers contract
+# below, in the gate that creates them. See the commented lines there.
+root_packages = ["core", "services"]
+
+# Required for the "framework-free" contract below. By default the graph
+# contains only our own code, and a rule naming `fastapi` would silently match
+# nothing - passing not because the import is absent but because the linter
+# never looked. This pulls third-party packages into the graph so the rule has
+# something to check against.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers point downward only"
+type = "layers"
+# Read bottom-up: `core` is the foundation and imports nothing above it;
+# `services` may import `core`; the two adapters may import either.
+#
+# The pipe means "siblings, independent of each other" - api and mcp_server sit
+# on the same layer and neither may import the other. That is not pedantry: the
+# day the MCP server imports a Pydantic schema out of api/, the two adapters
+# are coupled and the second one is no longer a genuine test of the design.
+layers = [
+    # "api | mcp_server",   <- uncomment in Gate 5/6, with the root_packages above
+    "services",
+    "core",
+]
+
+[[tool.importlinter.contracts]]
+name = "Services stay framework-free"
+type = "forbidden"
+source_modules = ["services"]
+# starlette is listed because it is FastAPI's foundation - `from starlette
+# import status` would sneak HTTP concepts past a rule that named only fastapi.
+forbidden_modules = ["fastapi", "starlette", "mcp", "uvicorn", "httpx"]
+
+[[tool.importlinter.contracts]]
+name = "Core stays framework-free"
+type = "forbidden"
+# The same rule one layer down. `core` holds the models, the exceptions and the
+# Actor protocol; all three are imported by both adapters, so a web dependency
+# here would be worse than one in services.
+source_modules = ["core"]
+forbidden_modules = ["fastapi", "starlette", "mcp", "uvicorn", "httpx"]

@@ -9,9 +9,9 @@
 |---|---|---|
 | 0 | Plan, repo, branch, push | ✅ done — commit `4d25463`, pushed to `AmzalFoumi/agentic-erp`, working on `dev` |
 | 1 | Python environment and dependencies | ✅ done — `.venv` at `backend/.venv`, 53 packages installed, `mcp==2.0.0` verified |
-| 2 | Hosted Postgres on Supabase | ⬜ not started |
-| 3 | Models, exceptions, first migration | ⬜ not started |
-| 4 | The service layer | ⬜ not started |
+| 2 | Hosted Postgres on Supabase | ✅ done — project `khinbdvubrxqqalejcbp` (eu-west-3), session pooler, `PostgreSQL 17.6` verified from SQLAlchemy; `list_tables` confirms empty `public` schema |
+| 3 | Models, exceptions, first migration | ✅ done — commit `18545e4`; `products` + `alembic_version` both created and both with RLS enabled, confirmed by `list_tables`; `get_advisors` clean |
+| 4 | The service layer | 🟡 files written, awaiting your `pytest` + `lint-imports` run — `import-linter` adopted |
 | 5 | Adapter #1: FastAPI | ⬜ not started |
 | 6 | Adapter #2: MCP server | ⬜ not started |
 
@@ -201,6 +201,67 @@ checked against PyPI.
 - Verify: a script opens a connection and prints the Postgres server version; cross-checked from
   the Supabase side with `list_tables`.
 
+### Outcome (2026-07-29)
+
+Supabase project **`agentic-erp`** created via MCP — ref `khinbdvubrxqqalejcbp`, org `AmzalAgentic`,
+region **eu-west-3** (Paris, nearest available to Morocco), status `ACTIVE_HEALTHY`. `get_cost`
+returned **$0/month**; free tier, so no confirmation escalation was needed.
+
+Docs verified on the day (Supabase "Connect to your database" + "Using SQLAlchemy with Supabase",
+pydantic-settings `SettingsConfigDict`). Two points confirmed rather than assumed:
+
+- The **session pooler** (`*.pooler.supabase.com`, port **5432**) is the right choice. The direct
+  endpoint is IPv6-only on the free plan; the session pooler is IPv4 on every tier. Transaction mode
+  (port 6543) is the wrong one here — it does not support prepared statements, which SQLAlchemy uses
+  by default, and would need `poolclass=NullPool`.
+- SQLAlchemy requires the scheme `postgresql://`, not the `postgres://` the dashboard hands you;
+  we additionally use `postgresql+psycopg://` to select psycopg 3 over the default psycopg2.
+
+Engine tuned for the free tier: `pool_pre_ping=True` (the pooler drops idle connections; without
+this the first query after a quiet spell fails), `pool_size=5`, `max_overflow=5`, `pool_recycle=1800`.
+
+`get_session()` deliberately does **not** commit. Committing expresses business intent, so it
+belongs to `services/`, not to connection plumbing.
+
+### Deferred: tighten TLS to `verify-full` before production (raised 2026-07-30)
+
+`sslmode` is a **libpq** parameter — it belongs to the Postgres C client, not to SQLAlchemy, which
+is why it rides in the connection string's query part and gets passed through verbatim. Its values,
+weakest to strongest: `disable` · `prefer` (libpq's default) · `require` · `verify-ca` ·
+`verify-full`.
+
+We currently set **`require`**. What that actually buys is not encryption — Supabase negotiates TLS
+under `prefer` anyway — it is the removal of the **silent fallback**. Under `prefer`, a network that
+blocks or strips TLS yields a plaintext connection with no error and no warning. Under `require`
+that connection fails loudly. Fail-closed, not fail-open.
+
+What `require` does **not** do is check *who* answered. It encrypts to whoever presented a
+certificate, without verifying that certificate is Supabase's. An attacker positioned to redirect
+the connection (hostile Wi-Fi, DNS poisoning, a compromised network hop) can present their own
+self-signed certificate, terminate the TLS session, read the password on the first packet, and proxy
+onward to the real database. Everything looks encrypted and works normally. `require` defends the
+wire against a passive eavesdropper; it does not defend against an active man-in-the-middle.
+
+**`verify-full`** closes that: the presented certificate must chain to a CA we trust *and* its
+subject must match the hostname we asked for. An attacker cannot satisfy that without a certificate
+issued for `*.pooler.supabase.com` by a trusted CA. (`verify-ca` does the chain check but not the
+hostname check, so it still permits any Supabase-issued certificate to impersonate any other —
+skip it and go straight to `verify-full`.)
+
+The cost is one operational step: Supabase's CA certificate must exist as a file on disk on every
+machine that connects, downloaded from the dashboard (Settings → Database → SSL Configuration),
+committed as an asset or shipped in the deployment image, and pointed at with `sslrootcert`:
+
+```
+DATABASE_URL=postgresql+psycopg://...?sslmode=verify-full&sslrootcert=/path/to/prod-ca-2021.crt
+```
+
+**Deferred, not dismissed.** Today the only client is a laptop on a trusted network talking to a
+database with no real data in it, so the certificate-distribution overhead buys nothing. The moment
+either becomes untrue — real supermarket data lands, or the backend deploys anywhere shared — this
+becomes required, and it is a two-field change to `DATABASE_URL` plus a file. Revisit at deploy
+time, alongside the auth-provider decision.
+
 ## Gate 3 — Models, exceptions, first migration
 
 | File | Purpose |
@@ -211,8 +272,134 @@ checked against PyPI.
 | `alembic.ini`, `alembic/` | Migrations, initialised in `backend/` |
 
 - Verify: `alembic upgrade head` creates the `products` table; confirmed with the Supabase MCP
-  `list_tables`, plus `get_advisors` for security warnings (expect a row-level-security notice —
-  noted for later, not fixed in this pass).
+  `list_tables`, plus `get_advisors` for security warnings.
+
+### Amended 2026-07-30: fix the RLS advisor rather than noting it
+
+This bullet previously read "expect a row-level-security notice — noted for later, not fixed in this
+pass." That was the wrong call, and it is cheap to correct now.
+
+Supabase runs **PostgREST**, which automatically publishes every table in the `public` schema as a
+REST endpoint at the project URL, reachable by anyone holding the publishable ("anon") key — a key
+designed to ship in browser JavaScript, i.e. effectively public. The gate that stops an anonymous
+caller reading a table through that endpoint is **row-level security**. A table with RLS disabled
+has no gate. Alembic creates tables with RLS disabled, because that is plain Postgres's default and
+Alembic knows nothing about Supabase.
+
+We do not use PostgREST — we connect via SQLAlchemy as the `postgres` role over the pooler — but the
+endpoint exists whether or not we use it. The exposure is real.
+
+The fix is one statement per table, added to the migration:
+
+```sql
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+```
+
+With RLS enabled and **no policies defined**, the default is deny-all: PostgREST's anonymous role
+sees zero rows. Our own connection is unaffected, because a table's owner bypasses RLS. So this
+costs us nothing functionally and closes the hole completely.
+
+Note the trap for later: `BYPASSRLS`/ownership is exactly why this is free *today*. When a real auth
+provider arrives and we connect as a lower-privileged role, RLS starts applying to us too, and
+policies will have to be written deliberately. Enabling it now means that day is a policy-writing
+exercise rather than a discovery that the table was open all along.
+
+### Decision: where authorization is enforced (2026-07-30)
+
+Raised by the user at the start of Gate 3: *"I don't think we should continue connecting as table
+owner either. For the app itself, we must prepare to have low-level authorized users. Do we need
+database users too? But we are not using Supabase Auth, we planned ThunderID — how would this
+conflict?"*
+
+**Database users are not the mechanism, and there is no conflict with ThunderID.**
+
+Postgres roles are cluster-level objects in `pg_authid`, designed for a handful of operators, not
+for application end-users. One role per staff member would mean DDL for every hire, DDL for every
+password reset, and a connection pool that is barely reusable (a pooled connection is only shareable
+between requests using the same role). Nobody builds it that way.
+
+The standard pattern — the one Supabase itself uses internally — is **one low-privilege role for the
+whole application, plus the current user's identity carried per transaction in a session variable
+that RLS policies read**. PostgREST connects as `authenticator`, switches to `anon` or
+`authenticated`, and sets `request.jwt.claims` per request; `auth.uid()` is literally
+`current_setting('request.jwt.claim.sub')`. The generic form, from the Supabase docs for external
+auth providers:
+
+```sql
+set app.current_user_id = '<current-user-id>';   -- SET LOCAL, inside our transaction
+
+create policy "..." on products for select
+  using (owner_id = current_setting('app.current_user_id')::bigint);
+```
+
+**Why ThunderID does not conflict.** Two distinct paths into the database exist, and only one cares
+who issued the JWT:
+
+| Path | Who validates the token | Does the IdP matter? |
+|---|---|---|
+| Browser → **PostgREST** → Postgres | Supabase, via configured JWT secret/JWKS | **Yes** — needs a Supabase-shaped JWT; this is what the "Third-Party Auth" integrations (Clerk, Auth0, …) exist for |
+| Our backend → **SQLAlchemy** → Postgres | **We do**, in `api/` | **No** — Supabase never sees the token |
+
+We are exclusively on the second path. FastAPI validates the ThunderID token itself, constructs an
+`Actor`, and the database learns only `app.current_user_id`. Postgres neither knows nor cares that
+ThunderID exists. Nothing to integrate; nothing to conflict. Supabase's Third-Party Auth feature is
+for people whose *browser* talks to PostgREST directly — which, having a real backend, we never do.
+
+**Where the rules themselves live.** Two enforcement points are available, and the trap is putting
+the same rules in both, where they drift apart in two languages and disagreements surface as
+silently-missing rows rather than errors.
+
+- `services/` — arbitrary Python, testable with plain pytest, explicit errors, shared by both
+  adapters.
+- RLS — unbypassable by any code path (a future script, a bad migration, a SQL-injection bug), but
+  policies are SQL expressions: awkward beyond row-ownership, near-untestable, and the failure mode
+  is silence.
+
+**Decided:**
+
+1. **`services/` is the single source of truth for authorization.** It is the layer both adapters
+   share and the layer we can test. Rules are written there, once.
+2. **RLS is a backstop, not a duplicate.** Enabled everywhere from the first migration, starting
+   deny-all. Any policy added later encodes an *invariant* ("nothing is readable unless
+   `app.current_user_id` is set"), never a business rule ("cashiers may not edit `sell_price`" —
+   that belongs in `services/`).
+3. **Dropping owner privileges is deferred to deploy time, deliberately.** It has three parts: a
+   non-owner application role, the policies themselves, and `SET LOCAL` wiring. The policies cannot
+   be written until the permission model exists, which is the deferred auth decision. What Gate 3
+   does is make that day cheap — RLS already on, `Actor` already carrying identity, and
+   `get_session()` kept as the single chokepoint through which every session in the application is
+   created, which is exactly where the `SET LOCAL` goes.
+
+Source: Supabase docs — "RLS with custom/third-party auth" and "Third-Party Auth: Clerk", read
+2026-07-30.
+
+### Outcome (2026-07-30)
+
+Four files written: `core/models.py` (`Product`), `core/exceptions.py`, `core/actor.py`,
+`alembic.ini` + `alembic/`. Two migrations applied:
+
+- `068702c8e737` — creates `products`, then `ALTER TABLE products ENABLE ROW LEVEL SECURITY`.
+- `a1c4e7b2f019` — hand-written, enables RLS on Alembic's own `alembic_version` table. Autogenerate
+  could never have produced this: it compares *columns* against the models, RLS is not a column, and
+  `alembic_version` is not one of our models. `get_advisors` had flagged it **critical** — reading
+  that table leaks only a revision hash, but *writing* it is a denial-of-service against the
+  migration system (clear the row and the next `upgrade` tries to create tables that already exist;
+  set a hash that does not exist and Alembic refuses to run at all).
+
+Final state confirmed by `list_tables`: both tables `rls_enabled: true`, advisors clear.
+
+Two lessons worth recording, both from real failures:
+
+- **`prepend_sys_path = .` in `alembic.ini` is not boilerplate.** It was dropped while trimming the
+  stock file, and `alembic revision` then failed with `ModuleNotFoundError: No module named 'core'`.
+  The familiar rule "Python puts the current directory on `sys.path`" holds for `python` and
+  `python -c` — but for an installed **console script** (`.venv/Scripts/alembic.exe`) Python sets
+  `sys.path[0]` to the *script's* directory, not the one you are standing in. Every tool needs its
+  own fix for this: Alembic → `prepend_sys_path`; pytest → `pythonpath` in `pyproject.toml`
+  (Gate 4); `uvicorn` is fine because it is invoked as `uvicorn api.main:app` from `backend/`.
+- **`primary_key=True` on a `Mapped[int]` emits SERIAL, not IDENTITY.** A code comment claimed the
+  latter; the live schema showed `nextval('products_id_seq'::regclass)`. Opting into the newer
+  standard-SQL form would mean `mapped_column(Identity(), primary_key=True)`. SERIAL is fine here.
 
 ## Gate 4 — The service layer (the important part)
 
@@ -226,6 +413,109 @@ checked against PyPI.
 - `tests/test_products.py`: pytest against the service layer directly (no HTTP), covering the
   duplicate-SKU and negative-stock rules.
 - Verify: `pytest` passes.
+
+### Added to this gate: tests must not pollute the live database (raised 2026-07-30)
+
+Identified when re-evaluating the plan at the Gate 3 boundary. The plan says "pytest against the
+service layer directly" without saying *which database*, and we have exactly one: the live Supabase
+project. A naive test that calls `create_product` leaves that row behind permanently. Run the suite
+twice and the duplicate-SKU test starts failing against its own leftovers — a test that passes once
+and never again is worse than no test.
+
+The fix is a `conftest.py` fixture that opens a connection, begins a transaction, binds the session
+to it, yields, and **rolls back unconditionally** in teardown. The test sees its own writes; the
+database keeps none of them. (Same trick as wrapping each Jest test in a Prisma `$transaction` that
+always throws.) A dedicated test database would be the more thorough answer and is worth revisiting
+if the suite grows; rollback is the right cost/benefit today.
+
+Also in this gate: `backend/pyproject.toml`, which settles pytest's import path via `pythonpath`
+— the same `sys.path` problem that broke Alembic in Gate 3, needing a different fix per tool.
+
+### Decided: enforce the module boundary with import-linter (raised and adopted 2026-07-30)
+
+The layering — `api | mcp_server` → `services` → `core` — is currently a promise in prose. One tired
+evening adding `from fastapi import HTTPException` to `services/` kills the design silently. This
+gate is where `services/` is first written, so it is the right moment to make the rule mechanical.
+
+**Adopted at the start of Gate 4.** Add `import-linter` (2.13, released
+2026-07-03, supports Python 3.10–3.14 — verified on PyPI 2026-07-30) plus two contracts in
+`pyproject.toml`:
+
+```toml
+[tool.importlinter]
+root_packages = ["core", "services", "api", "mcp_server"]
+
+[[tool.importlinter.contracts]]
+name = "Layers point downward only"
+type = "layers"
+layers = ["api | mcp_server", "services", "core"]   # `|` = siblings, independent of each other
+
+[[tool.importlinter.contracts]]
+name = "Services stay framework-free"
+type = "forbidden"
+source_modules = ["services"]
+forbidden_modules = ["fastapi", "mcp", "starlette"]
+```
+
+`lint-imports` then runs alongside `pytest`. This automates the "final invariant check" currently
+sitting at the end of Gate 6, turning it from a one-off manual grep into a build failure.
+
+Cost: one dependency, ~15 lines of config. This also **replaces** the manual "final invariant check"
+listed at the end of Gate 6 — that grep becomes a build failure instead of a thing to remember.
+
+Note on scope: `import-linter` reads `import` statements statically. It cannot catch a rule broken
+*without* an import — a service returning an HTTP status code as a bare integer, say. It enforces
+the dependency direction, not taste. The prose rule still stands above it.
+
+**Settled at the same time (2026-07-30): modular monolith, not microservices.** The question was
+whether `services/` should become its own process that `api/` and `mcp_server/` call over HTTP. No:
+that buys independent scaling and deployment (not needed — one developer, one supermarket) at the
+cost of a network hop per call, serialization both ways, auth between our own components, and a
+third process that must be running before anything works. The seam stays a *module* boundary. It is
+still a real seam — if we ever outgrow the monolith, `services/` is exactly where the cut goes.
+
+**Also settled: the database is deliberately NOT swappable.** Making it so means a repository
+pattern (abstract interface in `core/`, SQLAlchemy implementation behind it, services depending only
+on the interface). That is real indirection bought to enable switching off Postgres, which will never
+happen. SQLAlchemy already abstracts the SQL dialect; that is where abstraction stops.
+
+### Outcome (2026-07-30)
+
+Written: `services/{__init__,products,inventory,suppliers,purchasing}.py`, `tests/conftest.py`,
+`tests/test_products.py`, `backend/pyproject.toml`. Deleted the now-obsolete
+`alembic/versions/.gitkeep`. Added `import-linter==2.13` to requirements.txt (verified on PyPI
+2026-07-30; released 2026-07-03, requires Python ≥3.10).
+
+`services/products.py` holds the five functions plus `get_product_by_sku` — added because an SKU is
+what a human or an agent actually has; nobody reads an autoincrement id off a shelf label. Five
+conventions are established there for every future service to copy: `session` first and `actor`
+second, everything after them keyword-only, `actor.can(...)` before every write, `actor.id` into the
+audit columns, and failure as an exception rather than a `None` the caller can forget to check.
+
+**Services commit; `get_session()` still does not.** A service function is the unit of business
+work, so it owns the commit — otherwise both adapters have to remember, and one of them eventually
+will not. The known cost: two services cannot yet be composed into one transaction. That need
+arrives in `purchasing.py`, and the answer then is a small `unit_of_work` helper, not commits
+scattered into the adapters.
+
+**The test-isolation fix that the draft plan got wrong.** A plain outer transaction would have been
+ended by the first `session.commit()` inside a service. The working version is SQLAlchemy 2.0's
+`Session(bind=connection, join_transaction_mode="create_savepoint")`: each service commit releases a
+SAVEPOINT rather than committing for real, and the fixture's unconditional outer `rollback()` still
+discards everything. Constraints and defaults behave exactly as in production; nothing survives.
+
+**Two corrections to the import-linter config drafted above.** First, `include_external_packages =
+true` is required — without it the graph contains only our own code, so a rule naming `fastapi`
+matches nothing and passes because the linter never looked, which is the worst possible failure mode
+for a guard rail. Second, `root_packages` cannot name `api` or `mcp_server` yet; a package that is
+not on disk makes `lint-imports` fail to start. Both are listed with the layer line commented out,
+to be uncommented in Gates 5 and 6. A third contract was added beyond the two proposed: `core` is
+held framework-free too, on the grounds that both adapters import it, so a web dependency there
+would be worse than one in `services`.
+
+`backend/pyproject.toml` deliberately has no `[project]` table. Dependencies stay in
+`requirements.txt` — the simpler, more tutorial-compatible route for an application rather than a
+library meant for publishing. The file is tool config only.
 
 ## Gate 5 — Adapter #1: FastAPI
 
@@ -247,7 +537,50 @@ checked against PyPI.
 - Verify: `python -m mcp_server.server` starts clean; optionally register it in Claude Code's MCP
   config and ask the agent to "list all products", proving both adapters share one brain.
 - Final invariant check: `services/` contains zero references to `fastapi`, `mcp`, or
-  `HTTPException`.
+  `HTTPException`. (If the Gate 4 open item is adopted, `lint-imports` does this automatically.)
+
+### Transport decision: stdio now, HTTP later with auth (2026-07-30)
+
+The goal is for agents implemented **in the frontend** to reach these tools. A browser cannot spawn
+a child process, so stdio cannot serve them — that path needs **Streamable HTTP** transport, giving
+the MCP server a real URL.
+
+That URL pulls in the whole authorization stack. Per MCP 2026-07-28, an HTTP MCP server acts as an
+OAuth **resource server** and MUST:
+
+- answer unauthenticated requests with `401` + `WWW-Authenticate` pointing at its **Protected
+  Resource Metadata** (RFC 9728), and publish that document naming its trusted authorization servers
+- **validate the token audience on every request**, rejecting tokens not issued for this server
+- **never forward the caller's token upstream** — obtain fresh credentials for any onward hop
+  (confused-deputy defence)
+
+Clients must use OAuth 2.1 authorization code flow with mandatory PKCE/S256 (RFC 7636) and the
+`resource=` parameter (RFC 8707) binding the token to this server, and validate `iss` in the
+authorization response (RFC 9207, hardened in 2026-07-28).
+
+All of that requires an **authorization server** — precisely the decision deferred above (see
+"Decision: authentication"). We therefore cannot implement HTTP transport correctly yet.
+
+**Conclusion: Gate 6 stays on stdio, unchanged.** HTTP transport is added later, together with the
+auth provider decision. The cost of deferring is near zero because transport is the last line of the
+file — `mcp.run(transport="stdio")` becomes `mcp.run(transport="http")`. Tools, docstrings and
+service calls are identical either way. Stdio is exempt from the authorization requirements in
+practice: a client that can spawn the process already has local filesystem access, so there is no
+network attacker in the threat model.
+
+Two consequences to carry forward:
+
+- **The `actor` abstraction is now load-bearing, not speculative.** MCP 2026-07-28 removed the
+  `initialize` handshake and protocol-level sessions; client context moved into per-request `_meta`,
+  and any state that must survive a request has to be passed explicitly. "Who is asking" therefore
+  arrives with each call rather than being remembered — which is exactly what `core/actor.py` models.
+- **Connection budget changes under HTTP.** Stdio runs one MCP process per client, each with its own
+  engine (~10 connections at burst). Multiple HTTP replicas multiply that. At that point switch to
+  Supabase's **transaction** pooler (port 6543) with `poolclass=NullPool`, letting the pooler do the
+  pooling instead of the app. Not a problem today; it is why `.env.example` documents both modes.
+
+Sources: aaif.io — "The anatomy of MCP authorization" and "Migrate sessions to stateless requests
+with MCP 2026-07-28", both read 2026-07-30.
 
 ---
 
