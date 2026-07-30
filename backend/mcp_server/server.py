@@ -50,6 +50,7 @@ from core.actor import SystemActor
 from core.database import get_session
 from core.exceptions import ValidationError
 from core.models import Product
+from mcp_server.errors import translated
 from services import products as product_service
 
 # The server object. The name is what a client displays when listing what is
@@ -156,6 +157,7 @@ def _price(value: str, field: str) -> Decimal:
 
 
 @mcp.tool()
+@translated
 def list_products(
     search: str | None = None,
     limit: int = 50,
@@ -188,6 +190,7 @@ def list_products(
 
 
 @mcp.tool()
+@translated
 def get_product(product_id: int) -> dict[str, Any]:
     """Get one product by its numeric id.
 
@@ -210,6 +213,7 @@ def get_product(product_id: int) -> dict[str, Any]:
 
 
 @mcp.tool()
+@translated
 def get_product_by_sku(sku: str) -> dict[str, Any]:
     """Get one product by its SKU, the code printed on the shelf label.
 
@@ -232,6 +236,7 @@ def get_product_by_sku(sku: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@translated
 def create_product(
     sku: str,
     name: str,
@@ -290,6 +295,7 @@ def create_product(
 
 
 @mcp.tool()
+@translated
 def update_product(
     product_id: int,
     name: str | None = None,
@@ -343,6 +349,7 @@ def update_product(
 
 
 @mcp.tool()
+@translated
 def adjust_stock(product_id: int, delta: int, reason: str | None = None) -> dict[str, Any]:
     """Move a product's stock up or down by a given amount.
 

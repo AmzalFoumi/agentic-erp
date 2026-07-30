@@ -13,7 +13,7 @@
 | 3 | Models, exceptions, first migration | ✅ done — commit `18545e4`; `products` + `alembic_version` both created and both with RLS enabled, confirmed by `list_tables`; `get_advisors` clean |
 | 4 | The service layer | ✅ done — commit `f1da67f`; `services/products.py` (6 functions), 9 tests against the service layer with no HTTP, 3 `import-linter` contracts enforcing the boundary |
 | 5 | Adapter #1: FastAPI | ✅ done — merged via PR #3; `22 passed` (9 service + 13 API), `lint-imports` 3 contracts kept over 29 files |
-| 6 | Adapter #2: MCP server | 🟡 in progress on `feat/mcp/initial`, split into sub-gates 6a–6d (see below) |
+| 6 | Adapter #2: MCP server | ✅ done on `feat/mcp/initial`; `31 passed` (9 service + 13 API + 9 MCP), `lint-imports` 3 contracts kept over 37 files, real stdio client attached and `list_products` called live |
 
 ---
 
@@ -772,6 +772,44 @@ Separately swappable. Replacing the model provider changes zero lines here.
 One consequence of the multi-model plan worth carrying into 6b: **smaller models are markedly worse
 at selecting tools from vague descriptions.** Not an argument against them — an argument that the
 docstrings written in 6b matter more under this design than they would with a single large model.
+
+### Gate 6 outcome (2026-07-30)
+
+**The experiment succeeded.** `mcp_server/` was written without opening a single file in `api/`.
+Everything came from `services/products.py` and `core/`. That the two adapters nonetheless agree on
+serialising money as a decimal string is convergence, not coordination — both hit the same
+constraint, and there is only one correct answer to it.
+
+Verified three ways: `31 passed` (9 service, 13 API, 9 MCP); `lint-imports` 3 contracts kept over 37
+files with `mcp_server` now in `root_packages` and the top layer read as `"api | mcp_server"`; and a
+real `ClientSession` over stdio listed all six tools and called `list_products` against the live
+Supabase database.
+
+Four findings worth keeping:
+
+- **MCP has two error channels and only one is ours.** A JSON-RPC error (`MCPError` + numeric code)
+  says *the protocol failed* and goes to the client; `CallToolResult(isError=True)` says *the tool
+  could not do the job* and goes to the model. Domain errors use the second, exclusively. Reaching
+  for a JSON-RPC code for "no product with id 5" would repeat the HTTP 422 mistake — borrowing the
+  framework's vocabulary for something the framework did not say. The numeric range stays the SDK's.
+- **The SDK's default error handling is insufficient in a way that is invisible.** Left alone, every
+  exception becomes `f"Error executing tool {name}: {e}"`. A model then cannot distinguish "that
+  product does not exist" from "the database is unreachable", and retries against a dead database.
+  Worse, `str(e)` on a SQLAlchemy `OperationalError` carries the connection host and user — straight
+  into a model's context, the client's logs, and possibly a provider's telemetry.
+  `mcp_server/errors.py` is therefore a privacy control as much as a UX one, and it is tested as one.
+- **Error messages for a model need a third clause.** What happened, why, and **what to do next**.
+  The third is the one that gets skipped and the one that matters: "No product with id 5" leaves a
+  model free to try id 6.
+- **`functools.wraps` is load-bearing, not manners.** `@mcp.tool()` derives the schema from the
+  signature and the description from `__doc__`. A decorator without `wraps` registers six identical
+  `wrapper(**kwargs)` tools with no descriptions — a completely broken server that raises no error
+  and starts perfectly happily. `test_every_tool_is_registered_with_a_description_and_schema` exists
+  solely to catch that.
+
+Deferred out of this gate, unchanged: HTTP transport with the OAuth resource-server stack; threading
+the authenticated actor through instead of the hardcoded `SystemActor` (see the privilege note
+above); a stock-movement ledger so `adjust_stock`'s `reason` is stored rather than discarded.
 
 ---
 
