@@ -41,12 +41,19 @@ docs/PLAN.md.
 """
 
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy.orm import Session
 
 from core.actor import SystemActor
 from core.database import engine
+
+if TYPE_CHECKING:
+    # Imported for the type annotation only. `TYPE_CHECKING` is False at
+    # runtime, so this line never executes - it exists so a type checker and an
+    # editor can resolve `TestClient` without the import happening for real.
+    from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -85,6 +92,44 @@ def actor() -> SystemActor:
     permission-denied cases get their own fixture and their own tests.
     """
     return SystemActor(actor_id="pytest")
+
+
+@pytest.fixture
+def client(session: Session) -> Iterator["TestClient"]:
+    """A test client for the FastAPI app, sharing this test's rolled-back session.
+
+    `TestClient` calls the application in-process. No port is opened, no uvicorn
+    starts, nothing is listening - it drives the ASGI app directly and hands
+    back a real response object. Roughly supertest against an Express app.
+
+    The important line is `dependency_overrides`. Normally a request gets its
+    session from `api.deps.get_db`, which opens a fresh one against the engine -
+    and that session would be outside this test's transaction, so its writes
+    would be committed for real and survive the rollback. Overriding the
+    dependency hands every request the *same* savepoint-bound session the
+    service tests use, so HTTP tests are as disposable as the rest.
+
+    This is the payoff for injecting the session rather than reaching for it
+    inside the handlers: the swap happens without a single line of api/ knowing
+    it is under test.
+
+    `actor` is overridden too, so audit columns read "pytest" rather than "api",
+    and so the day a real auth dependency lands here, these tests do not all
+    start failing on a missing token.
+    """
+    from fastapi.testclient import TestClient
+
+    from api.deps import get_actor, get_db
+    from api.main import app
+
+    app.dependency_overrides[get_db] = lambda: session
+    app.dependency_overrides[get_actor] = lambda: SystemActor(actor_id="pytest")
+    try:
+        yield TestClient(app)
+    finally:
+        # `app` is a module-level singleton, so an override left behind would
+        # leak into every later test in the run.
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture

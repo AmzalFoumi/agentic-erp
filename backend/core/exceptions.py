@@ -12,11 +12,30 @@ translates them into its own dialect:
 
     NotFoundError         ->  api/: HTTP 404      mcp_server/: "no such product"
     DuplicateError        ->  api/: HTTP 409      mcp_server/: "SKU already used"
-    ValidationError       ->  api/: HTTP 422      mcp_server/: "invalid input"
+    ValidationError       ->  api/: HTTP 400      mcp_server/: "invalid input"
     PermissionDeniedError ->  api/: HTTP 403      mcp_server/: "not allowed"
 
 The translation happens once, in the adapter. The rule stays intact: knowledge
 about the web lives only in code that talks to the web.
+
+### Why ValidationError is 400 and not 422 (decided 2026-07-30)
+
+422 was the obvious choice and is wrong here, because **FastAPI already owns
+it**: a request whose JSON does not match the declared schema gets a 422 before
+any of our code runs. Reusing it would put two unrelated failures behind one
+status code - "not enough stock", which a shopkeeper should read, and "you sent
+a string where a number belongs", which is a bug in the client. A frontend could
+not tell them apart from the status line alone.
+
+400 is free: nothing in FastAPI or Starlette generates it for a JSON API. 409
+and 403 are likewise untouched by the framework. 404 is the one unavoidable
+overlap - Starlette returns it when no route matches - and that is handled in
+api/errors.py by giving every response, ours and the framework's, an `error`
+field naming the specific failure. See the note there.
+
+None of this applies to mcp_server/: MCP is JSON-RPC and has its own numeric
+error codes, with no relationship to HTTP status. It translates these same four
+exceptions into text a model can read.
 
 Coming from TypeScript, this is the same shape as defining your own `Error`
 subclasses in a domain package rather than throwing Nest's `NotFoundException`
