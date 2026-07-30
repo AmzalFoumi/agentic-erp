@@ -1,0 +1,3 @@
+# Migration files land here. Git does not track empty directories, and Alembic
+# requires this one to exist before `alembic revision` will run - hence this
+# placeholder. Safe to delete once the first migration is committed.

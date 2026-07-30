@@ -223,6 +223,45 @@ this the first query after a quiet spell fails), `pool_size=5`, `max_overflow=5`
 `get_session()` deliberately does **not** commit. Committing expresses business intent, so it
 belongs to `services/`, not to connection plumbing.
 
+### Deferred: tighten TLS to `verify-full` before production (raised 2026-07-30)
+
+`sslmode` is a **libpq** parameter — it belongs to the Postgres C client, not to SQLAlchemy, which
+is why it rides in the connection string's query part and gets passed through verbatim. Its values,
+weakest to strongest: `disable` · `prefer` (libpq's default) · `require` · `verify-ca` ·
+`verify-full`.
+
+We currently set **`require`**. What that actually buys is not encryption — Supabase negotiates TLS
+under `prefer` anyway — it is the removal of the **silent fallback**. Under `prefer`, a network that
+blocks or strips TLS yields a plaintext connection with no error and no warning. Under `require`
+that connection fails loudly. Fail-closed, not fail-open.
+
+What `require` does **not** do is check *who* answered. It encrypts to whoever presented a
+certificate, without verifying that certificate is Supabase's. An attacker positioned to redirect
+the connection (hostile Wi-Fi, DNS poisoning, a compromised network hop) can present their own
+self-signed certificate, terminate the TLS session, read the password on the first packet, and proxy
+onward to the real database. Everything looks encrypted and works normally. `require` defends the
+wire against a passive eavesdropper; it does not defend against an active man-in-the-middle.
+
+**`verify-full`** closes that: the presented certificate must chain to a CA we trust *and* its
+subject must match the hostname we asked for. An attacker cannot satisfy that without a certificate
+issued for `*.pooler.supabase.com` by a trusted CA. (`verify-ca` does the chain check but not the
+hostname check, so it still permits any Supabase-issued certificate to impersonate any other —
+skip it and go straight to `verify-full`.)
+
+The cost is one operational step: Supabase's CA certificate must exist as a file on disk on every
+machine that connects, downloaded from the dashboard (Settings → Database → SSL Configuration),
+committed as an asset or shipped in the deployment image, and pointed at with `sslrootcert`:
+
+```
+DATABASE_URL=postgresql+psycopg://...?sslmode=verify-full&sslrootcert=/path/to/prod-ca-2021.crt
+```
+
+**Deferred, not dismissed.** Today the only client is a laptop on a trusted network talking to a
+database with no real data in it, so the certificate-distribution overhead buys nothing. The moment
+either becomes untrue — real supermarket data lands, or the backend deploys anywhere shared — this
+becomes required, and it is a two-field change to `DATABASE_URL` plus a file. Revisit at deploy
+time, alongside the auth-provider decision.
+
 ## Gate 3 — Models, exceptions, first migration
 
 | File | Purpose |
@@ -233,8 +272,106 @@ belongs to `services/`, not to connection plumbing.
 | `alembic.ini`, `alembic/` | Migrations, initialised in `backend/` |
 
 - Verify: `alembic upgrade head` creates the `products` table; confirmed with the Supabase MCP
-  `list_tables`, plus `get_advisors` for security warnings (expect a row-level-security notice —
-  noted for later, not fixed in this pass).
+  `list_tables`, plus `get_advisors` for security warnings.
+
+### Amended 2026-07-30: fix the RLS advisor rather than noting it
+
+This bullet previously read "expect a row-level-security notice — noted for later, not fixed in this
+pass." That was the wrong call, and it is cheap to correct now.
+
+Supabase runs **PostgREST**, which automatically publishes every table in the `public` schema as a
+REST endpoint at the project URL, reachable by anyone holding the publishable ("anon") key — a key
+designed to ship in browser JavaScript, i.e. effectively public. The gate that stops an anonymous
+caller reading a table through that endpoint is **row-level security**. A table with RLS disabled
+has no gate. Alembic creates tables with RLS disabled, because that is plain Postgres's default and
+Alembic knows nothing about Supabase.
+
+We do not use PostgREST — we connect via SQLAlchemy as the `postgres` role over the pooler — but the
+endpoint exists whether or not we use it. The exposure is real.
+
+The fix is one statement per table, added to the migration:
+
+```sql
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+```
+
+With RLS enabled and **no policies defined**, the default is deny-all: PostgREST's anonymous role
+sees zero rows. Our own connection is unaffected, because a table's owner bypasses RLS. So this
+costs us nothing functionally and closes the hole completely.
+
+Note the trap for later: `BYPASSRLS`/ownership is exactly why this is free *today*. When a real auth
+provider arrives and we connect as a lower-privileged role, RLS starts applying to us too, and
+policies will have to be written deliberately. Enabling it now means that day is a policy-writing
+exercise rather than a discovery that the table was open all along.
+
+### Decision: where authorization is enforced (2026-07-30)
+
+Raised by the user at the start of Gate 3: *"I don't think we should continue connecting as table
+owner either. For the app itself, we must prepare to have low-level authorized users. Do we need
+database users too? But we are not using Supabase Auth, we planned ThunderID — how would this
+conflict?"*
+
+**Database users are not the mechanism, and there is no conflict with ThunderID.**
+
+Postgres roles are cluster-level objects in `pg_authid`, designed for a handful of operators, not
+for application end-users. One role per staff member would mean DDL for every hire, DDL for every
+password reset, and a connection pool that is barely reusable (a pooled connection is only shareable
+between requests using the same role). Nobody builds it that way.
+
+The standard pattern — the one Supabase itself uses internally — is **one low-privilege role for the
+whole application, plus the current user's identity carried per transaction in a session variable
+that RLS policies read**. PostgREST connects as `authenticator`, switches to `anon` or
+`authenticated`, and sets `request.jwt.claims` per request; `auth.uid()` is literally
+`current_setting('request.jwt.claim.sub')`. The generic form, from the Supabase docs for external
+auth providers:
+
+```sql
+set app.current_user_id = '<current-user-id>';   -- SET LOCAL, inside our transaction
+
+create policy "..." on products for select
+  using (owner_id = current_setting('app.current_user_id')::bigint);
+```
+
+**Why ThunderID does not conflict.** Two distinct paths into the database exist, and only one cares
+who issued the JWT:
+
+| Path | Who validates the token | Does the IdP matter? |
+|---|---|---|
+| Browser → **PostgREST** → Postgres | Supabase, via configured JWT secret/JWKS | **Yes** — needs a Supabase-shaped JWT; this is what the "Third-Party Auth" integrations (Clerk, Auth0, …) exist for |
+| Our backend → **SQLAlchemy** → Postgres | **We do**, in `api/` | **No** — Supabase never sees the token |
+
+We are exclusively on the second path. FastAPI validates the ThunderID token itself, constructs an
+`Actor`, and the database learns only `app.current_user_id`. Postgres neither knows nor cares that
+ThunderID exists. Nothing to integrate; nothing to conflict. Supabase's Third-Party Auth feature is
+for people whose *browser* talks to PostgREST directly — which, having a real backend, we never do.
+
+**Where the rules themselves live.** Two enforcement points are available, and the trap is putting
+the same rules in both, where they drift apart in two languages and disagreements surface as
+silently-missing rows rather than errors.
+
+- `services/` — arbitrary Python, testable with plain pytest, explicit errors, shared by both
+  adapters.
+- RLS — unbypassable by any code path (a future script, a bad migration, a SQL-injection bug), but
+  policies are SQL expressions: awkward beyond row-ownership, near-untestable, and the failure mode
+  is silence.
+
+**Decided:**
+
+1. **`services/` is the single source of truth for authorization.** It is the layer both adapters
+   share and the layer we can test. Rules are written there, once.
+2. **RLS is a backstop, not a duplicate.** Enabled everywhere from the first migration, starting
+   deny-all. Any policy added later encodes an *invariant* ("nothing is readable unless
+   `app.current_user_id` is set"), never a business rule ("cashiers may not edit `sell_price`" —
+   that belongs in `services/`).
+3. **Dropping owner privileges is deferred to deploy time, deliberately.** It has three parts: a
+   non-owner application role, the policies themselves, and `SET LOCAL` wiring. The policies cannot
+   be written until the permission model exists, which is the deferred auth decision. What Gate 3
+   does is make that day cheap — RLS already on, `Actor` already carrying identity, and
+   `get_session()` kept as the single chokepoint through which every session in the application is
+   created, which is exactly where the `SET LOCAL` goes.
+
+Source: Supabase docs — "RLS with custom/third-party auth" and "Third-Party Auth: Clerk", read
+2026-07-30.
 
 ## Gate 4 — The service layer (the important part)
 
