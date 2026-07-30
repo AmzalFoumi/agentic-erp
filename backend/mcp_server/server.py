@@ -41,12 +41,14 @@ is a tool the model misuses, in the same way an unlabelled button is a button
 users press wrongly.
 """
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from mcp.server import MCPServer
 
 from core.actor import SystemActor
 from core.database import get_session
+from core.exceptions import ValidationError
 from core.models import Product
 from services import products as product_service
 
@@ -125,6 +127,34 @@ def _describe(product: Product) -> dict[str, Any]:
     }
 
 
+def _price(value: str, field: str) -> Decimal:
+    """Parse a money string into a Decimal, or raise ValidationError.
+
+    Money crosses the protocol as a **string** in both directions. Outbound the
+    reason is precision (see `_describe`); inbound the reason is the same one
+    running backwards - if the tool took a `float`, the model would send
+    `19.99`, JSON would parse it to the nearest float64, and the value stored
+    would already be wrong before any of our code ran.
+
+    This is parsing, not business logic, so it belongs in the adapter. The
+    proof: `api/schemas.py` does the identical job with a Pydantic field type.
+    Both adapters must turn outside text into a Decimal before `services/` sees
+    it, because `services/` is entitled to assume it was given a Decimal.
+
+    The `InvalidOperation` catch matters more here than on the HTTP side. A
+    language model writing `"about 20"` or `"20 MAD"` into a price field is not
+    a hypothetical; without this, that surfaces as a raw decimal library error
+    with no indication of which argument was wrong.
+    """
+    try:
+        return Decimal(value)
+    except InvalidOperation:
+        raise ValidationError(
+            f"{field} must be a decimal number written as a string, "
+            f'like "19.99" - got {value!r}.'
+        ) from None
+
+
 @mcp.tool()
 def list_products(
     search: str | None = None,
@@ -155,6 +185,202 @@ def list_products(
             offset=offset,
         )
         return [_describe(product) for product in found]
+
+
+@mcp.tool()
+def get_product(product_id: int) -> dict[str, Any]:
+    """Get one product by its numeric id.
+
+    Prefer get_product_by_sku when you have a shelf-label code rather than an
+    id. Ids appear in the output of other tools; they are not printed on
+    packaging, so a user will almost never say one out loud.
+
+    Args:
+        product_id: The product's numeric id, as returned by list_products.
+
+    Returns:
+        The product's full details.
+
+    Raises:
+        An error if no product has that id. Do not retry with a guessed id -
+        search for the product with list_products instead.
+    """
+    with get_session() as session:
+        return _describe(product_service.get_product(session, _actor(), product_id=product_id))
+
+
+@mcp.tool()
+def get_product_by_sku(sku: str) -> dict[str, Any]:
+    """Get one product by its SKU, the code printed on the shelf label.
+
+    Matching ignores case and surrounding spaces, so "rice-1kg" finds
+    "RICE-1KG". This is the tool to use when a user quotes a code to you.
+
+    Args:
+        sku: The stock keeping unit code, for example "RICE-1KG".
+
+    Returns:
+        The product's full details.
+
+    Raises:
+        An error if no product has that SKU. That usually means the code was
+        misheard or mistyped; try list_products with part of the code as the
+        search term rather than guessing variations.
+    """
+    with get_session() as session:
+        return _describe(product_service.get_product_by_sku(session, _actor(), sku=sku))
+
+
+@mcp.tool()
+def create_product(
+    sku: str,
+    name: str,
+    category: str | None = None,
+    unit: str = "piece",
+    cost_price: str = "0.00",
+    sell_price: str = "0.00",
+    quantity_on_hand: int = 0,
+    reorder_level: int = 0,
+) -> dict[str, Any]:
+    """Add a new product to the catalogue.
+
+    Check first with get_product_by_sku or list_products that the product does
+    not already exist under a slightly different name - creating a duplicate
+    under a second SKU splits its stock across two records, which is tedious to
+    unpick. If the user has not given a SKU, ask for one rather than inventing
+    it: SKUs are printed on shelf labels and must match the physical shop.
+
+    Args:
+        sku: The shelf-label code. Stored upper-cased and trimmed. Must be
+            unique across the catalogue.
+        name: The product's display name, for example "Basmati Rice 1kg".
+        category: Optional grouping such as "Grains" or "Dairy".
+        unit: What stock is counted in - "piece", "kg", "litre", "box". Use a
+            smaller unit rather than fractions: a product sold by weight should
+            be counted in "gram", because quantities are whole numbers.
+        cost_price: What the shop pays, as a decimal string like "12.50".
+        sell_price: What the customer pays, as a decimal string like "18.00".
+        quantity_on_hand: Opening stock. Leave at 0 and use adjust_stock if the
+            stock is arriving as a delivery, so the movement has a reason.
+        reorder_level: Stock level at or below which the product counts as
+            needing reordering.
+
+    Returns:
+        The created product, including the id assigned by the database.
+
+    Raises:
+        An error if the SKU is already used, if the name is empty, or if a
+        price or quantity is negative.
+    """
+    with get_session() as session:
+        return _describe(
+            product_service.create_product(
+                session,
+                _actor(),
+                sku=sku,
+                name=name,
+                category=category,
+                unit=unit,
+                cost_price=_price(cost_price, "cost_price"),
+                sell_price=_price(sell_price, "sell_price"),
+                quantity_on_hand=quantity_on_hand,
+                reorder_level=reorder_level,
+            )
+        )
+
+
+@mcp.tool()
+def update_product(
+    product_id: int,
+    name: str | None = None,
+    category: str | None = None,
+    unit: str | None = None,
+    cost_price: str | None = None,
+    sell_price: str | None = None,
+    reorder_level: int | None = None,
+) -> dict[str, Any]:
+    """Change details of an existing product. Omitted fields are left alone.
+
+    Send only the fields being changed. Sending a field its current value is
+    harmless but sending every field is a good way to overwrite something the
+    user did not ask you to touch.
+
+    Two things cannot be changed here, deliberately. **SKU** is fixed once
+    printed on a label - to correct one, the product is deleted and recreated.
+    **Stock quantity** is changed only through adjust_stock, so that every
+    movement carries a reason.
+
+    Args:
+        product_id: Which product to change.
+        name: New display name.
+        category: New category. Sending an empty string clears it.
+        unit: New counting unit.
+        cost_price: New cost price, as a decimal string like "12.50".
+        sell_price: New selling price, as a decimal string like "18.00".
+        reorder_level: New reorder threshold.
+
+    Returns:
+        The product as it now stands.
+
+    Raises:
+        An error if the product does not exist, the name is blank, or a price
+        or level is negative.
+    """
+    with get_session() as session:
+        return _describe(
+            product_service.update_product(
+                session,
+                _actor(),
+                product_id=product_id,
+                name=name,
+                category=category,
+                unit=unit,
+                cost_price=None if cost_price is None else _price(cost_price, "cost_price"),
+                sell_price=None if sell_price is None else _price(sell_price, "sell_price"),
+                reorder_level=reorder_level,
+            )
+        )
+
+
+@mcp.tool()
+def adjust_stock(product_id: int, delta: int, reason: str | None = None) -> dict[str, Any]:
+    """Move a product's stock up or down by a given amount.
+
+    This is the only way stock changes. `delta` is a **change**, not a new
+    total: to record a delivery of 20 use delta=20, and to record 3 broken jars
+    use delta=-3. If a user says "we now have 50", first read the current
+    quantity and send the difference - sending 50 would add 50 to what is
+    already there.
+
+    Stock cannot go below zero. A request to remove more than is on hand is
+    refused rather than clamped, because the shortfall usually means the count
+    is wrong somewhere and silently zeroing it would hide that.
+
+    Args:
+        product_id: Which product to adjust.
+        delta: How much to add (positive) or remove (negative). Cannot be zero.
+        reason: Short note on why, such as "delivery", "breakage", "stocktake
+            correction". Always supply one when the user has given a reason;
+            it is not yet stored, but will be once the stock ledger exists.
+
+    Returns:
+        The product with its updated quantity.
+
+    Raises:
+        An error if the product does not exist, delta is zero, or the removal
+        would drive stock negative - the message states how much is actually
+        in stock.
+    """
+    with get_session() as session:
+        return _describe(
+            product_service.adjust_stock(
+                session,
+                _actor(),
+                product_id=product_id,
+                delta=delta,
+                reason=reason,
+            )
+        )
 
 
 if __name__ == "__main__":
