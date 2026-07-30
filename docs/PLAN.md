@@ -544,13 +544,25 @@ returning a 500. Instead `api/errors.py` registers handlers on the app, driven b
 route functions contain no `try`, no `if`, and no status codes. It also made the routes short
 enough that "this file contains no business logic" is verifiable by looking rather than by trusting.
 
-**The 422 collision, and how it was resolved.** `core/exceptions.py` maps domain `ValidationError`
-to 422, but FastAPI already uses 422 for request-shape failures. Two very different things — "not
-enough stock", which a shopkeeper should read, and "you posted a string into an int field", which is
-a client bug — would arrive indistinguishable. Rather than diverge from the committed contract in
-`core/exceptions.py`, both were given the same envelope with an `error` field naming the exception
-class (`"ValidationError"` vs `"RequestValidationError"`), and FastAPI's built-in 422 body is
-reshaped to match. The frontend switches on `error`, and gets exactly one error format to handle.
+**Decided: domain errors must not share a status code with any framework's own (2026-07-30).**
+Raised by the user during Gate 5, and the rule now applies to every exception added from here on.
+The codes FastAPI/Starlette generate unprompted are **422** (schema mismatch), **404** (no route),
+**405** (wrong method) and **500**. MCP and Supabase are not on that list — MCP is JSON-RPC with its
+own numeric codes, and we reach Postgres through SQLAlchemy rather than PostgREST, so neither can
+put a status code on one of our responses.
+
+Two consequences, both implemented:
+
+1. **`ValidationError` moved 422 → 400**, and `core/exceptions.py` updated to match. 422 was
+   FastAPI's; sharing it put "not enough stock" (a message for the shopkeeper) and "you posted a
+   string into an int field" (a client bug) behind one code. 400, 409 and 403 are all untouched by
+   the framework. A 422 from this API now means exactly one thing.
+2. **404 is the one overlap that cannot be designed away** — a missing product and a mistyped URL
+   are both genuinely 404. So the discriminator is the body, not the status line: every error
+   response now carries `{"error": ..., "detail": ...}`, including the framework's own. A
+   `StarletteHTTPException` handler names them (`RouteNotFound`, `MethodNotAllowed`,
+   `NotAuthenticated`), preserving `Allow` and other required headers. The API has exactly one
+   error format, and clients switch on `error`, never on the status code alone.
 
 **Money crosses the wire as a string.** Verified against live Pydantic docs: v2 serialises `Decimal`
 to JSON as a string by default. That initially looks like a bug and is the correct behaviour —

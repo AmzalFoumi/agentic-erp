@@ -14,32 +14,47 @@ function that runs whenever that exception escapes a handler. The handlers in
 routes/ therefore contain no error handling at all - they call a service and
 return. That is what makes them short enough to verify at a glance.
 
-### The status codes
+### The status codes, and the deliberate avoidance of the framework's own
 
-    NotFoundError          404 Not Found
-    DuplicateError         409 Conflict
-    ValidationError        422 Unprocessable Entity
-    PermissionDeniedError  403 Forbidden
-    DomainError (other)    400 Bad Request        <- safety net
+    NotFoundError          404 Not Found            (see the 404 note below)
+    DuplicateError         409 Conflict             framework never emits this
+    ValidationError        400 Bad Request          framework never emits this
+    PermissionDeniedError  403 Forbidden            framework never emits this
+    DomainError (other)    400 Bad Request          safety net
 
-The mapping is the one already written into core/exceptions.py, kept in step
-deliberately: that file is the contract both adapters read.
+The mapping matches core/exceptions.py, kept in step deliberately: that file is
+the contract both adapters read.
 
-One wrinkle worth knowing. FastAPI already uses **422** for its own request
-validation - the error you get for posting `"abc"` into an int field. So 422
-now carries two quite different meanings: "your JSON was the wrong shape"
-(a bug in the client) and "not enough stock" (a thing to show the user).
+**Codes the framework generates by itself**, which our own errors must not be
+confused with: 422 (request does not match the schema), 404 (no route matched),
+405 (wrong method), 500 (unhandled). Note that neither MCP nor Supabase appears
+here - MCP is JSON-RPC with its own numeric codes, and we reach Postgres through
+SQLAlchemy rather than PostgREST, so neither can put a status code on one of our
+responses.
 
-Rather than pick a different code and diverge from core/exceptions.py, we make
-the two distinguishable in the body: every error response from this API has the
-same envelope, with an `error` field naming the exception class. A client
-switches on `error`, not on the status code alone:
+`ValidationError` was originally mapped to 422 and moved to 400 for exactly this
+reason. 422 is FastAPI's, and sharing it would have put "not enough stock" -
+a message for the shopkeeper - behind the same status code as "you posted a
+string into an int field", which is a bug in the client.
 
+### The one unavoidable overlap: 404
+
+A missing product is a 404, and so is a typo in the URL. There is no better code
+for either, and inventing one would be worse than the overlap.
+
+So the discriminator is not the status code, it is the body. **Every** error
+response from this API - ours and the framework's alike - has the same envelope
+with an `error` field naming the specific failure:
+
+    {"error": "NotFoundError",          "detail": "No product with id 42."}
+    {"error": "RouteNotFound",          "detail": "Not Found"}
     {"error": "ValidationError",        "detail": "Cannot remove 5 of RICE-1: only 2 in stock."}
-    {"error": "RequestValidationError", "detail": "sell_price: Input should be greater than or equal to 0"}
+    {"error": "RequestValidationError", "detail": "sell_price: Input should be >= 0"}
 
-That also means FastAPI's built-in 422 gets reshaped below, so the frontend has
-exactly one error format to handle instead of two.
+A client switches on `error`, never on the status code alone. The two handlers
+at the bottom of this file exist to bring FastAPI's and Starlette's own errors
+into that envelope, so there is one error format in the whole API rather than
+three.
 
 ### 403 vs 401
 
@@ -53,6 +68,7 @@ one is a 401.
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core.exceptions import (
     DomainError,
@@ -68,12 +84,22 @@ from core.exceptions import (
 _STATUS_BY_EXCEPTION: dict[type[DomainError], int] = {
     NotFoundError: status.HTTP_404_NOT_FOUND,
     DuplicateError: status.HTTP_409_CONFLICT,
-    ValidationError: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ValidationError: status.HTTP_400_BAD_REQUEST,
     PermissionDeniedError: status.HTTP_403_FORBIDDEN,
     # The catch-all. A future domain exception that nobody remembered to map
     # lands here as a 400 rather than as a 500 with a stack trace - wrong-ish,
     # but honest: the request was bad, not the server.
     DomainError: status.HTTP_400_BAD_REQUEST,
+}
+
+# Names for the status codes Starlette raises on its own, so that its errors
+# carry a discriminator too. Without this a routing 404 and a missing-product
+# 404 are indistinguishable to a client, which is the single overlap we cannot
+# design away by choosing a different status code.
+_FRAMEWORK_ERROR_NAMES: dict[int, str] = {
+    status.HTTP_404_NOT_FOUND: "RouteNotFound",
+    status.HTTP_405_METHOD_NOT_ALLOWED: "MethodNotAllowed",
+    status.HTTP_401_UNAUTHORIZED: "NotAuthenticated",
 }
 
 
@@ -142,4 +168,37 @@ def install_error_handlers(app: FastAPI) -> None:
                 "error": "RequestValidationError",
                 "detail": "; ".join(problems),
             },
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_exception_handler(
+        request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
+        """Bring Starlette's own errors into the same envelope.
+
+        This covers the responses nothing in our code produces: an unmatched
+        URL, a GET on a POST-only route. By default they come back as
+        `{"detail": "Not Found"}` - a different shape from every other error
+        this API returns, and with no way to tell a mistyped URL from a product
+        that genuinely is not there.
+
+        Naming them here means a client has exactly one error format and one
+        field to switch on. `RouteNotFound` versus `NotFoundError` is the
+        distinction that the shared 404 status code cannot express.
+
+        Note this also catches `HTTPException` raised deliberately from our own
+        code - `fastapi.HTTPException` subclasses this one. There is currently
+        no such call anywhere in api/, and there should not be: raising an HTTP
+        exception from a handler is how business logic starts leaking into the
+        adapter. The domain exceptions above are the supported route.
+        """
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": _FRAMEWORK_ERROR_NAMES.get(exc.status_code, "HTTPError"),
+                "detail": str(exc.detail),
+            },
+            # Preserved because 405 responses carry a required `Allow` header,
+            # and dropping it would make the response non-compliant.
+            headers=getattr(exc, "headers", None),
         )

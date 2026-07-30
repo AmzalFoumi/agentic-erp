@@ -83,8 +83,14 @@ def test_duplicate_sku_is_409(client, unique_sku):
     assert response.json()["error"] == "DuplicateError"
 
 
-def test_business_rule_violation_is_422(client, unique_sku):
-    """ValidationError from a *service* -> 422, distinguishable from a schema error."""
+def test_business_rule_violation_is_400(client, unique_sku):
+    """ValidationError from a *service* -> 400, a code the framework never emits.
+
+    Deliberately NOT 422. FastAPI owns 422 for schema failures, and sharing it
+    would mean a client could not tell "not enough stock" - a message for the
+    shopkeeper - from "you sent the wrong type", which is a bug in the client.
+    See the next test for the other half of that pair.
+    """
     created = client.post(
         "/products",
         json={"sku": unique_sku, "name": "Tea 250g", "quantity_on_hand": 2},
@@ -95,20 +101,20 @@ def test_business_rule_violation_is_422(client, unique_sku):
         json={"delta": -5, "reason": "spillage"},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 400
     assert response.json()["error"] == "ValidationError"
     # The service's message, carried through untouched - it names the shortfall,
     # which is the whole reason services raise with human-readable text.
     assert "only 2 in stock" in response.json()["detail"]
 
 
-def test_malformed_request_is_also_422_but_a_different_error(client, unique_sku):
-    """The other kind of 422, and the reason the envelope has an `error` field.
+def test_malformed_request_is_422_and_stays_the_frameworks(client, unique_sku):
+    """FastAPI's own 422, reshaped into our envelope but keeping its status code.
 
-    A negative price is caught by Pydantic before any service runs. Same status
-    code as the test above, different meaning entirely: that one is a message
-    for the user, this one is a bug in the client. A frontend switches on
-    `error` to tell them apart.
+    A negative price is caught by Pydantic before any service runs. This is the
+    framework's error, so it keeps the framework's code - and because no domain
+    exception maps to 422 any more, a 422 from this API now means exactly one
+    thing: the request did not match the schema.
     """
     response = client.post(
         "/products", json={"sku": unique_sku, "name": "Bad", "sell_price": "-1.00"}
@@ -117,6 +123,35 @@ def test_malformed_request_is_also_422_but_a_different_error(client, unique_sku)
     assert response.status_code == 422
     assert response.json()["error"] == "RequestValidationError"
     assert "sell_price" in response.json()["detail"]
+
+
+def test_unknown_route_is_distinguishable_from_a_missing_product(client):
+    """The one status code we share with the framework, told apart by `error`.
+
+    Both this and `GET /products/-1` return 404, and there is no better code for
+    either. So the guarantee is in the body: a mistyped URL says `RouteNotFound`
+    and a genuinely absent row says `NotFoundError`. A frontend that shows
+    "product not found" on the first one would be lying to the user.
+    """
+    response = client.get("/no-such-endpoint")
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "RouteNotFound"
+
+
+def test_wrong_method_uses_the_same_envelope(client):
+    """Starlette's 405, normalised. Proves the envelope is universal.
+
+    Without the StarletteHTTPException handler this would come back as a bare
+    `{"detail": "Method Not Allowed"}` - a second error format for the frontend
+    to special-case.
+    """
+    response = client.delete("/products")
+
+    assert response.status_code == 405
+    assert response.json()["error"] == "MethodNotAllowed"
+    # The Allow header is required on a 405 and must survive our rewriting.
+    assert "allow" in {key.lower() for key in response.headers}
 
 
 def test_patch_leaves_unsent_fields_alone(client, unique_sku):
