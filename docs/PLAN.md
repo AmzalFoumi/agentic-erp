@@ -12,8 +12,8 @@
 | 2 | Hosted Postgres on Supabase | ✅ done — project `khinbdvubrxqqalejcbp` (eu-west-3), session pooler, `PostgreSQL 17.6` verified from SQLAlchemy; `list_tables` confirms empty `public` schema |
 | 3 | Models, exceptions, first migration | ✅ done — commit `18545e4`; `products` + `alembic_version` both created and both with RLS enabled, confirmed by `list_tables`; `get_advisors` clean |
 | 4 | The service layer | ✅ done — commit `f1da67f`; `services/products.py` (6 functions), 9 tests against the service layer with no HTTP, 3 `import-linter` contracts enforcing the boundary |
-| 5 | Adapter #1: FastAPI | 🟡 files written on `feat/fastapi/initial`, awaiting your `pytest` + `lint-imports` + `uvicorn` run |
-| 6 | Adapter #2: MCP server | ⬜ not started |
+| 5 | Adapter #1: FastAPI | ✅ done — merged via PR #3; `22 passed` (9 service + 13 API), `lint-imports` 3 contracts kept over 29 files |
+| 6 | Adapter #2: MCP server | 🟡 in progress on `feat/mcp/initial`, split into sub-gates 6a–6d (see below) |
 
 ---
 
@@ -641,6 +641,33 @@ that answered is running.
   manual grep is gone. What remains for this gate is config, not inspection — add `mcp_server` to
   `root_packages` and uncomment the `"api | mcp_server"` layer line in `backend/pyproject.toml`.
 
+### Sub-gates: this gate stops four times, not once (2026-07-30)
+
+Requested by the developer, who has not built an MCP server before. The other five gates stopped
+once at the end; this one stops after each sub-step, because the whole gate is unfamiliar ground
+rather than a new arrangement of familiar pieces. Same rules at each stop as a full gate — explain,
+list files, wait for "continue" — but no commit is required until the gate completes, since a
+half-written adapter is not a useful commit.
+
+| Sub-gate | What | Why it is its own stop |
+|---|---|---|
+| 6a | `mcp_server/__init__.py`, `server.py` with the `MCPServer` object, per-call session handling, and **one** read-only tool (`list_products`) | The smallest thing that runs. Everything conceptually new about MCP is here: the decorator, the docstring-as-description, where the session comes from. Adding a second tool teaches nothing the first did not. |
+| 6b | The remaining tools — `get_product`, `get_product_by_sku`, `create_product`, `update_product`, `adjust_stock` | Repetition of 6a's pattern, so it is a *practice* step. The new material is writing docstrings for a reader that is a language model rather than a person. |
+| 6c | Error translation — the MCP dialect of `core/exceptions.py` | The direct counterpart of `api/errors.py`, and the sub-gate that proves the "one vocabulary, two dialects" claim. Deliberately separated so it can be compared side by side with the HTTP version. |
+| 6d | Wiring and verification — `pyproject.toml` (`root_packages`, `"api \| mcp_server"`), `frontend/README.md`, `lint-imports`, and attaching the server to a real client | The architecture check and the payoff. `lint-imports` here is what mechanically proves the adapter was written without reaching into `api/`. |
+
+**The experiment this gate actually runs.** "The business logic is written once and reused" has so
+far been an assertion. Gate 5 only weakly supported it, because `api/` was written while `services/`
+was still fresh in mind. The real test: can `mcp_server/server.py` be written **without opening a
+single file in `api/`**? The agent will do exactly that and report the outcome honestly either way.
+
+The failure mode has a specific shape worth naming in advance. If writing a tool requires looking at
+`ProductCreate` in `api/schemas.py` to know what fields a product takes, then the true contract
+drifted into the HTTP adapter and `services/` is not self-describing. The tempting shortcut —
+`from api.schemas import ProductCreate` — looks like clean reuse and is not: it makes the agent
+adapter depend on the web adapter. Two front doors, one hinge. `lint-imports` fails on it in 6d, but
+only *after* it is written, so not opening `api/` at all is the stronger discipline.
+
 ### Transport decision: stdio now, HTTP later with auth (2026-07-30)
 
 The goal is for agents implemented **in the frontend** to reach these tools. A browser cannot spawn
@@ -683,6 +710,68 @@ Two consequences to carry forward:
 
 Sources: aaif.io — "The anatomy of MCP authorization" and "Migrate sessions to stateless requests
 with MCP 2026-07-28", both read 2026-07-30.
+
+### Who can actually reach this server: three deployment shapes (2026-07-30)
+
+Raised by the developer, whose intent is a product where "a user can either use the UI or the agent
+to get things done related to their ERP needs" — and who reasonably asked whether writing an MCP
+server means exposing the ERP to every agent everywhere.
+
+**It does not.** `transport="stdio"` means standard input/output — no port, no socket, no URL. The
+only way to call it is to be a process on the same machine that spawns `python -m mcp_server.server`
+as a child and writes JSON-RPC to its stdin. Today it is *less* reachable than the FastAPI app,
+which at least binds `127.0.0.1:8000`. Publishing an MCP server is a separate, deliberate act — a
+`server.json` submitted to a registry, deployed to a public URL. None of that is done here.
+
+Three shapes, of which only the third is genuinely exposed:
+
+| Shape | Who runs the agent | Where the MCP server runs | Reachable from the internet? |
+|---|---|---|---|
+| **A — agent inside our backend** ← **the target** | We do, server-side, behind our own auth | Child process of our own agent | No |
+| B — the user's own client (Claude Desktop, Cursor) | The user | On the user's machine | No, but the client is software we do not control |
+| C — hosted MCP server on a public URL | Anyone | Our infrastructure | Yes — needs Streamable HTTP + the full OAuth stack above |
+
+**Shape A is the intended architecture.** Browser → Next.js → FastAPI → `services/`, and in parallel
+Browser → Next.js → our agent loop → (stdio) → `mcp_server/server.py` → `services/`. The MCP server
+is internal plumbing, never a network endpoint. **stdio is therefore correct permanently for this
+shape, not a temporary stand-in** — the HTTP migration noted above is only required if we ever
+choose B-at-scale or C.
+
+**The privilege-escalation trap in Shape A — the reason this is written down now.** `_actor()` in
+`mcp_server/server.py` currently returns `SystemActor(actor_id="mcp")`, whose `can()` returns `True`
+for everything. That is harmless while the only caller is a developer on their own machine. It
+becomes a real vulnerability the moment the agent runs server-side on behalf of a logged-in user,
+because **the agent must never be more powerful than the user it is acting for**. Otherwise a user
+whose role forbids deleting products simply asks the assistant to do it, and the assistant — running
+as an omnipotent system actor — complies. The permission check in `services/` passes, correctly, on
+an actor that was never the user's.
+
+The fix is a threading problem, not a redesign: the authenticated actor from the web session must be
+carried into the agent's MCP calls instead of being fabricated in `_actor()`. Per MCP 2026-07-28
+statelessness, identity arrives per request anyway (`_meta`), so there is a natural place to put it.
+Cost of deferring is one function; cost of forgetting is an authorization bypass with no log entry
+distinguishing it from legitimate use.
+
+**Revisit at:** the auth-provider gate, together with the `token_verifier=`/`auth=` wiring. Until
+then `SystemActor` is acceptable *only* because no un-authenticated caller exists.
+
+### The agent stack is a separate project from this one (2026-07-30)
+
+The developer is undecided on the agent side — possibly Gemini, possibly several small models with a
+larger Gemini orchestrator. **That decision does not touch this file, now or later.**
+
+`mcp_server/server.py` contains no reference to Claude, Anthropic, or any model. It speaks JSON-RPC
+and publishes a schema generated from type hints. Which model calls it is decided entirely on the
+other side of the pipe. For Gemini specifically: read the tool list over MCP, pass it as function
+declarations (Gemini's format is JSON Schema, which is what `@mcp.tool()` already emits), forward
+returned function calls back over MCP. Most agent frameworks ship that translation.
+
+The seam, stated once: **MCP decides what the machine can do; the agent stack decides who decides.**
+Separately swappable. Replacing the model provider changes zero lines here.
+
+One consequence of the multi-model plan worth carrying into 6b: **smaller models are markedly worse
+at selecting tools from vague descriptions.** Not an argument against them — an argument that the
+docstrings written in 6b matter more under this design than they would with a single large model.
 
 ---
 
