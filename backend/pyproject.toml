@@ -58,11 +58,10 @@ addopts = "-q --strict-markers"
 # direction, not taste.
 
 [tool.importlinter]
-# `mcp_server` is still deliberately absent: it does not exist until Gate 6, and
-# naming a package that is not on disk makes lint-imports fail to start. It gets
-# added to this list, and to the layers contract below, in that gate.
-# `api` was added in Gate 5, when the package first appeared.
-root_packages = ["core", "services", "api"]
+# Each package is added here in the gate that creates it - `api` in Gate 5,
+# `mcp_server` in Gate 6 - because naming a package that is not yet on disk
+# makes lint-imports fail to start rather than skip it.
+root_packages = ["core", "services", "api", "mcp_server"]
 
 # Required for the "framework-free" contract below. By default the graph
 # contains only our own code, and a rule naming `fastapi` would silently match
@@ -82,8 +81,7 @@ type = "layers"
 # day the MCP server imports a Pydantic schema out of api/, the two adapters
 # are coupled and the second one is no longer a genuine test of the design.
 layers = [
-    # Gate 6: becomes "api | mcp_server", with mcp_server added to root_packages.
-    "api",
+    "api | mcp_server",
     "services",
     "core",
 ]

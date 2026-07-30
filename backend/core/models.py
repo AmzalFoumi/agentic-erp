@@ -24,6 +24,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import DateTime, Numeric, String, func
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
@@ -138,6 +139,43 @@ class Product(Base):
     # provider may hand us a UUID, an OIDC `sub`, or a name like "system".
     created_by: Mapped[str | None] = mapped_column(String(128), default=None)
     updated_by: Mapped[str | None] = mapped_column(String(128), default=None)
+
+    # --- derived -----------------------------------------------------------
+
+    @hybrid_property
+    def needs_reorder(self) -> bool:
+        """True when stock has fallen to or below the reorder level.
+
+        This started life in the MCP adapter as a convenience for an agent
+        asking "what needs restocking?". It was moved here on the grounds that
+        it is a genuine business concept, not presentation: the definition of
+        "needs reordering" is a rule the shop owns, and the purchasing service
+        will need the same one. Defining it in an adapter would mean the web UI
+        and the agent could one day disagree about what is running low - the
+        exact failure the services-first design exists to prevent.
+
+        **Why `hybrid_property` rather than a plain `@property`.** A plain
+        property is computed in Python, on a row already loaded, so it can only
+        be read after the fact:
+
+            [p for p in all_products if p.needs_reorder]   # loads everything
+
+        A hybrid works in *both* worlds. Used on an instance it runs the Python
+        above; used on the class it emits SQL, so the same definition can filter
+        in the database:
+
+            select(Product).where(Product.needs_reorder)
+            # -> WHERE products.quantity_on_hand <= products.reorder_level
+
+        That matters the moment the catalogue is large enough that loading every
+        row to find the low ones is the wrong shape of query. Writing it as a
+        hybrid now costs one import and means the rule has exactly one
+        definition serving both uses.
+
+        No migration is needed: nothing is stored. This is computed from two
+        columns that already exist, so the database schema is unchanged.
+        """
+        return self.quantity_on_hand <= self.reorder_level
 
     def __repr__(self) -> str:
         return f"Product(id={self.id!r}, sku={self.sku!r}, name={self.name!r})"
