@@ -180,6 +180,44 @@ is tiny — `mcp` is imported by exactly one file (Gate 6) and the fallback is a
 `mcp==1.29.0`. Note that `mcp` 2.0 depends on `httpx2`, so both `httpx` and `httpx2` are installed;
 they are different packages, not a conflict.
 
+### Deferred: move dependency declaration into `pyproject.toml` (raised 2026-07-30)
+
+`requirements.txt` and `pyproject.toml` currently split the job: the first lists dependencies, the
+second holds tool config only (and says so at the top of the file). The question raised was whether
+the second could absorb the first. It can, three ways:
+
+1. **A `[project]` table** — the direct `package.json` analogue. It also declares this directory an
+   installable package, so it drags in a `[build-system]` table, a build backend choice, and
+   `pip install -e .` in place of `pip install -r requirements.txt`.
+2. **PEP 735 `[dependency-groups]`** — dependency lists with no `[project]` and no build backend,
+   installed with `pip install --group`. The closest Python has to `dependencies` vs
+   `devDependencies`.
+3. **Leave it.** Current state.
+
+**Deferred, staying on option 3 through Gate 6.** The reasons are ordered by weight:
+
+- **Do not change two things at once.** Gate 6 installs and imports `mcp` for the first time. If
+  that import misbehaves, the only new variable should be the SDK — not also how the venv is built.
+- `requirements.txt` is what every FastAPI tutorial, Dockerfile example and deploy platform expects.
+  Matching the tutorials is worth more than matching best practice while Python is still new here.
+- The per-package comments in that file are load-bearing teaching material, including the live
+  `mcp==2.0.0` fallback note. They survive a migration, but they are the file's real value.
+
+What deferring costs, stated honestly:
+
+- **No prod/dev split.** `pytest`, `httpx` and `import-linter` sit in the same file a production
+  deploy would install. Harmless on a laptop; the first thing to fix when a Dockerfile exists.
+- **The `sys.path` hacks stay.** `pythonpath = ["."]` in `pyproject.toml` and `prepend_sys_path = .`
+  in `alembic.ini` both exist purely because the project is not installed. Option 1 removes both.
+
+Framing worth keeping: `requirements.txt` with every version pinned by `==` is doing the job of
+`package-lock.json`, not `package.json`. It records the resolved set; what `pyproject.toml` adds is
+the *declaration* layer. Python never split those two roles as cleanly as npm did, which is why the
+question has three answers rather than one.
+
+**Revisit at:** the deploy gate, when "do not install pytest in production" stops being theoretical.
+Check pip's current `--group` support against live docs at that point rather than assuming it.
+
 ## Standing rule: verify against current docs at every gate
 
 At the start of each gate, fetch current documentation and released versions rather than relying on
