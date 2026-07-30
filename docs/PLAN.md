@@ -11,8 +11,8 @@
 | 1 | Python environment and dependencies | ✅ done — `.venv` at `backend/.venv`, 53 packages installed, `mcp==2.0.0` verified |
 | 2 | Hosted Postgres on Supabase | ✅ done — project `khinbdvubrxqqalejcbp` (eu-west-3), session pooler, `PostgreSQL 17.6` verified from SQLAlchemy; `list_tables` confirms empty `public` schema |
 | 3 | Models, exceptions, first migration | ✅ done — commit `18545e4`; `products` + `alembic_version` both created and both with RLS enabled, confirmed by `list_tables`; `get_advisors` clean |
-| 4 | The service layer | 🟡 files written, awaiting your `pytest` + `lint-imports` run — `import-linter` adopted |
-| 5 | Adapter #1: FastAPI | ⬜ not started |
+| 4 | The service layer | ✅ done — commit `f1da67f`; `services/products.py` (6 functions), 9 tests against the service layer with no HTTP, 3 `import-linter` contracts enforcing the boundary |
+| 5 | Adapter #1: FastAPI | 🟡 files written on `feat/fastapi/initial`, awaiting your `pytest` + `lint-imports` + `uvicorn` run |
 | 6 | Adapter #2: MCP server | ⬜ not started |
 
 ---
@@ -179,6 +179,44 @@ We took the one-day-old major version deliberately. Unlike the ThunderID decisio
 is tiny — `mcp` is imported by exactly one file (Gate 6) and the fallback is a one-line re-pin to
 `mcp==1.29.0`. Note that `mcp` 2.0 depends on `httpx2`, so both `httpx` and `httpx2` are installed;
 they are different packages, not a conflict.
+
+### Deferred: move dependency declaration into `pyproject.toml` (raised 2026-07-30)
+
+`requirements.txt` and `pyproject.toml` currently split the job: the first lists dependencies, the
+second holds tool config only (and says so at the top of the file). The question raised was whether
+the second could absorb the first. It can, three ways:
+
+1. **A `[project]` table** — the direct `package.json` analogue. It also declares this directory an
+   installable package, so it drags in a `[build-system]` table, a build backend choice, and
+   `pip install -e .` in place of `pip install -r requirements.txt`.
+2. **PEP 735 `[dependency-groups]`** — dependency lists with no `[project]` and no build backend,
+   installed with `pip install --group`. The closest Python has to `dependencies` vs
+   `devDependencies`.
+3. **Leave it.** Current state.
+
+**Deferred, staying on option 3 through Gate 6.** The reasons are ordered by weight:
+
+- **Do not change two things at once.** Gate 6 installs and imports `mcp` for the first time. If
+  that import misbehaves, the only new variable should be the SDK — not also how the venv is built.
+- `requirements.txt` is what every FastAPI tutorial, Dockerfile example and deploy platform expects.
+  Matching the tutorials is worth more than matching best practice while Python is still new here.
+- The per-package comments in that file are load-bearing teaching material, including the live
+  `mcp==2.0.0` fallback note. They survive a migration, but they are the file's real value.
+
+What deferring costs, stated honestly:
+
+- **No prod/dev split.** `pytest`, `httpx` and `import-linter` sit in the same file a production
+  deploy would install. Harmless on a laptop; the first thing to fix when a Dockerfile exists.
+- **The `sys.path` hacks stay.** `pythonpath = ["."]` in `pyproject.toml` and `prepend_sys_path = .`
+  in `alembic.ini` both exist purely because the project is not installed. Option 1 removes both.
+
+Framing worth keeping: `requirements.txt` with every version pinned by `==` is doing the job of
+`package-lock.json`, not `package.json`. It records the resolved set; what `pyproject.toml` adds is
+the *declaration* layer. Python never split those two roles as cleanly as npm did, which is why the
+question has three answers rather than one.
+
+**Revisit at:** the deploy gate, when "do not install pytest in production" stops being theoretical.
+Check pip's current `--group` support against live docs at that point rather than assuming it.
 
 ## Standing rule: verify against current docs at every gate
 
@@ -524,8 +562,70 @@ library meant for publishing. The file is tool config only.
 - `api/routes/products.py` — an `APIRouter` whose handlers do three things and nothing else: get a
   session, call the service, translate `NotFoundError` → 404 / `DuplicateError` → 409.
 - `api/main.py` — `FastAPI()` app, CORS for `localhost:3000`, includes the router, `/health`.
+- `backend/pyproject.toml` — add `"api"` to `root_packages` and uncomment the `"api | mcp_server"`
+  layer line (left commented in Gate 4 because naming a package that is not on disk makes
+  `lint-imports` fail to start). Until this is done the new adapter is outside the contracts
+  entirely, so the boundary it is meant to prove is not actually being checked.
 - Verify: `uvicorn api.main:app --reload` → http://127.0.0.1:8000/docs, create a product through
-  the interactive Swagger UI and list it back.
+  the interactive Swagger UI and list it back; `lint-imports` still reports 3 contracts kept.
+
+### Outcome (2026-07-30)
+
+Written: `api/{__init__,deps,errors,schemas,main}.py`, `api/routes/{__init__,products}.py`,
+`tests/test_api_products.py`, plus a `client` fixture in `tests/conftest.py`. `pyproject.toml`
+gained `"api"` in `root_packages` and an `"api"` layer above `services`.
+
+**Error translation moved out of the handlers.** The plan said each handler would catch
+`NotFoundError` and raise a 404. That is what tutorials show, and it is how the mapping drifts —
+one rule written twelve times eventually gets written wrong once, and a missing row starts
+returning a 500. Instead `api/errors.py` registers handlers on the app, driven by a dict, and the
+route functions contain no `try`, no `if`, and no status codes. It also made the routes short
+enough that "this file contains no business logic" is verifiable by looking rather than by trusting.
+
+**Decided: domain errors must not share a status code with any framework's own (2026-07-30).**
+Raised by the user during Gate 5, and the rule now applies to every exception added from here on.
+The codes FastAPI/Starlette generate unprompted are **422** (schema mismatch), **404** (no route),
+**405** (wrong method) and **500**. MCP and Supabase are not on that list — MCP is JSON-RPC with its
+own numeric codes, and we reach Postgres through SQLAlchemy rather than PostgREST, so neither can
+put a status code on one of our responses.
+
+Two consequences, both implemented:
+
+1. **`ValidationError` moved 422 → 400**, and `core/exceptions.py` updated to match. 422 was
+   FastAPI's; sharing it put "not enough stock" (a message for the shopkeeper) and "you posted a
+   string into an int field" (a client bug) behind one code. 400, 409 and 403 are all untouched by
+   the framework. A 422 from this API now means exactly one thing.
+2. **404 is the one overlap that cannot be designed away** — a missing product and a mistyped URL
+   are both genuinely 404. So the discriminator is the body, not the status line: every error
+   response now carries `{"error": ..., "detail": ...}`, including the framework's own. A
+   `StarletteHTTPException` handler names them (`RouteNotFound`, `MethodNotAllowed`,
+   `NotAuthenticated`), preserving `Allow` and other required headers. The API has exactly one
+   error format, and clients switch on `error`, never on the status code alone.
+
+**Money crosses the wire as a string.** Verified against live Pydantic docs: v2 serialises `Decimal`
+to JSON as a string by default. That initially looks like a bug and is the correct behaviour —
+JavaScript numbers are float64, the precise representation `Numeric(10,2)` exists to avoid, so
+emitting `18.00` as a JSON number would hand the frontend back the rounding drift the column was
+chosen to prevent. Left as-is, asserted in a test, and documented so nobody "fixes" it.
+
+**Two auth seams put in place while they are still free.** `deps.get_actor` currently returns a
+`SystemActor(actor_id="api")`; when an auth provider lands, that one function reads the token and
+nothing else changes, because every handler and every service already takes an `Actor`. And
+`PermissionDeniedError` maps to 403, never 401 — by the time a service raises it, authentication has
+already succeeded. Retrofitting either later would mean touching every signature in the codebase.
+
+**Added beyond the plan: `tests/test_api_products.py` (11 tests).** Deliberately thin — it asserts
+only what the adapter is responsible for (routing, status codes, the error envelope, `exclude_unset`
+on PATCH), not the business rules, which `test_products.py` already covers. Re-testing rules here
+would imply they live at the HTTP layer. The `client` fixture overrides `get_db` with the same
+savepoint-bound session the service tests use, so HTTP tests roll back too — which is the payoff for
+injecting the session rather than grabbing it inside handlers.
+
+**No `lifespan`.** Current FastAPI replaces the deprecated `@app.on_event("startup")` with a
+`lifespan` context manager, but there is nothing to start: the engine is created at import time and
+its pool connects lazily. An empty lifespan added for appearances would be noise. `/health` runs a
+real `SELECT 1` for the same reason — a hardcoded `{"status": "ok"}` proves only that the process
+that answered is running.
 
 ## Gate 6 — Adapter #2: MCP server (the proof)
 
@@ -536,8 +636,10 @@ library meant for publishing. The file is tool config only.
 - `frontend/README.md` placeholder noting Next.js is scaffolded in a later pass.
 - Verify: `python -m mcp_server.server` starts clean; optionally register it in Claude Code's MCP
   config and ask the agent to "list all products", proving both adapters share one brain.
-- Final invariant check: `services/` contains zero references to `fastapi`, `mcp`, or
-  `HTTPException`. (If the Gate 4 open item is adopted, `lint-imports` does this automatically.)
+- ~~Final invariant check: `services/` contains zero references to `fastapi`, `mcp`, or
+  `HTTPException`.~~ **Superseded in Gate 4:** `lint-imports` enforces this on every run, so the
+  manual grep is gone. What remains for this gate is config, not inspection — add `mcp_server` to
+  `root_packages` and uncomment the `"api | mcp_server"` layer line in `backend/pyproject.toml`.
 
 ### Transport decision: stdio now, HTTP later with auth (2026-07-30)
 
