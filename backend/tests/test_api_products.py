@@ -1,0 +1,195 @@
+"""Tests for the HTTP adapter.
+
+These are deliberately *thin*, and that is the argument they exist to make.
+
+tests/test_products.py already proves the business rules are correct. If this
+file re-tested them - every price rule, every permission - it would be asserting
+the same logic twice, and worse, it would suggest the rules live at the HTTP
+layer. They do not.
+
+So what is left to check here is only what the adapter itself is responsible
+for, which is a short list:
+
+  - the routing and the status codes are wired up
+  - a domain exception becomes the right HTTP status (the api/errors.py map)
+  - the response body matches ProductRead
+  - PATCH sends only the fields the client supplied
+
+Every one of these is a claim about translation, not about products. The same
+list, in the MCP dialect, is what Gate 6 will need to verify.
+"""
+
+from decimal import Decimal
+
+
+def test_health_reaches_the_database(client):
+    """Proves the app boots and its session dependency resolves."""
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["database"] == "reachable"
+
+
+def test_create_returns_201_and_the_created_row(client, unique_sku):
+    """The happy path, end to end over HTTP."""
+    response = client.post(
+        "/products",
+        json={
+            "sku": unique_sku,
+            "name": "Basmati Rice 1kg",
+            "category": "Grains",
+            "sell_price": "18.00",
+            "quantity_on_hand": 40,
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["id"] is not None
+    assert body["sku"] == unique_sku
+
+    # Money arrives as a JSON *string*, not a number - see the note in
+    # api/schemas.py. Asserting it explicitly documents the contract, so that
+    # anyone who "fixes" it into a float has to change this line and think.
+    assert body["sell_price"] == "18.00"
+
+    # The overridden actor from conftest, proving the audit stamp survives the
+    # trip through the adapter rather than being set to some HTTP-layer default.
+    assert body["created_by"] == "pytest"
+
+
+def test_missing_product_is_404(client):
+    """NotFoundError -> 404, and the error envelope is the documented one."""
+    response = client.get("/products/-1")
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["error"] == "NotFoundError"
+    assert "detail" in body
+
+
+def test_duplicate_sku_is_409(client, unique_sku):
+    """DuplicateError -> 409 Conflict.
+
+    The service rule is already tested; what is tested here is that it does not
+    surface as a 500. An unmapped exception would give exactly that, so this is
+    the test that would catch a missing entry in api/errors.py.
+    """
+    payload = {"sku": unique_sku, "name": "Sugar 1kg"}
+    assert client.post("/products", json=payload).status_code == 201
+
+    response = client.post("/products", json=payload)
+    assert response.status_code == 409
+    assert response.json()["error"] == "DuplicateError"
+
+
+def test_business_rule_violation_is_422(client, unique_sku):
+    """ValidationError from a *service* -> 422, distinguishable from a schema error."""
+    created = client.post(
+        "/products",
+        json={"sku": unique_sku, "name": "Tea 250g", "quantity_on_hand": 2},
+    ).json()
+
+    response = client.post(
+        f"/products/{created['id']}/adjust-stock",
+        json={"delta": -5, "reason": "spillage"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "ValidationError"
+    # The service's message, carried through untouched - it names the shortfall,
+    # which is the whole reason services raise with human-readable text.
+    assert "only 2 in stock" in response.json()["detail"]
+
+
+def test_malformed_request_is_also_422_but_a_different_error(client, unique_sku):
+    """The other kind of 422, and the reason the envelope has an `error` field.
+
+    A negative price is caught by Pydantic before any service runs. Same status
+    code as the test above, different meaning entirely: that one is a message
+    for the user, this one is a bug in the client. A frontend switches on
+    `error` to tell them apart.
+    """
+    response = client.post(
+        "/products", json={"sku": unique_sku, "name": "Bad", "sell_price": "-1.00"}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "RequestValidationError"
+    assert "sell_price" in response.json()["detail"]
+
+
+def test_patch_leaves_unsent_fields_alone(client, unique_sku):
+    """`exclude_unset=True` in the route, verified rather than assumed.
+
+    Without it, omitting `category` would send `category=None` to the service,
+    which reads that as "clear it". This test fails loudly if that line is ever
+    removed - the kind of silent data loss that is otherwise found in production
+    by a confused shopkeeper.
+    """
+    created = client.post(
+        "/products",
+        json={"sku": unique_sku, "name": "Chickpeas 400g", "category": "Tinned"},
+    ).json()
+
+    response = client.patch(
+        f"/products/{created['id']}", json={"sell_price": "4.50"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sell_price"] == "4.50"
+    assert body["category"] == "Tinned"
+    assert body["name"] == "Chickpeas 400g"
+
+
+def test_list_and_search(client, unique_sku):
+    """Query parameters reach the service, and the response is a JSON array."""
+    client.post("/products", json={"sku": unique_sku, "name": "Cardamom Pods"})
+
+    response = client.get("/products", params={"search": "cardamom"})
+
+    assert response.status_code == 200
+    assert any(item["sku"] == unique_sku for item in response.json())
+
+
+def test_lookup_by_sku_is_case_insensitive(client, unique_sku):
+    """The literal `/by-sku/` route resolves, and normalisation still applies."""
+    client.post("/products", json={"sku": unique_sku, "name": "Olive Oil 1L"})
+
+    response = client.get(f"/products/by-sku/{unique_sku.lower()}")
+
+    assert response.status_code == 200
+    assert response.json()["sku"] == unique_sku
+
+
+def test_no_service_rule_was_reimplemented_in_the_adapter(client, unique_sku):
+    """A guard against the failure mode this architecture is designed to avoid.
+
+    SKU normalisation lives in the service. If someone ever "helpfully" adds
+    `.upper()` to the schema or the route, this test still passes - but the MCP
+    adapter, which never touches api/, would keep working precisely because the
+    rule is where it belongs. The assertion is that lowercase input comes back
+    normalised *without* the adapter doing anything to it.
+    """
+    response = client.post(
+        "/products", json={"sku": f"  {unique_sku.lower()}  ", "name": "Lentils"}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["sku"] == unique_sku
+
+
+def test_decimal_precision_survives_the_round_trip(client, unique_sku):
+    """The reason money is Numeric and serialised as a string, demonstrated.
+
+    0.1 + 0.2 in float64 is 0.30000000000000004. A price of 19.99 stored and
+    returned as a float would be 19.989999999999998 in the frontend. Here it is
+    exact on the way in and exact on the way out.
+    """
+    response = client.post(
+        "/products",
+        json={"sku": unique_sku, "name": "Coffee 200g", "cost_price": "19.99"},
+    )
+
+    assert Decimal(response.json()["cost_price"]) == Decimal("19.99")

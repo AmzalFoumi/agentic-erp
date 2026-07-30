@@ -12,7 +12,7 @@
 | 2 | Hosted Postgres on Supabase | ✅ done — project `khinbdvubrxqqalejcbp` (eu-west-3), session pooler, `PostgreSQL 17.6` verified from SQLAlchemy; `list_tables` confirms empty `public` schema |
 | 3 | Models, exceptions, first migration | ✅ done — commit `18545e4`; `products` + `alembic_version` both created and both with RLS enabled, confirmed by `list_tables`; `get_advisors` clean |
 | 4 | The service layer | ✅ done — commit `f1da67f`; `services/products.py` (6 functions), 9 tests against the service layer with no HTTP, 3 `import-linter` contracts enforcing the boundary |
-| 5 | Adapter #1: FastAPI | ⬜ not started |
+| 5 | Adapter #1: FastAPI | 🟡 files written on `feat/fastapi/initial`, awaiting your `pytest` + `lint-imports` + `uvicorn` run |
 | 6 | Adapter #2: MCP server | ⬜ not started |
 
 ---
@@ -530,6 +530,52 @@ library meant for publishing. The file is tool config only.
   entirely, so the boundary it is meant to prove is not actually being checked.
 - Verify: `uvicorn api.main:app --reload` → http://127.0.0.1:8000/docs, create a product through
   the interactive Swagger UI and list it back; `lint-imports` still reports 3 contracts kept.
+
+### Outcome (2026-07-30)
+
+Written: `api/{__init__,deps,errors,schemas,main}.py`, `api/routes/{__init__,products}.py`,
+`tests/test_api_products.py`, plus a `client` fixture in `tests/conftest.py`. `pyproject.toml`
+gained `"api"` in `root_packages` and an `"api"` layer above `services`.
+
+**Error translation moved out of the handlers.** The plan said each handler would catch
+`NotFoundError` and raise a 404. That is what tutorials show, and it is how the mapping drifts —
+one rule written twelve times eventually gets written wrong once, and a missing row starts
+returning a 500. Instead `api/errors.py` registers handlers on the app, driven by a dict, and the
+route functions contain no `try`, no `if`, and no status codes. It also made the routes short
+enough that "this file contains no business logic" is verifiable by looking rather than by trusting.
+
+**The 422 collision, and how it was resolved.** `core/exceptions.py` maps domain `ValidationError`
+to 422, but FastAPI already uses 422 for request-shape failures. Two very different things — "not
+enough stock", which a shopkeeper should read, and "you posted a string into an int field", which is
+a client bug — would arrive indistinguishable. Rather than diverge from the committed contract in
+`core/exceptions.py`, both were given the same envelope with an `error` field naming the exception
+class (`"ValidationError"` vs `"RequestValidationError"`), and FastAPI's built-in 422 body is
+reshaped to match. The frontend switches on `error`, and gets exactly one error format to handle.
+
+**Money crosses the wire as a string.** Verified against live Pydantic docs: v2 serialises `Decimal`
+to JSON as a string by default. That initially looks like a bug and is the correct behaviour —
+JavaScript numbers are float64, the precise representation `Numeric(10,2)` exists to avoid, so
+emitting `18.00` as a JSON number would hand the frontend back the rounding drift the column was
+chosen to prevent. Left as-is, asserted in a test, and documented so nobody "fixes" it.
+
+**Two auth seams put in place while they are still free.** `deps.get_actor` currently returns a
+`SystemActor(actor_id="api")`; when an auth provider lands, that one function reads the token and
+nothing else changes, because every handler and every service already takes an `Actor`. And
+`PermissionDeniedError` maps to 403, never 401 — by the time a service raises it, authentication has
+already succeeded. Retrofitting either later would mean touching every signature in the codebase.
+
+**Added beyond the plan: `tests/test_api_products.py` (11 tests).** Deliberately thin — it asserts
+only what the adapter is responsible for (routing, status codes, the error envelope, `exclude_unset`
+on PATCH), not the business rules, which `test_products.py` already covers. Re-testing rules here
+would imply they live at the HTTP layer. The `client` fixture overrides `get_db` with the same
+savepoint-bound session the service tests use, so HTTP tests roll back too — which is the payoff for
+injecting the session rather than grabbing it inside handlers.
+
+**No `lifespan`.** Current FastAPI replaces the deprecated `@app.on_event("startup")` with a
+`lifespan` context manager, but there is nothing to start: the engine is created at import time and
+its pool connects lazily. An empty lifespan added for appearances would be noise. `/health` runs a
+real `SELECT 1` for the same reason — a hardcoded `{"status": "ok"}` proves only that the process
+that answered is running.
 
 ## Gate 6 — Adapter #2: MCP server (the proof)
 
