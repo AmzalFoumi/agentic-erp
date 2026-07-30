@@ -163,7 +163,13 @@ def install_error_handlers(app: FastAPI) -> None:
             problems.append(f"{field}: {error['msg']}")
 
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            # `_CONTENT`, not the older `_ENTITY`. Both constants are the
+            # integer 422; RFC 9110 renamed only the reason phrase, from
+            # "Unprocessable Entity" to "Unprocessable Content", and Starlette
+            # followed by deprecating the old spelling. Nothing about the
+            # response changes - the rename is taken because a deprecated name
+            # eventually disappears, and this would then fail at import.
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
                 "error": "RequestValidationError",
                 "detail": "; ".join(problems),
