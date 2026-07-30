@@ -11,7 +11,7 @@
 | 1 | Python environment and dependencies | ✅ done — `.venv` at `backend/.venv`, 53 packages installed, `mcp==2.0.0` verified |
 | 2 | Hosted Postgres on Supabase | ✅ done — project `khinbdvubrxqqalejcbp` (eu-west-3), session pooler, `PostgreSQL 17.6` verified from SQLAlchemy; `list_tables` confirms empty `public` schema |
 | 3 | Models, exceptions, first migration | ✅ done — commit `18545e4`; `products` + `alembic_version` both created and both with RLS enabled, confirmed by `list_tables`; `get_advisors` clean |
-| 4 | The service layer | 🟡 files written, awaiting your `pytest` + `lint-imports` run — `import-linter` adopted |
+| 4 | The service layer | ✅ done — commit `f1da67f`; `services/products.py` (6 functions), 9 tests against the service layer with no HTTP, 3 `import-linter` contracts enforcing the boundary |
 | 5 | Adapter #1: FastAPI | ⬜ not started |
 | 6 | Adapter #2: MCP server | ⬜ not started |
 
@@ -524,8 +524,12 @@ library meant for publishing. The file is tool config only.
 - `api/routes/products.py` — an `APIRouter` whose handlers do three things and nothing else: get a
   session, call the service, translate `NotFoundError` → 404 / `DuplicateError` → 409.
 - `api/main.py` — `FastAPI()` app, CORS for `localhost:3000`, includes the router, `/health`.
+- `backend/pyproject.toml` — add `"api"` to `root_packages` and uncomment the `"api | mcp_server"`
+  layer line (left commented in Gate 4 because naming a package that is not on disk makes
+  `lint-imports` fail to start). Until this is done the new adapter is outside the contracts
+  entirely, so the boundary it is meant to prove is not actually being checked.
 - Verify: `uvicorn api.main:app --reload` → http://127.0.0.1:8000/docs, create a product through
-  the interactive Swagger UI and list it back.
+  the interactive Swagger UI and list it back; `lint-imports` still reports 3 contracts kept.
 
 ## Gate 6 — Adapter #2: MCP server (the proof)
 
@@ -536,8 +540,10 @@ library meant for publishing. The file is tool config only.
 - `frontend/README.md` placeholder noting Next.js is scaffolded in a later pass.
 - Verify: `python -m mcp_server.server` starts clean; optionally register it in Claude Code's MCP
   config and ask the agent to "list all products", proving both adapters share one brain.
-- Final invariant check: `services/` contains zero references to `fastapi`, `mcp`, or
-  `HTTPException`. (If the Gate 4 open item is adopted, `lint-imports` does this automatically.)
+- ~~Final invariant check: `services/` contains zero references to `fastapi`, `mcp`, or
+  `HTTPException`.~~ **Superseded in Gate 4:** `lint-imports` enforces this on every run, so the
+  manual grep is gone. What remains for this gate is config, not inspection — add `mcp_server` to
+  `root_packages` and uncomment the `"api | mcp_server"` layer line in `backend/pyproject.toml`.
 
 ### Transport decision: stdio now, HTTP later with auth (2026-07-30)
 
