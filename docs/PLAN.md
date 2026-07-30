@@ -813,25 +813,34 @@ above); a stock-movement ledger so `adjust_stock`'s `reason` is stored rather th
 
 ---
 
-## Target structure
+## Structure — as actually built (refreshed 2026-07-30, end of Gate 6)
 
 ```
 agentic-erp/
 ├── .gitignore, README.md
-├── docs/PLAN.md
+├── CLAUDE.md                      # agent onboarding; a summary of this file, not a rival to it
+├── docs/PLAN.md                   # the source of truth
 ├── backend/
-│   ├── .env.example, requirements.txt, alembic.ini, alembic/
-│   ├── core/        config.py  database.py  models.py  exceptions.py
-│   ├── services/    products.py  inventory.py  suppliers.py  purchasing.py
-│   ├── api/         main.py  schemas.py  routes/products.py
-│   ├── mcp_server/  server.py
-│   └── tests/       test_products.py
-└── frontend/        README.md
+│   ├── .env (gitignored), .env.example, requirements.txt, pyproject.toml
+│   ├── alembic.ini, alembic/versions/   # 2 migrations: create products, RLS on alembic_version
+│   ├── core/        config.py  database.py  models.py  exceptions.py  actor.py
+│   ├── services/    products.py  +  inventory.py  suppliers.py  purchasing.py (stubs)
+│   ├── api/         main.py  schemas.py  deps.py  errors.py  routes/products.py
+│   ├── mcp_server/  server.py  errors.py
+│   └── tests/       conftest.py  test_products.py  test_api_products.py  test_mcp_products.py
+└── frontend/        README.md     # placeholder; no Next.js app yet
 ```
 
-Note: the original sketch had `services/inventory.py` as the main file. `products.py` is added as
-the slice-1 entity because inventory movements need products to exist first; `inventory.py` remains
-a stub for stock movements and adjustment history.
+Four files exist that the original sketch did not anticipate, each for a reason recorded above:
+`core/actor.py` (identity as a parameter, so `services/` never learns what a request is);
+`api/deps.py` (the DI seam, and the one place a real auth provider will land); and the matched pair
+`api/errors.py` / `mcp_server/errors.py` — one vocabulary in `core/exceptions.py`, two dialects.
+`pyproject.toml` holds pytest and import-linter config only; dependencies stay in
+`requirements.txt` (see the deferred note under Gate 1).
+
+Note: the original sketch had `services/inventory.py` as the main file. `products.py` is the slice-1
+entity because inventory movements need products to exist first; `inventory.py` remains a stub for
+stock movements and adjustment history.
 
 ## Teaching notes
 
