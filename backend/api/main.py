@@ -32,6 +32,7 @@ from sqlalchemy import text
 from api.deps import DbSession
 from api.errors import install_error_handlers
 from api.routes import products
+from core.config import settings
 
 app = FastAPI(
     title="Supermarket Inventory API",
@@ -61,13 +62,13 @@ install_error_handlers(app)
 # there is: `allow_credentials=True` combined with `*` would let any website a
 # logged-in user visits call this API with their cookies attached. Setting the
 # habit now means not having to remember later.
+#
+# The list comes from settings rather than being written here, because it is
+# environment-specific: localhost while developing, a real domain once this is
+# deployed. See CORS_ORIGINS in core/config.py and .env.example.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Next.js dev server
-        "http://127.0.0.1:3000",  # same server, other spelling - browsers treat
-                                  # these as different origins
-    ],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,0 +1,35 @@
+# Prettier configuration.
+#
+# This file is YAML, not JSON. `.prettierrc` accepts either, and YAML is chosen
+# because it takes comments - the alternative that also does, .prettierrc.json5,
+# sits lower in Prettier's precedence order and would be silently overridden if
+# anyone later added a plain .prettierrc.
+#
+# Read .prettierignore first. It is the more important of the two files: it
+# records why the plan documents are excluded, which is a real corruption
+# incident rather than a preference. Nothing here would have prevented it -
+# Prettier exposes no option for markdown emphasis markers or table padding.
+#
+# Scope note: there is no package.json in this repo until Gate 9 scaffolds
+# Next.js into frontend/. Until then only editor integrations read this file;
+# afterwards `npm run format` will too. Committing it now means the frontend is
+# formatted consistently from its first file rather than reformatted later in a
+# commit that touches everything.
+
+# 100 rather than the default 80, to match the width the Python side already
+# uses and the width the plan documents are hand-wrapped to. One number for the
+# whole repository is worth more than a per-language optimum.
+printWidth: 100
+
+# Defaults, written out rather than omitted. These are the options a reader is
+# most likely to wonder about, and "we accepted the default" is easier to trust
+# when it is visible than when it is absent.
+semi: true
+singleQuote: false
+trailingComma: all
+
+# LF, always - including on Windows, which is the only machine this is
+# developed on today. Git normalises line endings on commit (see
+# .gitattributes), so letting the editor write CRLF would mean every file
+# differs from its committed form and `git status` never settles.
+endOfLine: lf

@@ -1,0 +1,54 @@
+# Backend-specific ignores.
+#
+# The repository root .gitignore already covers everything here except the last
+# two sections. This file is deliberate redundancy, for two reasons:
+#
+#   1. Secrets. backend/.env holds the real database URL. If the root file is
+#      ever edited, moved, or this directory is copied elsewhere, that ignore
+#      must not travel away with it. Defense in depth on the one file whose
+#      accidental commit cannot be undone by deleting it in a later commit.
+#   2. Locality. Someone working only in backend/ can see what is ignored
+#      without reading a file two directories up.
+#
+# Nested .gitignore rules resolve relative to THIS directory, and a nested file
+# can re-ignore something the root un-ignored. Hence the explicit
+# `!.env.example` below — without it this file would shadow the root's negation
+# and hide the committed template.
+
+# ---------- Secrets (the reason this file exists) ----------
+# .env.example is the committed template and contains no real values.
+.env
+.env.*
+!.env.example
+
+# ---------- Virtual environment ----------
+# Recreated from requirements.txt; never committed.
+.venv/
+venv/
+env/
+
+# ---------- Bytecode and packaging artifacts ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# ---------- Test and tooling caches ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+# import-linter currently writes a self-ignoring .gitignore into its own cache
+# directory, so this line is belt-and-braces rather than a fix for a gap.
+.import_linter_cache/
+
+# ---------- Not covered by the root file ----------
+# Local scratch databases. The real database is hosted Postgres on Supabase;
+# any .db/.sqlite3 here is something someone created while experimenting and is
+# never part of the project.
+*.db
+*.sqlite3
+
+# Ad-hoc log output, e.g. from redirecting uvicorn or alembic.
+*.log

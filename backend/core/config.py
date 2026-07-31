@@ -44,6 +44,24 @@ class Settings(BaseSettings):
     # string "false" from the .env file into the Python value False for us.
     sql_echo: bool = False
 
+    # Origins the browser is allowed to call this API from. A setting rather
+    # than a literal in api/main.py because the value is environment-specific
+    # by nature: localhost in development, a real domain in production. Code
+    # that has to be edited to deploy is code that will be edited wrongly.
+    #
+    # The default is the Next.js dev server under both spellings of localhost.
+    # Browsers treat `localhost` and `127.0.0.1` as different origins even
+    # though they resolve to the same place, so both are listed or the frontend
+    # breaks depending on which URL the developer happened to type.
+    #
+    # Deliberately not `["*"]`, and deliberately not overridable to it by
+    # accident: a wildcard is harmless only while there is no authentication,
+    # and this project has an auth gate coming. See the note in api/main.py.
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
 
 # One shared instance, created when this module is first imported. Everything
 # else in the codebase does `from core.config import settings`.

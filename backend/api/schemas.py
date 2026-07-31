@@ -36,6 +36,7 @@ decimal library. Do not "fix" this by casting to float.
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -156,6 +157,65 @@ class ProductRead(BaseModel):
     created_by: str | None
     updated_by: str | None
 
+    # Computed on the model, not stored, and not recomputed here. This mirrors
+    # the `needs_reorder` hybrid_property in core/models.py, which
+    # `from_attributes=True` reads like any other attribute.
+    #
+    # It is on the wire for an architectural reason, not for convenience. "Is
+    # this product low?" is a business rule, and the rule is `quantity_on_hand
+    # <= reorder_level` *today* - tomorrow it might account for lead time or
+    # seasonal demand. If the frontend computed it from the two raw numbers,
+    # that rule would exist in a third place that neither adapter can see, and
+    # the UI and the agent could disagree about which products need reordering.
+    # Shipping the answer instead of the inputs keeps the rule in one file.
+    needs_reorder: bool = Field(
+        description="True when quantity_on_hand <= reorder_level."
+    )
+
+
+class ProductList(BaseModel):
+    """The body of GET /products: a page of results plus the size of the whole set.
+
+    `items` alone was the original shape, and it cannot support page numbers -
+    "page 3 of 12" needs to know there are 12. The total arrives as a body
+    field rather than an `X-Total-Count` header because `openapi-typescript`
+    generates precise types for bodies and near-useless ones for headers, and
+    the frontend's whole contract-safety story rests on that generator.
+
+    Note `total` counts every product matching the current `search`, ignoring
+    `limit` and `offset`. A total that respected the window would just be
+    `len(items)`.
+    """
+
+    items: list[ProductRead]
+    total: int = Field(
+        description="Total matching the search, ignoring limit/offset.",
+    )
+
+
+# Every value the `error` field can take. Written out as a Literal rather than
+# `str` so the generated TypeScript is a union type and a `switch` over it can
+# be checked for exhaustiveness by the compiler - the frontend then cannot
+# forget a case, and adding one here breaks the build until it is handled.
+#
+# The first five are our own, from core/exceptions.py. The rest are the
+# framework's, renamed into this envelope by api/errors.py. `test_errors.py`
+# asserts that this list stays in step with both sources.
+ErrorCode = Literal[
+    # Ours - core/exceptions.py
+    "NotFoundError",
+    "DuplicateError",
+    "ValidationError",
+    "PermissionDeniedError",
+    "DomainError",
+    # The framework's - see _FRAMEWORK_ERROR_NAMES in api/errors.py
+    "RequestValidationError",
+    "RouteNotFound",
+    "MethodNotAllowed",
+    "NotAuthenticated",
+    "HTTPError",
+]
+
 
 class ErrorResponse(BaseModel):
     """The shape of every error this API returns.
@@ -165,5 +225,15 @@ class ErrorResponse(BaseModel):
     the happy path. See api/errors.py for what fills it in.
     """
 
-    error: str = Field(description="Machine-readable class, e.g. 'NotFoundError'.")
+    error: ErrorCode = Field(description="Machine-readable class, e.g. 'NotFoundError'.")
     detail: str = Field(description="Human-readable message, safe to show a user.")
+
+    # Only ever populated on a 422, where the failure is per-field and a form
+    # wants to put each message next to the input that caused it. `detail`
+    # still carries the same information as one flattened sentence, so a
+    # client that does not care about fields is unaffected - this is purely
+    # additive. Absent (not empty) on every other error.
+    fields: dict[str, str] | None = Field(
+        default=None,
+        description="Field name -> message. Present on 422 only.",
+    )
