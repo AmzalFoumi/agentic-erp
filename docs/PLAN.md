@@ -1,7 +1,12 @@
 # Supermarket Inventory — build plan
 
-> This is the **permanent, committed** copy of the plan and the source of truth. It is updated at
-> the end of every gate to record what was actually built.
+> This is the **permanent, committed** copy of the plan and the **root source of truth**. It is
+> updated at the end of every gate to record what was actually built.
+>
+> `docs/FRONTEND.md` holds frontend detail under gates 7–13. It is **subordinate**: where the two
+> disagree, this file wins. Cross-cutting rules (stop gates, division of labour, the standing
+> verify-docs rule, the auth decision) are recorded here once and referenced there, never restated.
+> The progress table below is the single status board for the whole project.
 
 ## Progress
 
@@ -14,6 +19,17 @@
 | 4 | The service layer | ✅ done — commit `f1da67f`; `services/products.py` (6 functions), 9 tests against the service layer with no HTTP, 3 `import-linter` contracts enforcing the boundary |
 | 5 | Adapter #1: FastAPI | ✅ done — merged via PR #3; `22 passed` (9 service + 13 API), `lint-imports` 3 contracts kept over 29 files |
 | 6 | Adapter #2: MCP server | ✅ done on `feat/mcp/initial`; `31 passed` (9 service + 13 API + 9 MCP), `lint-imports` 3 contracts kept over 37 files, real stdio client attached and `list_products` called live |
+| 7 | Docs restructure — persist the frontend plan, `docs/FRONTEND.md`, amend two recorded decisions | 🔄 in progress — docs only, no code |
+| 8 | Backend contract closure — `needs_reorder`, `{items,total}`, 422 `fields`, `Literal` error union, settings-driven CORS | ⬜ not started |
+| 9 | Scaffold Next.js + TypeScript + Tailwind v4 + shadcn/ui in `frontend/` | ⬜ not started |
+| 10 | Typed client from `/openapi.json`, contract-drift check, capability inventory, identity seam | ⬜ not started |
+| 11 | Design tokens — `frontend/DESIGN.md` + `globals.css`, density axis, LKR money format | ⬜ not started |
+| 12 | Claude Design — `/design-sync` push, screens generated against real tokens | ⬜ not started |
+| 13 | Handoff — capability audit, extract component kit, wire screens to the API | ⬜ not started |
+
+Gates 9–13 are detailed in **`docs/FRONTEND.md`**. Numbering stays flat deliberately: a parallel
+`F0…Fn` sequence would mean "which gate are we on" has two answers and this table would stop being a
+status board.
 
 ---
 
@@ -35,6 +51,12 @@ file gets a short comment explaining what it is for.
 
 **Decisions:** hosted Postgres on **Supabase** from day one · skeleton plus one working vertical
 slice · backend only, frontend deferred · execution is **gated**.
+
+> **Amended 2026-07-31 (Gate 7): "frontend deferred" no longer holds.** The backend proved the
+> two-adapter thesis through Gate 6, so the frontend is now the active work — gates 9–13, detailed in
+> `docs/FRONTEND.md`. Two things stay deferred and are *not* part of it: the **auth provider** (see
+> the authentication decision below) and the **agent service** itself. The frontend's job in gates
+> 9–13 is to leave clean seams for both, not to implement either.
 
 ## Viability assessment
 
@@ -93,6 +115,77 @@ a rewrite. The audit columns are wanted regardless — an ERP needs "who adjuste
 governance becomes central. Otherwise Supabase Auth is the pragmatic default, since the project is
 already provisioned and it integrates with Postgres row-level security.
 
+### Amended 2026-07-31 (Gate 7): the provider landscape, verified
+
+Raised by the developer while planning the frontend: *can an agent be restricted to only the
+logged-in user's allowed actions, is an identity server actually required, and is there a free option?*
+
+**An identity server is required.** The standards-based mechanism for "the agent may only do what the
+user may do" is **OAuth 2.0 Token Exchange (RFC 8693)**: the agent presents the user's token as
+`subject_token` and receives a *derived, narrower* token carrying both the user's identity and the
+agent's. Issuing that token is by definition an authorization server's job. The alternatives —
+forwarding the user's raw token, or running the agent as a service account — are precisely the
+confused-deputy and privilege-escalation failures documented under "three deployment shapes" below.
+MCP assumes this too: an HTTP MCP server is an OAuth resource server that must never forward the
+caller's token upstream.
+
+| Option | Status | Who runs the server | Cost |
+|---|---|---|---|
+| **ThunderID** (Apache 2.0, Go) | **Alpha** — `v1.0.0-alpha2`, breaking changes across recent releases | **You** — binary/container, datastore, TLS, backups | Free licence, paid for in ops |
+| **WSO2 Asgardeo** — renaming to **WSO2 Identity Platform** (SaaS) | GA | **WSO2** — nothing to run | Free tier; see below |
+| **WSO2 Identity Server** (Java, on-prem) | GA, established | **You** — JVM, heavier | Free to self-host; no agent-specific tooling |
+| **Auth0 "Auth for MCP"** | **GA since May 2026** | Auth0 | Commercial. Most complete packaged story: OBO token exchange, DCR, resource indicators |
+| **Keycloak 26.2+** | GA | **You** — container + database | Free. RFC 8693 token exchange officially supported since 26.2; 26.5 adds cross-domain identity chaining |
+
+**Correction to the note above:** ThunderID has moved from `asgardeo/thunder` to
+<https://github.com/thunder-id/thunderid>, with its own site at <https://thunderid.dev>. It is
+**standalone — it does not require WSO2 Identity Server.** It is still alpha, which confirms rather
+than undermines the Q1 2027 re-evaluation.
+
+**Asgardeo free tier, verified 2026-07-31.** "Free forever", no credit card, three tiers by use case:
+B2C up to 7,500 MAUs · B2B up to 250 · **B2E up to 50 employee MAUs**. This ERP is **B2E** — the users
+are stock clerks and managers, not consumers — so 50 monthly active users is the relevant allowance,
+which comfortably covers a single supermarket's back office. Beyond it, B2E is Enterprise-quoted at
+~$2.50/MAU. Free-tier limits: 3 administrators, 5 applications, 2 MFA methods, **2 days audit-log
+retention**, 3 days session retention; accounts inactive 2+ months are terminated. The audit retention
+is survivable here only because "who adjusted this stock" is answered by our own
+`created_by`/`updated_by` columns, not by the provider's logs.
+
+**Open question, to be settled at the auth gate before committing to a provider: is RFC 8693 token
+exchange available on the Asgardeo free tier?** That single feature is what the entire delegation
+design rests on, and free tiers commonly gate it. If it is paid-only, the free answer is Keycloak,
+where RFC 8693 is confirmed shipping.
+
+**Revised shortlist:** Asgardeo free tier (zero ops, *if* token exchange is included) or Keycloak
+(self-hosted, free, confirmed). **Not Supabase Auth** — it solves human auth, which is the easy half,
+and has no delegation story for the agent half. That supersedes the "Supabase Auth is the pragmatic
+default" line above.
+
+### The deferral, stated plainly (2026-07-31)
+
+**Nothing in gates 7–13 implements authentication, and nothing in them should.** No provider is
+chosen, no login screen is built, no token is issued or validated. `SystemActor` remains the only
+`Actor` implementation; `frontend/lib/auth/current-user.ts` will hardcode `"system"` to match it.
+
+Why, restated so it is not mistaken for an oversight: the hard half is *agent* identity, not human
+identity. Human auth is commoditized and can be added in a week. Agent delegation is unsettled — the
+best-fitting product is at alpha, and the feature the design rests on is unconfirmed on the free tier
+of the shipping alternative. Choosing now would mean choosing on the easy half and discovering the
+hard half afterward.
+
+Cost of deferring: three functions — `api/deps.py`'s `get_actor()`, `mcp_server/server.py`'s
+`_actor()`, and `frontend/lib/auth/current-user.ts`. Cost of *forgetting*: the privilege-escalation
+bypass described under "three deployment shapes", with no log entry distinguishing it from
+legitimate use.
+
+**Two conditions make this deferral expire.** Either one triggers the auth gate before further
+feature work:
+
+1. The MCP server becomes reachable over HTTP by anything that is not the developer's own machine.
+2. A second human user exists.
+
+Until both are false, `SystemActor` is acceptable *only* because no unauthenticated caller exists.
+
 ---
 
 ## How execution works: stop gates
@@ -110,7 +203,7 @@ Work proceeds in **gated stages**. At the end of every gate the agent will:
 
 ## Division of labour: who runs what
 
-**The developer runs every command that controls Python itself or the repository.** The agent
+**The developer runs every command that controls the toolchain or the repository.** The agent
 explains each command — what it does, what output to expect, what a failure looks like — and then
 waits. Learning the toolchain by typing it is the point.
 
@@ -129,6 +222,35 @@ Agent-run:
 - Supabase MCP tools (creating the project, `list_tables`, `execute_sql`, `get_advisors`)
 
 If a command fails, the developer pastes the output and the agent diagnoses it.
+
+### Extended 2026-07-31 (Gate 7): the Node half
+
+The rule above was written when the only toolchain was Python — the opening line said "controls
+**Python** itself", now generalised. From Gate 9 the frontend adds a second toolchain, run from
+`frontend/`, **not** `backend/`. Same principle, same split:
+
+| Python | Node equivalent (run from `frontend/`) |
+|---|---|
+| venv create / activate | `npm ci`, `npm install` |
+| `pip install`, `pip freeze` | `npm install <pkg>`, any lockfile change |
+| `pytest` | `npm test`, `npx tsc --noEmit`, `npm run lint` |
+| `uvicorn ...` | `npm run dev`, `npm run build` |
+| `alembic revision` | `npm run api:types` (contract codegen) |
+| `git` / `gh` | unchanged — developer-run |
+
+Three cases the original rule does not cover, resolved explicitly because otherwise Gate 9 has no
+owner:
+
+- **Generators both run a command and write source.** `create-next-app`, `shadcn add`,
+  `openapi-typescript` are all "developer runs commands" *and* "agent writes files" at once. Rule:
+  **the developer runs the generator; the agent edits the generated output afterward.**
+- **Generated code is build output, not source.** `frontend/lib/api/schema.d.ts` is committed — so
+  contract drift shows up as a reviewable diff — but is **never hand-edited** by either party. If it
+  is wrong, the backend schema is wrong; fix that and regenerate.
+- **Verification needs two servers running.** From Gate 13, checking a screen needs `uvicorn` *and*
+  `npm run dev`, and the agent may start neither. Ritual: **the developer starts both and says
+  continue; only then may the agent use browser MCP tools** (chrome-devtools / playwright). Without
+  this the agent will guess at whether the UI works, which is exactly what those tools exist to avoid.
 
 ---
 
@@ -674,6 +796,11 @@ The goal is for agents implemented **in the frontend** to reach these tools. A b
 a child process, so stdio cannot serve them — that path needs **Streamable HTTP** transport, giving
 the MCP server a real URL.
 
+> **Read with the 2026-07-31 amendment** at the end of "three deployment shapes" below: the agent is
+> no longer planned to live in the frontend, and Streamable HTTP is now the deployment target rather
+> than a contingency. The analysis in this section is unchanged and still correct — only the
+> conclusion about *when* it applies moved.
+
 That URL pulls in the whole authorization stack. Per MCP 2026-07-28, an HTTP MCP server acts as an
 OAuth **resource server** and MUST:
 
@@ -736,6 +863,26 @@ Browser → Next.js → our agent loop → (stdio) → `mcp_server/server.py` �
 is internal plumbing, never a network endpoint. **stdio is therefore correct permanently for this
 shape, not a temporary stand-in** — the HTTP migration noted above is only required if we ever
 choose B-at-scale or C.
+
+> **Amended 2026-07-31 (Gate 7): "permanently" was wrong, and Shape A's co-location assumption is
+> dropped.** Raised by the developer while planning the frontend: *stdio may cause trouble when we
+> deploy.* Correct.
+>
+> The paragraph above holds only while the agent loop runs **inside the Next.js process**, so a child
+> process is always spawnable. That assumption no longer stands — the agent is now planned as its own
+> service (in this repo, its own directory), and under any real deployment shape (containers,
+> serverless, separate hosts) spawning `python -m mcp_server.server` per caller is a liability:
+> process-per-request cost, no horizontal story, and it forces the agent to be co-located with the ERP.
+>
+> **Revised: stdio for local development; Streamable HTTP is the deployment target.** The code cost is
+> still near zero — `mcp.run(transport="stdio")` → `"http"`. What it pulls in is the OAuth
+> resource-server stack enumerated in the transport decision above, which is why it lands with the
+> auth gate and not before. Also still applies: under HTTP, switch to Supabase's **transaction**
+> pooler (6543) with `poolclass=NullPool`.
+>
+> Consequence already applied in `docs/FRONTEND.md`: the frontend must not assume the agent is
+> in-process. Both FastAPI and the future agent are remote HTTP services, reached through one
+> identity seam, with `API_BASE_URL` and `AGENT_BASE_URL` reserved as separate server-side values.
 
 **The privilege-escalation trap in Shape A — the reason this is written down now.** `_actor()` in
 `mcp_server/server.py` currently returns `SystemActor(actor_id="mcp")`, whose `can()` returns `True`
@@ -813,13 +960,14 @@ above); a stock-movement ledger so `adjust_stock`'s `reason` is stored rather th
 
 ---
 
-## Structure — as actually built (refreshed 2026-07-30, end of Gate 6)
+## Structure — as actually built (refreshed 2026-07-31, Gate 7)
 
 ```
 agentic-erp/
 ├── .gitignore, README.md
 ├── CLAUDE.md                      # agent onboarding; a summary of this file, not a rival to it
-├── docs/PLAN.md                   # the source of truth
+├── docs/PLAN.md                   # the root source of truth
+├── docs/FRONTEND.md               # frontend detail under gates 7-13; subordinate to PLAN.md
 ├── backend/
 │   ├── .env (gitignored), .env.example, requirements.txt, pyproject.toml
 │   ├── alembic.ini, alembic/versions/   # 2 migrations: create products, RLS on alembic_version
@@ -828,7 +976,7 @@ agentic-erp/
 │   ├── api/         main.py  schemas.py  deps.py  errors.py  routes/products.py
 │   ├── mcp_server/  server.py  errors.py
 │   └── tests/       conftest.py  test_products.py  test_api_products.py  test_mcp_products.py
-└── frontend/        README.md     # placeholder; no Next.js app yet
+└── frontend/        README.md     # pointer only until Gate 9 scaffolds Next.js here
 ```
 
 Four files exist that the original sketch did not anticipate, each for a reason recorded above:
