@@ -37,7 +37,7 @@ The more thorough answer is a dedicated test database, so the suite cannot
 touch production data even in principle. That means a second Supabase project
 (or Docker Postgres locally) and a `TEST_DATABASE_URL`. Not worth it for four
 tests; worth it the moment the suite grows or anyone else runs it. Noted in
-docs/PLAN.md.
+docs/BACKEND-PLAN.md.
 """
 
 from collections.abc import Iterator

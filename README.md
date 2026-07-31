@@ -41,8 +41,10 @@ collapses into an ordinary web app.
 | `backend/mcp_server/` | MCP tools — thin adapter, calls `services/`                |
 | `backend/tests/`      | pytest, mostly against `services/` directly                |
 | `frontend/`           | Next.js UI — a client of the API, no business logic        |
-| `docs/PLAN.md`        | The build plan and its stop gates — the root source of truth |
-| `docs/FRONTEND.md`    | Frontend detail under gates 7–13 — subordinate to `PLAN.md` |
+| `docs/PLAN.md`        | Progress table and the rules governing every gate — the root source of truth |
+| `docs/BACKEND-PLAN.md`  | Gates 0–8 as built — subordinate to `PLAN.md`            |
+| `docs/FRONTEND-PLAN.md` | Gates 9–13 — subordinate to `PLAN.md`                    |
+| `docs/AUTH-PLAN.md`     | The auth decision and its deferral — subordinate to `PLAN.md` |
 
 ## Stack
 
@@ -56,4 +58,4 @@ by both adapters, with the boundary enforced by `import-linter`. The frontend is
 see `docs/PLAN.md`'s progress table for the current gate.
 
 Authentication and the AI agent itself are deliberately deferred, with seams reserved for both.
-`docs/PLAN.md` records why, and the two conditions that end the deferral.
+`docs/AUTH-PLAN.md` records why, and the two conditions that end the deferral.

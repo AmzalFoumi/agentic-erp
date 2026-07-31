@@ -38,6 +38,6 @@
 # Generated, and committed so that drift is a reviewable diff. Marking it
 # `linguist-generated` collapses it by default in GitHub pull requests, so a
 # 4,000-line regeneration does not bury the change that caused it.
-# See docs/FRONTEND.md - this file is never hand-edited.
+# See docs/FRONTEND-PLAN.md - this file is never hand-edited.
 frontend/lib/api/schema.d.ts    linguist-generated=true
 package-lock.json               linguist-generated=true

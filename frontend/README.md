@@ -14,12 +14,13 @@ recorded once, where it is enforced:
 
 | What | Where |
 |---|---|
-| Gates 9–13, the API capability inventory, and the **NOT-SUPPORTED list** | `docs/FRONTEND.md` |
+| Gates 9–13, the API capability inventory, and the **NOT-SUPPORTED list** | `docs/FRONTEND-PLAN.md` |
 | Design tokens, density axis, LKR money format, timestamp format | `frontend/DESIGN.md` (from Gate 11) |
-| Architecture decisions, the auth deferral, MCP transport | `docs/PLAN.md` |
+| Backend architecture decisions and MCP transport | `docs/BACKEND-PLAN.md` |
+| The auth deferral and what ends it | `docs/AUTH-PLAN.md` |
 | Live API reference | `uvicorn api.main:app --reload` from `backend/`, then <http://127.0.0.1:8000/docs> |
 
-The **capability inventory** in `docs/FRONTEND.md` is the one to read first. It lists what the API
+The **capability inventory** in `docs/FRONTEND-PLAN.md` is the one to read first. It lists what the API
 deliberately does *not* support — no delete, no sorting, no reason capture on stock adjustment —
 because building against a capability that isn't there is the most likely way to waste a gate.
 

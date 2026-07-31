@@ -39,8 +39,8 @@ addopts = "-q --strict-markers"
 # import-linter
 # ---------------------------------------------------------------------------
 #
-# This is the architecture rule from docs/PLAN.md, made mechanical. The rule -
-# `services/` must never import `api/` or `mcp_server/`, and must never import
+# This is the architecture rule from docs/BACKEND-PLAN.md, made mechanical. The
+# rule - `services/` must never import `api/` or `mcp_server/`, and must never import
 # a web framework - is the single constraint the whole design rests on, and
 # until now it was enforced by remembering it. One `from fastapi import
 # HTTPException` typed on a Friday and the MCP server can no longer reuse the
