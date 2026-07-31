@@ -6,14 +6,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A supermarket inventory/purchasing system where business logic is written exactly once, in
 `backend/services/`, and reused by two front doors: a FastAPI HTTP API (`backend/api/`) for the
-future Next.js UI, and an MCP server (`backend/mcp_server/`) exposing the same operations as tools
-for an AI agent. `docs/PLAN.md` is the permanent source of truth — the full build history, every
+Next.js UI, and an MCP server (`backend/mcp_server/`) exposing the same operations as tools for an
+AI agent. `docs/PLAN.md` is the permanent **root** source of truth — the full build history, every
 architectural decision and why it was made, and the current gate status. Read it before making any
 non-trivial change; it is long but nearly everything you'd otherwise guess wrong is answered there.
 
-**This file is a summary of `docs/PLAN.md`, never a second opinion.** Where the two disagree,
-`PLAN.md` wins and this file is the thing that is out of date. Record decisions there; update the
-summary here only if a decision changes something on this page.
+**Three documents, one precedence order:**
+
+| File | Scope | Precedence |
+|---|---|---|
+| `docs/PLAN.md` | Everything. Build history, all decisions, the progress table (gates 0–13) | **Root — wins over both others** |
+| `docs/FRONTEND.md` | Frontend detail under gates 7–13: screen and capability inventories, design-system rationale | Subordinate to `PLAN.md` |
+| `CLAUDE.md` (this file) | A summary for agent onboarding | Subordinate to both |
+
+**This file is a summary, never a second opinion.** Where it disagrees with either plan doc, the plan
+doc wins and this file is the thing that is out of date. Record decisions in `PLAN.md` (or
+`FRONTEND.md` for frontend-only detail); update the summary here only if a decision changes something
+on this page. A decision is recorded **once, where it is enforced** — the other file links to it
+rather than restating it.
 
 ## The one rule
 
@@ -28,9 +38,10 @@ Services raise plain exceptions from `core/exceptions.py` (`NotFoundError`, `Dup
 
 ## Commands
 
-All commands run from `backend/`. Per the project's working agreement (see below), **the developer
-runs these, not the agent** — but they're listed here for reference and for verifying instructions
-you give the developer are correct.
+Per the project's working agreement (see below), **the developer runs these, not the agent** — but
+they're listed here for reference and for verifying instructions you give the developer are correct.
+
+**From `backend/`:**
 
 ```bash
 pytest                    # run the full suite
@@ -42,7 +53,19 @@ alembic revision --autogenerate -m "..."   # new migration
 alembic upgrade head                        # apply migrations
 ```
 
-No frontend exists yet (`frontend/` is a placeholder).
+**From `frontend/` — note the different working directory.** Every command above assumes `backend/`;
+these do not. Available from Gate 9 onward:
+
+```bash
+npm run dev                # Next.js dev server -> http://localhost:3000
+npm run build              # production build
+npx tsc --noEmit           # type check (the frontend's "pytest" half)
+npm run lint               # ESLint, incl. the restricted-import architecture rules
+npm run api:types          # regenerate lib/api/schema.d.ts from FastAPI's /openapi.json
+```
+
+`frontend/` is a pointer-only placeholder until Gate 9 scaffolds Next.js into it. Check
+`docs/PLAN.md`'s progress table for the current gate before assuming any of the above runs.
 
 ## Architecture
 
@@ -63,8 +86,15 @@ AI agent ──▶ mcp_server/ ──┘
   on the app), not scattered `try/except` in route handlers.
 - **`mcp_server/`** — MCP adapter. `@mcp.tool()` functions call the same `services/` functions;
   docstrings become the tool descriptions an AI model reads, so they matter more here than typical
-  code comments. Runs over stdio (see "Auth and identity" below for why, and why that's permanent
-  for this project's intended shape, not temporary).
+  code comments. Runs over **stdio for local development**; Streamable HTTP is the deployment target,
+  landing with the auth gate because an HTTP MCP server must be a full OAuth resource server. (This
+  supersedes an earlier "stdio is permanent" conclusion — see the 2026-07-31 amendment in `PLAN.md`.)
+- **`frontend/`** — Next.js UI, from Gate 9. **A client of the API and nothing more**; no business
+  logic, and any server-side Next code is transport only. Two rules enforced by ESLint
+  `no-restricted-imports`, the frontend's answer to `lint-imports`: only `lib/api/**` may import the
+  generated client or call `fetch`; and no `app/api/**` handlers mirroring FastAPI endpoints — that
+  would be a *third adapter*, the same mistake as `services/` importing `api/`. React Server
+  Components call FastAPI directly. Detail in `docs/FRONTEND.md`.
 
 ### Identity: `Actor`, not ambient request state
 
@@ -75,7 +105,14 @@ from whatever it has and passes it down — eventually a validated bearer token 
 `get_actor()`, and per-call `_meta` on the MCP side. Neither does that yet: `SystemActor` (grants
 everything) is the only implementation today, returned by both adapters, because no auth provider is
 wired in (deliberately deferred, see `docs/PLAN.md`). The two functions above are the seams where
-that lands, and nothing below them changes when it does.
+that lands, and nothing below them changes when it does. The frontend gets a third seam of the same
+shape — `frontend/lib/auth/current-user.ts`, also hardcoded to `"system"`.
+
+**The deferral has two expiry conditions**, recorded in `PLAN.md`: either the MCP server becomes
+HTTP-reachable by anything that is not the developer's own machine, or a second human user exists.
+Either one triggers the auth gate before further feature work. `PLAN.md` also carries the verified
+provider comparison (ThunderID is alpha; Asgardeo's free tier is B2E-capped at 50 MAUs; Keycloak has
+confirmed RFC 8693 support) — don't re-research it, and don't pick a provider without reading it.
 
 **Known trap, not yet fixed:** `mcp_server/server.py`'s `_actor()` currently hardcodes `SystemActor`.
 That's fine only because no unauthenticated caller exists yet. The moment an agent runs server-side
@@ -109,14 +146,24 @@ to avoid float64 precision loss on `Numeric(10,2)` columns. Don't "fix" this.
 This project follows a **gated** workflow recorded in `docs/PLAN.md`. Two things apply on every
 turn, not just during initial build-out:
 
-1. **The developer runs every command that touches the toolchain or git**: venv creation/activation,
-   `pip install`/`pip freeze`, `pytest`, `uvicorn`, `alembic`, and all `git`/`gh` commands. Explain
-   what a command does and what to expect — don't run it yourself. Reading files, searching, `git
-   status`/`git log`, and Supabase MCP read tools (`list_tables`, `get_advisors`) are fine to run.
+1. **The developer runs every command that touches the toolchain or git** — both toolchains: venv
+   creation/activation, `pip install`/`pip freeze`, `pytest`, `uvicorn`, `alembic`, plus `npm
+   install`/`npm run *`/`npx`, and all `git`/`gh` commands. Explain what a command does and what to
+   expect — don't run it yourself. Reading files, searching, `git status`/`git log`, and Supabase MCP
+   read tools (`list_tables`, `get_advisors`) are fine to run.
+   Three clarifications for the Node half: **generators** (`create-next-app`, `shadcn add`,
+   `openapi-typescript`) are developer-run, then the agent edits the output; `lib/api/schema.d.ts` is
+   **build output — committed but never hand-edited**; and browser MCP tools (chrome-devtools,
+   playwright) may only be used **after the developer has started both `uvicorn` and `npm run dev`**
+   and said continue.
 2. **Verify against current docs/PyPI rather than training data** before pinning a version or citing
    API behavior — this project has already been bitten twice by stale assumptions (MCP spec/SDK
    changed the day before Gate 6; several version pins from memory were wrong before being checked).
 
 When picking up new work: check `docs/PLAN.md`'s progress table for the current gate, and follow the
 same stop-gate discipline it describes (explain what changed, list files touched and why, hand off
-for a manual commit) unless the user has explicitly asked to move faster.
+for a manual commit) unless the user has explicitly asked to move faster. If the work is in
+`frontend/`, read `docs/FRONTEND.md` too — in particular its **capability inventory**, which lists
+what the API deliberately does *not* support (no delete, no sorting, no page-number pagination
+before Gate 8, no stock-adjustment reason). Building against a capability that isn't there is the
+most likely way to waste a gate.

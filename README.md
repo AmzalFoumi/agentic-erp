@@ -40,14 +40,20 @@ collapses into an ordinary web app.
 | `backend/api/`        | FastAPI routes — thin adapter, calls `services/`           |
 | `backend/mcp_server/` | MCP tools — thin adapter, calls `services/`                |
 | `backend/tests/`      | pytest, mostly against `services/` directly                |
-| `frontend/`           | Next.js UI (scaffolded in a later pass)                    |
-| `docs/PLAN.md`        | The build plan and its stop gates — the source of truth    |
+| `frontend/`           | Next.js UI — a client of the API, no business logic        |
+| `docs/PLAN.md`        | The build plan and its stop gates — the root source of truth |
+| `docs/FRONTEND.md`    | Frontend detail under gates 7–13 — subordinate to `PLAN.md` |
 
 ## Stack
 
 Python 3.12 · FastAPI · SQLAlchemy + Alembic · Postgres (hosted on Supabase) · MCP Python SDK ·
-Next.js (later)
+Next.js · TypeScript · Tailwind CSS · shadcn/ui
 
 ## Status
 
-Under construction.
+Under construction. The backend is complete for products end to end — six service functions reused
+by both adapters, with the boundary enforced by `import-linter`. The frontend is the active work;
+see `docs/PLAN.md`'s progress table for the current gate.
+
+Authentication and the AI agent itself are deliberately deferred, with seams reserved for both.
+`docs/PLAN.md` records why, and the two conditions that end the deferral.
