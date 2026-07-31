@@ -1,4 +1,12 @@
 {
+  "extraKnownMarketplaces": {
+    "thunderid-skills": {
+      "source": {
+        "source": "github",
+        "repo": "thunder-id/skills"
+      }
+    }
+  },
   "enabledPlugins": {
     "thunderid-skills@thunderid-skills": true
   }
