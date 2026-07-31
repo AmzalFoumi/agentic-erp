@@ -1,0 +1,40 @@
+# EditorConfig - baseline file conventions, honoured by VS Code, JetBrains,
+# Vim and most other editors, in several cases without a plugin.
+#
+# This sits underneath Prettier rather than beside it. Prettier only handles
+# the languages it parses (and, per .prettierignore, not the markdown here);
+# EditorConfig applies to every file anyone opens, including .env.example,
+# .toml, and the Python that no formatter currently owns. It is the layer that
+# stops an editor silently changing a file just because it was opened.
+#
+# See .prettierignore for the incident that prompted these files.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Python: 4 spaces, per PEP 8 and matching every existing file in backend/.
+[*.py]
+indent_size = 4
+max_line_length = 100
+
+# Markdown: trailing whitespace is significant - two spaces at end of line is a
+# hard line break. Trimming it silently changes rendering, so it is left alone
+# here even though it is trimmed everywhere else.
+#
+# max_line_length documents the 100-column hand-wrapping the plan documents
+# use. It is a hint to the editor's ruler, not enforcement - Prettier is
+# deliberately not allowed near these files.
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = 100
+
+# Makefiles and .gitmodules require literal tabs and break with spaces.
+[{Makefile,*.mk}]
+indent_style = tab

@@ -91,8 +91,8 @@ AI agent ──▶ mcp_server/ ──┘
   supersedes an earlier "stdio is permanent" conclusion — see the 2026-07-31 amendment in `PLAN.md`.)
 - **`frontend/`** — Next.js UI, from Gate 9. **A client of the API and nothing more**; no business
   logic, and any server-side Next code is transport only. Two rules enforced by ESLint
-  `no-restricted-imports`, the frontend's answer to `lint-imports`: only `lib/api/**` may import the
-  generated client or call `fetch`; and no `app/api/**` handlers mirroring FastAPI endpoints — that
+  `no-restricted-imports`, the frontend's answer to `lint-imports`: only the `lib/api` tree may
+  import the generated client or call `fetch`; and no `app/api` handlers mirroring FastAPI — that
   would be a *third adapter*, the same mistake as `services/` importing `api/`. React Server
   Components call FastAPI directly. Detail in `docs/FRONTEND.md`.
 

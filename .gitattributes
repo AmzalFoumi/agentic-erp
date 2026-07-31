@@ -1,0 +1,43 @@
+# Line-ending normalisation, stated in the repository rather than left to each
+# machine's git config.
+#
+# Today this works only because `core.autocrlf=true` happens to be set locally:
+# files are stored LF in git and written CRLF to disk. That is a per-machine
+# setting. A second clone, a CI runner, or a container with a different default
+# would commit CRLF into the repository, and every subsequent diff would show
+# whole files as changed. `.gitattributes` is the version of that decision that
+# travels with the code.
+#
+# `text=auto` - let git detect text vs binary, and normalise text to LF in the
+#               repository on commit.
+# `eol=lf`    - and check it out as LF too, so the working tree matches what is
+#               stored. This is what keeps Prettier's `endOfLine: lf` and
+#               EditorConfig's `end_of_line = lf` from fighting git.
+*               text=auto eol=lf
+
+# Explicitly binary. Without this, git may guess "text" for an unfamiliar
+# extension and corrupt the file by rewriting bytes that look like line
+# endings. Cheap insurance; the failure mode is silent.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.webp          binary
+*.pdf           binary
+*.woff          binary
+*.woff2         binary
+*.zip           binary
+
+# Windows-only scripts genuinely require CRLF - cmd.exe mis-parses LF batch
+# files. The venv's activate.bat is not committed, but this guards anything
+# added later.
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+
+# Generated, and committed so that drift is a reviewable diff. Marking it
+# `linguist-generated` collapses it by default in GitHub pull requests, so a
+# 4,000-line regeneration does not bury the change that caused it.
+# See docs/FRONTEND.md - this file is never hand-edited.
+frontend/lib/api/schema.d.ts    linguist-generated=true
+package-lock.json               linguist-generated=true
