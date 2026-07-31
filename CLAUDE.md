@@ -164,6 +164,5 @@ When picking up new work: check `docs/PLAN.md`'s progress table for the current 
 same stop-gate discipline it describes (explain what changed, list files touched and why, hand off
 for a manual commit) unless the user has explicitly asked to move faster. If the work is in
 `frontend/`, read `docs/FRONTEND.md` too — in particular its **capability inventory**, which lists
-what the API deliberately does *not* support (no delete, no sorting, no page-number pagination
-before Gate 8, no stock-adjustment reason). Building against a capability that isn't there is the
-most likely way to waste a gate.
+what the API deliberately does *not* support (no delete, no sorting, no stock-adjustment reason).
+Building against a capability that isn't there is the most likely way to waste a gate.

@@ -28,13 +28,13 @@ treatment or it will drift.
 
 **Two rules, both mechanical (ESLint `no-restricted-imports`), landing in Gate 10:**
 
-1. **Only `lib/api/**` may import the generated client or call `fetch`.** Everything else goes
+1. Only the `lib/api` tree may import the generated client or call `fetch`. Everything else goes
    through that module. This is the frontend restatement of "the UI is a client of the API and
    nothing more".
-2. **No `app/api/**` route handlers mirroring FastAPI endpoints.** A Next route handler that proxies
-   `/products` to FastAPI is a *third adapter* — the same category of mistake as `services/`
-   importing `api/`, and forbidden for the same reason. React Server Components call FastAPI
-   directly; Next's own documentation calls the mirror layer an anti-pattern.
+2. No route handlers under the `app/api` tree mirroring FastAPI endpoints. A Next route handler
+   that proxies `/products` to FastAPI is a _third adapter_ — the same category of mistake as
+   `services/` importing `api/`, and forbidden for the same reason. React Server Components call
+   FastAPI directly; Next's own documentation calls the mirror layer an anti-pattern.
 
 **Standing rule: no business logic in `frontend/`.** Any server-side Next code is transport only. The
 concrete test: if a rule would give a different answer in the MCP adapter than in the UI, it belongs
@@ -49,7 +49,7 @@ least-code path. Client-side fetching is what costs extra — a React Query/SWR 
 Reads happen in Server Components. Mutations go through Server Actions. The API base URL is a
 server-side value and never reaches the browser.
 
-Note this is **not** an argument from auth. A confidential OAuth client needs *a* trusted server, not
+Note this is **not** an argument from auth. A confidential OAuth client needs _a_ trusted server, not
 specifically a JavaScript one, and `backend/` is already a server. See "Identity seam" below.
 
 ---
@@ -91,12 +91,12 @@ rewrite.
 Versions verified against the npm registry **2026-07-31**. Per `PLAN.md`'s standing rule, re-verify
 at gate start rather than trusting this table.
 
-| Package | Version |
-|---|---|
-| Next.js | 16.2.12 |
-| React | 19.2.8 |
-| Tailwind CSS | 4.3.3 |
-| openapi-typescript | 7.13.0 |
+| Package                | Version          |
+| ---------------------- | ---------------- |
+| Next.js                | 16.2.12          |
+| React                  | 19.2.8           |
+| Tailwind CSS           | 4.3.3            |
+| openapi-typescript     | 7.13.0           |
 | Node / npm (installed) | 22.16.0 / 11.6.2 |
 
 `create-next-app` with App Router, TypeScript, Tailwind, ESLint; then `shadcn init`. Next still needs
@@ -126,17 +126,30 @@ second exists because an unconstrained design tool will draw plausible, unbuilda
 
 **Supported today:**
 
-| Endpoint | Notes |
-|---|---|
-| `GET /products` | `search` (case-insensitive substring over name **or** sku), `limit` 1–200 default 50, `offset` |
-| `POST /products` | 201 on success |
-| `GET /products/by-sku/{sku}` | SKU is normalised `.strip().upper()` server-side, so lookup is case-insensitive |
-| `GET /products/{id}` | |
-| `PATCH /products/{id}` | `sku` and `quantity_on_hand` are deliberately not updatable here |
-| `POST /products/{id}/adjust-stock` | signed `delta`; zero is rejected; cannot go below zero |
-| `GET /health` | |
+| Endpoint                           | Notes                                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `GET /products`                    | Returns `{items, total}`. `search` (case-insensitive substring over name **or** sku), `limit` 1–200 default 50, `offset`. `total` counts the whole match, ignoring the window — so page numbers are buildable |
+| `POST /products`                   | 201 on success                                                                                 |
+| `GET /products/by-sku/{sku}`       | SKU is normalised `.strip().upper()` server-side, so lookup is case-insensitive                |
+| `GET /products/{id}`               |                                                                                                |
+| `PATCH /products/{id}`             | `sku` and `quantity_on_hand` are deliberately not updatable here                               |
+| `POST /products/{id}/adjust-stock` | signed `delta`; zero is rejected; cannot go below zero                                         |
+| `GET /health`                      |                                                                                                |
 
 Sort is fixed to `id DESC` and is not configurable.
+
+Three things Gate 8 added that the design may rely on:
+
+- **`needs_reorder`** is on every product response, computed by the backend. Render it; never
+  recompute `quantity_on_hand <= reorder_level` in the UI. It is a business rule, and the moment the
+  frontend derives it there are two definitions of "low stock".
+- **`total`** on the list response, so page-number pagination is now supported. It was not before
+  Gate 8; any earlier note saying otherwise is stale.
+- **422 responses carry `fields`** — a `{field: message}` map — so form errors go under their own
+  inputs. `detail` still carries the same information flattened, for toasts.
+
+The `error` field is a closed union of ten values, so a `switch` over it can be exhaustively checked
+by TypeScript. Handle every case; the compiler will insist.
 
 **NOT supported — do not design:**
 
@@ -183,7 +196,7 @@ Money and quantity columns use tabular numerals.
 
 **Palette and type are chosen by the developer in the Claude Design UI, not invented by the agent.**
 The named failure mode is the generic AI aesthetic — the same gradients and the same rounded cards
-every recent site has. Sequence: the agent defines the token *slots*; the developer browses themes
+every recent site has. Sequence: the agent defines the token _slots_; the developer browses themes
 and styles in Claude Design; the chosen values are synced down into `globals.css`.
 
 ### Two formatting decisions, recorded once in `DESIGN.md`
@@ -215,9 +228,11 @@ components rather than placeholders; pull brings canvas work back down. Work can
 in the Claude Design web UI or in Claude Code; neither surface is a dead end.
 
 **The brief's centerpiece is the NOT-SUPPORTED list above**, stated as loudly as the supported half.
-Left unconstrained, a design tool will produce page-number pagination, per-row trash icons, sortable
-column headers, bulk-select bars, product thumbnails, a supplier column, and a user avatar menu with
-sign-out. Most of those look plausible and every one of them is unbuildable today.
+Left unconstrained, a design tool will produce per-row trash icons, sortable column headers,
+bulk-select bars, product thumbnails, a supplier column, and a user avatar menu with sign-out. Most
+of those look plausible and every one of them is unbuildable today. (Page-number pagination was on
+this list until Gate 8 shipped `total`; it is now allowed. The list is only useful if it is kept
+current — an over-broad prohibition trains the reader to ignore it.)
 
 Also required in the brief:
 
@@ -241,7 +256,7 @@ backend gate.
 Explicitly forbidden: shipping a disabled button with `// TODO: no endpoint yet`. That permanently
 moves the design's problems into the codebase, where they stop being visible as design decisions.
 
-Then: extract the domain component kit *from* the generated screens rather than reconciling against a
+Then: extract the domain component kit _from_ the generated screens rather than reconciling against a
 pre-built one; wire to the typed client; RSC for reads, Server Actions for mutations. Component tests
 run against MSW handlers typed from the generated schema, so fixtures cannot drift from the contract
 either.
