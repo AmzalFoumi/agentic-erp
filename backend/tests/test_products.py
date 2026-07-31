@@ -22,7 +22,12 @@ from decimal import Decimal
 
 import pytest
 
-from core.exceptions import DuplicateError, NotFoundError, ValidationError
+from core.exceptions import (
+    DuplicateError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 from services import products
 
 
@@ -158,3 +163,57 @@ def test_search_matches_name_and_sku(session, actor, unique_sku):
 
     by_sku = products.list_products(session, actor, search=unique_sku[5:])
     assert any(p.sku == unique_sku for p in by_sku)
+
+
+def test_count_agrees_with_list(session, actor, unique_sku):
+    """The count and the list apply the same predicate.
+
+    They share `_search_filter` for exactly this reason. If they ever diverge,
+    the frontend renders "page 3 of 12" and page 3 comes back empty - a bug
+    that only shows up under a search term, which is the hardest kind to spot.
+    """
+    for index in range(3):
+        products.create_product(
+            session, actor, sku=f"{unique_sku}-{index}", name=f"Nutmeg {index}"
+        )
+
+    listed = products.list_products(session, actor, search="Nutmeg", limit=200)
+    counted = products.count_products(session, actor, search="Nutmeg")
+
+    assert counted == len(listed) == 3
+
+
+def test_count_ignores_the_page_window(session, actor, unique_sku):
+    """`count_products` takes no limit/offset, and this is why it matters.
+
+    A count that respected the window would return 1 here, which the caller
+    already knew from `len(items)`. The whole purpose is to describe the set
+    the window was cut from.
+    """
+    for index in range(3):
+        products.create_product(
+            session, actor, sku=f"{unique_sku}-{index}", name=f"Saffron {index}"
+        )
+
+    page = products.list_products(session, actor, search="Saffron", limit=1)
+
+    assert len(page) == 1
+    assert products.count_products(session, actor, search="Saffron") == 3
+
+
+def test_count_requires_read_permission(session, unique_sku):
+    """Every read checks `actor.can`, and a count is a read.
+
+    Easy to forget on a function that returns only a number, but the number
+    leaks information: "how many products match 'whisky'" is a fact about the
+    catalogue that an actor without `product.read` should not learn.
+    """
+
+    class NoPermissions:
+        id = "nobody"
+
+        def can(self, permission: str) -> bool:
+            return False
+
+    with pytest.raises(PermissionDeniedError):
+        products.count_products(session, NoPermissions(), search=None)

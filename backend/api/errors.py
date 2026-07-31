@@ -154,13 +154,34 @@ def install_error_handlers(app: FastAPI) -> None:
         needs two code paths. `exc.errors()` is a list of dicts; we flatten it
         to one readable line per problem, keeping the field name so the client
         can point at the right input.
+
+        ### Why there is also a `fields` map
+
+        `detail` is one sentence: `"sell_price: Input should be >= 0; name:
+        Field required"`. That is right for a log line or a toast, and useless
+        for a form, which needs to put each message under its own input. The
+        only way to get there from `detail` is to split on `"; "` and then on
+        `": "` - which breaks the moment a validation message itself contains
+        either separator, and Pydantic's messages are not written with that
+        constraint in mind.
+
+        So the structure `exc.errors()` already has is preserved instead of
+        being reconstructed by the client. `detail` is unchanged, so this is
+        purely additive: existing callers see exactly what they saw before.
+
+        Two fields failing the same key would collide in a dict; last wins.
+        That is acceptable because a single field cannot fail twice in one
+        Pydantic pass - the collision would need two entries with an identical
+        `loc`, which does not occur.
         """
         problems = []
+        fields: dict[str, str] = {}
         for error in exc.errors():
             # `loc` is a tuple like ("body", "sell_price"). The first element is
             # always the source, which is noise to the caller, so drop it.
             field = ".".join(str(part) for part in error["loc"][1:]) or "request"
             problems.append(f"{field}: {error['msg']}")
+            fields[field] = error["msg"]
 
         return JSONResponse(
             # `_CONTENT`, not the older `_ENTITY`. Both constants are the
@@ -173,6 +194,7 @@ def install_error_handlers(app: FastAPI) -> None:
             content={
                 "error": "RequestValidationError",
                 "detail": "; ".join(problems),
+                "fields": fields,
             },
         )
 

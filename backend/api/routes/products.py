@@ -33,7 +33,14 @@ not numeric. Nothing had to be declared twice.
 from fastapi import APIRouter, Query, status
 
 from api.deps import CurrentActor, DbSession
-from api.schemas import ProductCreate, ProductRead, ProductUpdate, StockAdjustment
+from api.schemas import (
+    ErrorResponse,
+    ProductCreate,
+    ProductList,
+    ProductRead,
+    ProductUpdate,
+    StockAdjustment,
+)
 from services import products
 
 # `prefix` is prepended to every path below, so the routes read as "" and
@@ -42,7 +49,62 @@ from services import products
 router = APIRouter(prefix="/products", tags=["products"])
 
 
-@router.get("", response_model=list[ProductRead])
+# --------------------------------------------------------------------------
+# Documented failures
+# --------------------------------------------------------------------------
+#
+# api/errors.py has always produced these responses; until now none of them
+# appeared in the OpenAPI document, so a generated client knew the success
+# shape and nothing else. `responses=` is what puts them there.
+#
+# This is declaration, not behaviour: adding or removing an entry changes the
+# generated types and the /docs page, never what the API actually returns. The
+# risk is therefore drift in one direction only - a failure that happens but
+# is not declared. Hence assembling them from named constants rather than
+# retyping a dict on six decorators.
+
+
+def _errors(*codes: int) -> dict[int | str, dict]:
+    """Build a `responses=` mapping for the given status codes.
+
+    Every error this API emits has the same envelope, so the schema is always
+    `ErrorResponse` and only the set of codes differs per route.
+
+    Declaring 422 here deliberately **overrides** the `HTTPValidationError`
+    entry FastAPI adds by itself. That default describes the shape FastAPI
+    would return if nothing intervened, and something does: the handler in
+    api/errors.py reshapes every 422 into this envelope. Leaving the default in
+    place would document a response the API never actually sends.
+    """
+    descriptions = {
+        status.HTTP_400_BAD_REQUEST: "A business rule was broken.",
+        status.HTTP_403_FORBIDDEN: "The actor lacks the required permission.",
+        status.HTTP_404_NOT_FOUND: "No such product.",
+        status.HTTP_409_CONFLICT: "That SKU is already taken.",
+        status.HTTP_422_UNPROCESSABLE_CONTENT: (
+            "The request body does not match the schema. Carries `fields`."
+        ),
+    }
+    return {
+        code: {"model": ErrorResponse, "description": descriptions[code]}
+        for code in codes
+    }
+
+
+# Any route can refuse on permissions, because every service call begins with
+# `actor.can(...)`.
+_FORBIDDEN = status.HTTP_403_FORBIDDEN
+_NOT_FOUND = status.HTTP_404_NOT_FOUND
+_CONFLICT = status.HTTP_409_CONFLICT
+_BAD_REQUEST = status.HTTP_400_BAD_REQUEST
+_UNPROCESSABLE = status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+@router.get(
+    "",
+    response_model=ProductList,
+    responses=_errors(_FORBIDDEN, _UNPROCESSABLE),
+)
 def list_products(
     session: DbSession,
     actor: CurrentActor,
@@ -57,22 +119,34 @@ def list_products(
     same trick the MCP adapter will use in Gate 6, where the docstring becomes
     the tool description an AI model reads to decide whether to call it.
 
-    `response_model=list[ProductRead]` does two jobs. It documents the shape in
+    `response_model=ProductList` does two jobs. It documents the shape in
     OpenAPI, and it *filters* the output: even if the service returned an object
     with extra attributes, only the fields declared on ProductRead are
     serialised. That is the guarantee that makes returning ORM objects safe.
 
-    Pagination note: this returns a bare list, not `{items, total}`. A total
-    requires a second COUNT query, and nothing needs it yet. When the frontend
-    wants page numbers, that is the moment to add it - and the change is local
-    to this file plus the service signature.
+    Pagination: `{items, total}`, where `total` counts everything matching
+    `search` regardless of the window. That costs a second COUNT query on every
+    list call, which is the honest price of page numbers - an offset-based
+    control cannot render "of 12 pages" without knowing there are 12.
+
+    The two calls are deliberately separate service functions rather than one
+    returning a pair, so the MCP adapter - where an agent has no use for a page
+    total - does not pay for the COUNT. See `services/products.py`.
     """
-    return products.list_products(
-        session, actor, search=search, limit=limit, offset=offset
-    )
+    return {
+        "items": products.list_products(
+            session, actor, search=search, limit=limit, offset=offset
+        ),
+        "total": products.count_products(session, actor, search=search),
+    }
 
 
-@router.post("", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=ProductRead,
+    status_code=status.HTTP_201_CREATED,
+    responses=_errors(_BAD_REQUEST, _FORBIDDEN, _CONFLICT, _UNPROCESSABLE),
+)
 def create_product(payload: ProductCreate, session: DbSession, actor: CurrentActor):
     """Create a product.
 
@@ -93,7 +167,11 @@ def create_product(payload: ProductCreate, session: DbSession, actor: CurrentAct
     return products.create_product(session, actor, **payload.model_dump())
 
 
-@router.get("/by-sku/{sku}", response_model=ProductRead)
+@router.get(
+    "/by-sku/{sku}",
+    response_model=ProductRead,
+    responses=_errors(_FORBIDDEN, _NOT_FOUND),
+)
 def get_product_by_sku(sku: str, session: DbSession, actor: CurrentActor):
     """Look a product up by the code on its shelf label.
 
@@ -106,7 +184,11 @@ def get_product_by_sku(sku: str, session: DbSession, actor: CurrentActor):
     return products.get_product_by_sku(session, actor, sku=sku)
 
 
-@router.get("/{product_id}", response_model=ProductRead)
+@router.get(
+    "/{product_id}",
+    response_model=ProductRead,
+    responses=_errors(_FORBIDDEN, _NOT_FOUND, _UNPROCESSABLE),
+)
 def get_product(product_id: int, session: DbSession, actor: CurrentActor):
     """Fetch a single product by id.
 
@@ -116,7 +198,11 @@ def get_product(product_id: int, session: DbSession, actor: CurrentActor):
     return products.get_product(session, actor, product_id=product_id)
 
 
-@router.patch("/{product_id}", response_model=ProductRead)
+@router.patch(
+    "/{product_id}",
+    response_model=ProductRead,
+    responses=_errors(_BAD_REQUEST, _FORBIDDEN, _NOT_FOUND, _UNPROCESSABLE),
+)
 def update_product(
     product_id: int, payload: ProductUpdate, session: DbSession, actor: CurrentActor
 ):
@@ -133,7 +219,11 @@ def update_product(
     )
 
 
-@router.post("/{product_id}/adjust-stock", response_model=ProductRead)
+@router.post(
+    "/{product_id}/adjust-stock",
+    response_model=ProductRead,
+    responses=_errors(_BAD_REQUEST, _FORBIDDEN, _NOT_FOUND, _UNPROCESSABLE),
+)
 def adjust_stock(
     product_id: int, payload: StockAdjustment, session: DbSession, actor: CurrentActor
 ):
@@ -146,7 +236,10 @@ def adjust_stock(
     change to this endpoint's contract.
 
     Refusing to go negative is the service's rule, and it produces a message
-    naming the actual shortfall, which arrives here as a 422.
+    naming the actual shortfall. It reaches the client as a **400**, not a 422 -
+    `ValidationError` was moved off 422 precisely so a shopkeeper-readable "only
+    2 in stock" is not behind the same code as a malformed request body. See
+    core/exceptions.py.
     """
     return products.adjust_stock(
         session, actor, product_id=product_id, delta=payload.delta, reason=payload.reason

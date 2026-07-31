@@ -45,7 +45,7 @@ to have opened one.
 
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core.actor import Actor
@@ -101,6 +101,27 @@ def _check_price(value: Decimal, field: str) -> None:
         raise ValidationError(f"{field} cannot be negative (got {value}).")
 
 
+def _search_filter(stmt, search: str | None):
+    """Apply the search predicate, if there is one, and return the statement.
+
+    Extracted the moment a second caller appeared. `list_products` and
+    `count_products` must agree on what "matching" means - a total that counts
+    rows the list would not return is worse than no total at all, because it
+    produces a pagination control that promises a page which comes back empty.
+    Sharing the predicate makes them wrong together or right together, which is
+    the only guarantee worth having here.
+    """
+    if not search:
+        return stmt
+
+    pattern = f"%{search.strip()}%"
+    # `ilike` is Postgres' case-insensitive LIKE. `|` on two SQLAlchemy
+    # conditions builds SQL `OR` - it is not Python's bitwise-or here, because
+    # the operands are SQLAlchemy expression objects that override the
+    # operator. (`or` cannot be overridden, which is why `|` is used.)
+    return stmt.where(Product.name.ilike(pattern) | Product.sku.ilike(pattern))
+
+
 # --- reads -----------------------------------------------------------------
 
 
@@ -126,21 +147,44 @@ def list_products(
     # SQLAlchemy 2.0 style: build a `select()` object, then execute it. The 1.x
     # style you will see in older tutorials is `session.query(Product)...`,
     # which still works but is legacy. Use this form.
-    stmt = select(Product)
-
-    if search:
-        pattern = f"%{search.strip()}%"
-        # `ilike` is Postgres' case-insensitive LIKE. `|` on two SQLAlchemy
-        # conditions builds SQL `OR` - it is not Python's bitwise-or here,
-        # because the operands are SQLAlchemy expression objects that override
-        # the operator. (`or` cannot be overridden, which is why `|` is used.)
-        stmt = stmt.where(Product.name.ilike(pattern) | Product.sku.ilike(pattern))
-
+    stmt = _search_filter(select(Product), search)
     stmt = stmt.order_by(Product.id.desc()).limit(limit).offset(offset)
 
     # `.scalars()` unwraps each result row into the single entity it holds.
     # Without it you get rows of one-element tuples: `(Product(...),)`.
     return list(session.execute(stmt).scalars().all())
+
+
+def count_products(
+    session: Session,
+    actor: Actor,
+    *,
+    search: str | None = None,
+) -> int:
+    """Count products matching the same filter `list_products` would apply.
+
+    A sibling function rather than a changed return type on `list_products`,
+    and that choice is the point. Making `list_products` return
+    `(rows, total)` would force a second COUNT on every caller that does not
+    want one - notably the MCP adapter, where an agent listing products has no
+    use for a page total and the extra query is pure cost. Two functions let
+    each adapter pay only for what it asks for.
+
+    Deliberately no `limit`/`offset`: a total that respected the page window
+    would just be `len(rows)`, which the caller already has. The whole reason
+    this exists is to describe the set the window is cut from.
+    """
+    _require(actor, "product.read")
+
+    # `select(func.count()).select_from(Product)` rather than
+    # `select(func.count(Product.id))` so the predicate in `_search_filter`
+    # attaches to the same FROM clause the list query uses.
+    stmt = _search_filter(select(func.count()).select_from(Product), search)
+
+    # `.scalar_one()` insists on exactly one row with exactly one column, which
+    # a COUNT always returns. It raises rather than silently giving None, so a
+    # malformed query fails here instead of becoming a `total` of null.
+    return session.execute(stmt).scalar_one()
 
 
 def get_product(session: Session, actor: Actor, *, product_id: int) -> Product:

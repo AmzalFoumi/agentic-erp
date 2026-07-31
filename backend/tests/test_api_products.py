@@ -20,6 +20,11 @@ list, in the MCP dialect, is what Gate 6 will need to verify.
 """
 
 from decimal import Decimal
+from typing import get_args
+
+from api.errors import _FRAMEWORK_ERROR_NAMES
+from api.schemas import ErrorCode
+from core.exceptions import DomainError
 
 
 def test_health_reaches_the_database(client):
@@ -125,6 +130,38 @@ def test_malformed_request_is_422_and_stays_the_frameworks(client, unique_sku):
     assert "sell_price" in response.json()["detail"]
 
 
+def test_422_carries_a_per_field_map(client):
+    """A form needs each message under its own input, not one flattened line.
+
+    `detail` is kept unchanged - this is additive - but `fields` is what stops
+    every client re-deriving structure by splitting `detail` on "; " and ": ",
+    which breaks as soon as a validation message contains either separator.
+    """
+    response = client.post(
+        "/products",
+        # Two failures at once, so the map is doing real work: `name` is
+        # missing entirely, and `sell_price` breaks the ge=0 constraint.
+        json={"sku": "X", "sell_price": "-1.00"},
+    )
+
+    assert response.status_code == 422
+    fields = response.json()["fields"]
+    assert set(fields) == {"name", "sell_price"}
+    assert "required" in fields["name"].lower()
+
+    # The flattened form still says the same thing, for callers that had it.
+    detail = response.json()["detail"]
+    assert "name" in detail and "sell_price" in detail
+
+
+def test_fields_is_absent_on_errors_that_are_not_per_field(client):
+    """`fields` is for schema failures only. A business rule has no field."""
+    response = client.get("/products/-1")
+
+    assert response.status_code == 404
+    assert response.json().get("fields") is None
+
+
 def test_unknown_route_is_distinguishable_from_a_missing_product(client):
     """The one status code we share with the framework, told apart by `error`.
 
@@ -179,13 +216,86 @@ def test_patch_leaves_unsent_fields_alone(client, unique_sku):
 
 
 def test_list_and_search(client, unique_sku):
-    """Query parameters reach the service, and the response is a JSON array."""
+    """Query parameters reach the service, and the response is the envelope."""
     client.post("/products", json={"sku": unique_sku, "name": "Cardamom Pods"})
 
     response = client.get("/products", params={"search": "cardamom"})
 
     assert response.status_code == 200
-    assert any(item["sku"] == unique_sku for item in response.json())
+    body = response.json()
+    # `{items, total}`, not a bare array. Changed in Gate 8 so an offset-based
+    # pagination control can render "page 3 of 12".
+    assert any(item["sku"] == unique_sku for item in body["items"])
+
+
+def test_total_describes_the_whole_match_not_the_page(client, unique_sku):
+    """`total` ignores limit/offset, which is the only reason it is useful.
+
+    A total equal to `len(items)` would be something the client already knows.
+    This is the assertion that would fail if `count_products` ever grew the
+    window arguments.
+    """
+    for index in range(3):
+        client.post(
+            "/products",
+            json={"sku": f"{unique_sku}-{index}", "name": f"Fenugreek {index}"},
+        )
+
+    response = client.get("/products", params={"search": "Fenugreek", "limit": 1})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["items"]) == 1
+    assert body["total"] == 3
+
+
+def test_total_respects_the_same_filter_as_items(client, unique_sku):
+    """The count and the list must agree on what "matching" means.
+
+    They share `_search_filter` in the service precisely so this cannot drift.
+    A total counting rows the list would never return produces a pagination
+    control promising a page that comes back empty.
+    """
+    client.post("/products", json={"sku": unique_sku, "name": "Asafoetida 50g"})
+
+    matching = client.get("/products", params={"search": "Asafoetida"}).json()
+
+    # Every row the count claims is a row the list actually returns.
+    assert matching["total"] == len(matching["items"]) == 1
+    assert matching["items"][0]["sku"] == unique_sku
+
+    # And the filter is doing something: the unfiltered count is not smaller.
+    everything = client.get("/products").json()
+    assert everything["total"] >= matching["total"]
+
+
+def test_needs_reorder_is_computed_by_the_backend(client, unique_sku):
+    """The low-stock rule is on the wire, not left for the frontend to derive.
+
+    This is the API half of what test_mcp_products.py already asserts for the
+    MCP adapter. Both front doors report the same rule from the same
+    `hybrid_property`, which is the whole point of it living on the model.
+    """
+    created = client.post(
+        "/products",
+        json={
+            "sku": unique_sku,
+            "name": "Tamarind Block",
+            "quantity_on_hand": 2,
+            "reorder_level": 5,
+        },
+    ).json()
+
+    assert created["needs_reorder"] is True
+
+    # Push stock above the threshold; the same field must flip without the
+    # client recomputing anything.
+    restocked = client.post(
+        f"/products/{created['id']}/adjust-stock", json={"delta": 10}
+    ).json()
+
+    assert restocked["quantity_on_hand"] == 12
+    assert restocked["needs_reorder"] is False
 
 
 def test_lookup_by_sku_is_case_insensitive(client, unique_sku):
@@ -228,3 +338,85 @@ def test_decimal_precision_survives_the_round_trip(client, unique_sku):
     )
 
     assert Decimal(response.json()["cost_price"]) == Decimal("19.99")
+
+
+# --------------------------------------------------------------------------
+# The error union
+# --------------------------------------------------------------------------
+#
+# `ErrorCode` promises the frontend an exhaustive list, and TypeScript will
+# believe it: a `switch` over the generated union compiles clean when every
+# member is handled. The promise is only worth anything if the list cannot
+# silently fall out of step with the code that produces the values, so these
+# two tests derive the truth from the source rather than restating it.
+
+
+def test_error_union_covers_every_domain_exception():
+    """Adding an exception to core/exceptions.py must break this test.
+
+    `type(exc).__name__` is what api/errors.py puts in the `error` field, so
+    every DomainError subclass name is a value the API can emit. A new
+    subclass that nobody added to `ErrorCode` would be a value the generated
+    TypeScript union does not contain - the frontend's `switch` would compile,
+    and fall through at runtime on a real error.
+    """
+
+    def descendants(cls: type) -> set[str]:
+        found = set()
+        for sub in cls.__subclasses__():
+            found.add(sub.__name__)
+            found |= descendants(sub)
+        return found
+
+    declared = set(get_args(ErrorCode))
+    ours = descendants(DomainError) | {DomainError.__name__}
+
+    assert ours <= declared, f"not in ErrorCode: {sorted(ours - declared)}"
+
+
+def test_error_union_covers_every_framework_error_name():
+    """The same guarantee for the names api/errors.py invents for Starlette.
+
+    `HTTPError` is the fallback for any status not in the map, so it is
+    asserted separately - it appears in no dict but is reachable from the
+    `.get(...)` default.
+    """
+    declared = set(get_args(ErrorCode))
+    framework = set(_FRAMEWORK_ERROR_NAMES.values()) | {
+        "HTTPError",
+        "RequestValidationError",
+    }
+
+    assert framework <= declared, f"not in ErrorCode: {sorted(framework - declared)}"
+
+
+def test_declared_error_responses_reach_the_openapi_document(client):
+    """`responses=` on the routes actually lands in the schema.
+
+    ErrorResponse was declared for months and attached to nothing, so it never
+    appeared in /openapi.json and a generated client knew only the success
+    shape. This asserts the wiring, not the wording.
+    """
+    schema = client.get("/openapi.json").json()
+
+    assert "ErrorResponse" in schema["components"]["schemas"]
+
+    # A 404 on the by-id route is the clearest case: it is entirely ours, and
+    # it is the one a frontend detail page must handle.
+    responses = schema["paths"]["/products/{product_id}"]["get"]["responses"]
+    assert "404" in responses
+    ref = responses["404"]["content"]["application/json"]["schema"]["$ref"]
+    assert ref.endswith("/ErrorResponse")
+
+
+def test_list_envelope_is_in_the_openapi_document(client):
+    """The generated client must see `{items, total}`, not a bare array."""
+    schema = client.get("/openapi.json").json()
+
+    ref = schema["paths"]["/products"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]["$ref"]
+    assert ref.endswith("/ProductList")
+
+    product = schema["components"]["schemas"]["ProductRead"]
+    assert "needs_reorder" in product["properties"]
