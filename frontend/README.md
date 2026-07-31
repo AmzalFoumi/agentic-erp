@@ -1,3 +1,6 @@
+## REMEMBER - this file has oler existing README.md content and the nextjs default README.md combined (Manually copied back by developer after create-next-app replaced it). Check at next pass to protect original content.
+
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
