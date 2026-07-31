@@ -69,7 +69,7 @@ class SystemActor:
     """An actor with unrestricted permissions. The only implementation today.
 
     The authentication provider decision is deliberately deferred (see
-    docs/PLAN.md). Until it lands, adapters pass a SystemActor and every
+    docs/AUTH-PLAN.md). Until it lands, adapters pass a SystemActor and every
     `can()` returns True, so nothing is actually gated yet.
 
     Two things are true at once, and both matter:

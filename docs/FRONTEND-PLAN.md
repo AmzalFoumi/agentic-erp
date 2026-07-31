@@ -1,10 +1,10 @@
 # Frontend — build plan
 
-> **Subordinate to `docs/PLAN.md`.** This file is detail under `PLAN.md`'s gates 7–13; where the two
+> **Subordinate to `docs/PLAN.md`.** This file is detail under `PLAN.md`'s gates 9–13; where the two
 > disagree, **`PLAN.md` wins** and this file is the thing that is out of date. Cross-cutting rules
-> (stop gates, division of labour, verify-against-current-docs, the auth decision) live in `PLAN.md`
-> and are referenced here, never restated. There is **no progress table here** — `PLAN.md`'s table is
-> the single status board for the whole project.
+> (stop gates, division of labour, verify-against-current-docs) live in `PLAN.md` and are referenced
+> here, never restated; the auth decision lives in `docs/AUTH-PLAN.md`. There is **no progress table
+> here** — `PLAN.md`'s table is the single status board for the whole project.
 
 ## Why this file exists (2026-07-31)
 
@@ -13,10 +13,15 @@ same treatment — screen inventory, capability inventory, design-system rationa
 but appending it to `PLAN.md` would bury the backend history and make the file unnavigable.
 
 The split rule, decided at Gate 7: **a decision is recorded once, where it is enforced; the other
-file links to it.** The auth decision is enforced in `backend/api/deps.py` and
-`backend/mcp_server/server.py`, so it stays in `PLAN.md` and this file links to it. The money display
-format is enforced in `frontend/DESIGN.md`, so it lives there and this file links to it. Two
-drifting accounts of the same decision is the failure mode this rule exists to prevent.
+file links to it.** The money display format is enforced in `frontend/DESIGN.md`, so it lives there
+and this file links to it. Two drifting accounts of the same decision is the failure mode this rule
+exists to prevent.
+
+**Generalised at Gate 8.5 (2026-07-31).** The same argument applied to `PLAN.md` itself once it
+reached 1,067 lines: 73% of what was re-read at the start of every session was finished backend
+history. `PLAN.md` was reduced to the progress table and the rules that govern every gate, with
+gates 0–8 moving to `docs/BACKEND-PLAN.md` and the auth workstream to `docs/AUTH-PLAN.md`. This file
+was renamed `FRONTEND-PLAN.md` for symmetry. Nothing was removed — every block moved verbatim.
 
 ---
 
@@ -58,8 +63,8 @@ specifically a JavaScript one, and `backend/` is already a server. See "Identity
 
 Nothing in gates 7–13 implements authentication. No provider is chosen, no login screen is built, no
 token is issued or validated. The full reasoning, the verified provider landscape, and the two
-conditions that make the deferral expire are recorded in **`PLAN.md`'s "Decision: authentication"
-section** — read it there, it is not duplicated here.
+conditions that make the deferral expire are recorded in **`docs/AUTH-PLAN.md`** — read it there, it
+is not duplicated here.
 
 What lands in this codebase, at Gate 10:
 
@@ -74,9 +79,9 @@ agent service — not Next. The Next tier stays thin.
 
 ### The agent is a remote service, not an in-process loop
 
-`PLAN.md`'s original "Shape A" sketch put the agent loop inside Next.js. **That assumption is
-dropped** (see `PLAN.md`'s amended transport decision). The agent is its own implementation, deferred,
-and reached over HTTP.
+`BACKEND-PLAN.md`'s original "Shape A" sketch put the agent loop inside Next.js. **That assumption
+is dropped** (see `BACKEND-PLAN.md`'s amended transport decision). The agent is its own
+implementation, deferred, and reached over HTTP.
 
 The only thing this plan does about it: `frontend/.env.example` reserves `API_BASE_URL` **and**
 `AGENT_BASE_URL` as separate server-side values — no `NEXT_PUBLIC_` prefix, so neither reaches the
@@ -209,7 +214,8 @@ that do not add up.
 > **Hard rule: never use `Intl.NumberFormat` with `style: "currency"` on a `number`.** That requires
 > `parseFloat` on the wire string and reintroduces exactly the float64 precision bug the string
 > encoding exists to prevent (`18.00` → `17.999999999999996`). Format the string directly or use a
-> decimal library. See `PLAN.md`'s money-as-string rationale and `backend/api/schemas.py`'s comment.
+> decimal library. See `BACKEND-PLAN.md`'s money-as-string rationale and the comment in
+> `backend/api/schemas.py`.
 
 **Timestamps** are `TIMESTAMPTZ`. Display timezone and format are decided once in `DESIGN.md`;
 otherwise four implementations appear.
@@ -266,6 +272,7 @@ either.
 ## Deferred, as decisions rather than oversights
 
 Soft-delete / archive · a sort parameter · clearing `category` back to NULL · a stock-movement ledger
-so adjustment `reason` is stored · **auth provider** (see `PLAN.md`) · **MCP Streamable HTTP transport
-and its OAuth resource-server stack** (see `PLAN.md`) · **the agent service itself** · deployment
-shape, production origin, and therefore the real `CORS_ORIGINS` and `API_BASE_URL` values.
+so adjustment `reason` is stored · **auth provider** (see `AUTH-PLAN.md`) · **MCP Streamable HTTP
+transport and its OAuth resource-server stack** (see `BACKEND-PLAN.md`) · **the agent service
+itself** · deployment shape, production origin, and therefore the real `CORS_ORIGINS` and
+`API_BASE_URL` values.

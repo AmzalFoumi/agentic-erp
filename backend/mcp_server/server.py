@@ -6,8 +6,8 @@ the same functions in `services/products.py`. If a stock rule changes, it
 changes in one place and both front doors change with it.
 
 Worth stating plainly what was NOT done while writing this: no file in `api/`
-was opened. That was the experiment (see docs/PLAN.md, Gate 6). If this adapter
-could only be written by looking at the HTTP one, the "written once" claim was
+was opened. That was the experiment (see docs/BACKEND-PLAN.md, Gate 6). If this
+adapter could only be written by looking at the HTTP one, the "written once" claim was
 never true - the real contract would have quietly moved into `api/schemas.py`.
 Everything here came from `services/products.py` and `core/`.
 
@@ -73,8 +73,8 @@ def _actor() -> SystemActor:
     """The caller identity passed to every service function.
 
     Hardcoded to a SystemActor for now, exactly as the FastAPI adapter does -
-    the auth provider decision is deferred (docs/PLAN.md). The id is "mcp" so
-    the `created_by` column records which front door a row came through, which
+    the auth provider decision is deferred (docs/AUTH-PLAN.md). The id is "mcp"
+    so the `created_by` column records which front door a row came through, which
     is genuinely useful the first time you wonder whether a human or an agent
     created something.
 

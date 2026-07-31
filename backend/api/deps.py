@@ -60,8 +60,8 @@ def get_actor() -> Actor:
     """Who is making this request.
 
     A placeholder, and deliberately an obvious one. There is no auth provider
-    yet - that decision is deferred, see docs/PLAN.md - so every HTTP caller is
-    currently the same all-powerful `SystemActor`.
+    yet - that decision is deferred, see docs/AUTH-PLAN.md - so every HTTP
+    caller is currently the same all-powerful `SystemActor`.
 
     The reason this exists *now*, before it does anything useful, is that it is
     the seam. When a real auth provider lands, the change is confined to this

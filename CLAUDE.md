@@ -7,23 +7,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A supermarket inventory/purchasing system where business logic is written exactly once, in
 `backend/services/`, and reused by two front doors: a FastAPI HTTP API (`backend/api/`) for the
 Next.js UI, and an MCP server (`backend/mcp_server/`) exposing the same operations as tools for an
-AI agent. `docs/PLAN.md` is the permanent **root** source of truth — the full build history, every
-architectural decision and why it was made, and the current gate status. Read it before making any
-non-trivial change; it is long but nearly everything you'd otherwise guess wrong is answered there.
+AI agent. `docs/PLAN.md` is the permanent **root** source of truth — the progress table and the rules
+that govern every gate. Read it before making any non-trivial change, plus whichever detail doc
+covers the work; nearly everything you'd otherwise guess wrong is answered there.
 
-**Three documents, one precedence order:**
+**Five documents, one precedence order.** `PLAN.md` is deliberately short so it can be read every
+time; the rest are read when you are working in the area they cover.
 
-| File | Scope | Precedence |
+| File | Scope | Read when |
 |---|---|---|
-| `docs/PLAN.md` | Everything. Build history, all decisions, the progress table (gates 0–13) | **Root — wins over both others** |
-| `docs/FRONTEND.md` | Frontend detail under gates 7–13: screen and capability inventories, design-system rationale | Subordinate to `PLAN.md` |
-| `CLAUDE.md` (this file) | A summary for agent onboarding | Subordinate to both |
+| `docs/PLAN.md` | Progress table (gates 0–13), stop gates, division of labour, verify-docs rule, structure | **Every gate. Root — wins over all others** |
+| `docs/BACKEND-PLAN.md` | Gates 0–8 as built, backend decisions and deferrals | Changing backend code |
+| `docs/FRONTEND-PLAN.md` | Gates 9–13, screen and capability inventories, design-system rationale | Changing frontend code |
+| `docs/AUTH-PLAN.md` | Auth decision, verified provider landscape, the deferral | The auth gate |
+| `CLAUDE.md` (this file) | A summary for agent onboarding | Subordinate to all four |
 
-**This file is a summary, never a second opinion.** Where it disagrees with either plan doc, the plan
-doc wins and this file is the thing that is out of date. Record decisions in `PLAN.md` (or
-`FRONTEND.md` for frontend-only detail); update the summary here only if a decision changes something
-on this page. A decision is recorded **once, where it is enforced** — the other file links to it
-rather than restating it.
+**This file is a summary, never a second opinion.** Where it disagrees with any plan doc, the plan
+doc wins and this file is the thing that is out of date. A decision is recorded **once, where it is
+enforced** — the other files link to it rather than restating it. Record new decisions in the doc
+that owns the area, and update the summary here only if it changes something on this page.
 
 ## The one rule
 
@@ -88,13 +90,14 @@ AI agent ──▶ mcp_server/ ──┘
   docstrings become the tool descriptions an AI model reads, so they matter more here than typical
   code comments. Runs over **stdio for local development**; Streamable HTTP is the deployment target,
   landing with the auth gate because an HTTP MCP server must be a full OAuth resource server. (This
-  supersedes an earlier "stdio is permanent" conclusion — see the 2026-07-31 amendment in `PLAN.md`.)
+  supersedes an earlier "stdio is permanent" conclusion — see the 2026-07-31 amendment in
+  `BACKEND-PLAN.md`.)
 - **`frontend/`** — Next.js UI, from Gate 9. **A client of the API and nothing more**; no business
   logic, and any server-side Next code is transport only. Two rules enforced by ESLint
   `no-restricted-imports`, the frontend's answer to `lint-imports`: only the `lib/api` tree may
   import the generated client or call `fetch`; and no `app/api` handlers mirroring FastAPI — that
   would be a *third adapter*, the same mistake as `services/` importing `api/`. React Server
-  Components call FastAPI directly. Detail in `docs/FRONTEND.md`.
+  Components call FastAPI directly. Detail in `docs/FRONTEND-PLAN.md`.
 
 ### Identity: `Actor`, not ambient request state
 
@@ -104,15 +107,14 @@ what an HTTP request is, the MCP server can no longer reuse it. Each adapter bui
 from whatever it has and passes it down — eventually a validated bearer token in `api/deps.py`'s
 `get_actor()`, and per-call `_meta` on the MCP side. Neither does that yet: `SystemActor` (grants
 everything) is the only implementation today, returned by both adapters, because no auth provider is
-wired in (deliberately deferred, see `docs/PLAN.md`). The two functions above are the seams where
-that lands, and nothing below them changes when it does. The frontend gets a third seam of the same
-shape — `frontend/lib/auth/current-user.ts`, also hardcoded to `"system"`.
+wired in (deliberately deferred, see `docs/AUTH-PLAN.md`). The two functions above are the seams
+where that lands, and nothing below them changes when it does. The frontend gets a third seam of the
+same shape — `frontend/lib/auth/current-user.ts`, also hardcoded to `"system"`.
 
-**The deferral has two expiry conditions**, recorded in `PLAN.md`: either the MCP server becomes
+**The deferral has two expiry conditions**, also in `PLAN.md`: either the MCP server becomes
 HTTP-reachable by anything that is not the developer's own machine, or a second human user exists.
-Either one triggers the auth gate before further feature work. `PLAN.md` also carries the verified
-provider comparison (ThunderID is alpha; Asgardeo's free tier is B2E-capped at 50 MAUs; Keycloak has
-confirmed RFC 8693 support) — don't re-research it, and don't pick a provider without reading it.
+Either one triggers the auth gate before further feature work. **`docs/AUTH-PLAN.md` carries the
+verified provider comparison** — don't re-research it, and don't pick a provider without reading it.
 
 **Known trap, not yet fixed:** `mcp_server/server.py`'s `_actor()` currently hardcodes `SystemActor`.
 That's fine only because no unauthenticated caller exists yet. The moment an agent runs server-side
@@ -163,6 +165,6 @@ turn, not just during initial build-out:
 When picking up new work: check `docs/PLAN.md`'s progress table for the current gate, and follow the
 same stop-gate discipline it describes (explain what changed, list files touched and why, hand off
 for a manual commit) unless the user has explicitly asked to move faster. If the work is in
-`frontend/`, read `docs/FRONTEND.md` too — in particular its **capability inventory**, which lists
+`frontend/`, read `docs/FRONTEND-PLAN.md` too — in particular its **capability inventory**, which lists
 what the API deliberately does *not* support (no delete, no sorting, no stock-adjustment reason).
 Building against a capability that isn't there is the most likely way to waste a gate.
