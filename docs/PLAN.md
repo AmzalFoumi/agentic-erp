@@ -36,7 +36,7 @@
 | 7    | Docs restructure — persist the frontend plan, `docs/FRONTEND-PLAN.md`, amend two recorded decisions                         | ✅ done — merged to `dev`; docs only, no code                                                                                                                                      |
 | 8    | Backend contract closure — `needs_reorder`, `{items,total}`, 422 `fields`, `Literal` error union, settings-driven CORS | ✅ done on `feat/fastapi/contract`; `pytest` green and `lint-imports` 3 contracts kept, both verified by the developer                                                              |
 | 8.5  | Docs split — `PLAN.md` reduced to index + shared rules; gates 0–8 to `BACKEND-PLAN.md`, auth to `AUTH-PLAN.md`, `FRONTEND.md` renamed | ✅ done — docs only, no code; every block moved verbatim, nothing removed                                                                                                            |
-| 9    | Scaffold Next.js + TypeScript + Tailwind v4 + shadcn/ui in `frontend/`                                                 | ⬜ not started                                                                                                                                                                     |
+| 9    | Scaffold Next.js + TypeScript + Tailwind v4 + shadcn/ui in `frontend/`                                                 | ✅ done on `feat/client/web`; next `16.2.12`, react `19.2.4`, tailwindcss `4.3.3`, `src/` layout, shadcn `base-nova` (Base UI, not Radix) — re-scaffolded off a stale-cache v15                                                                                                                                                                     |
 | 10   | Typed client from `/openapi.json`, contract-drift check, capability inventory, identity seam                           | ⬜ not started                                                                                                                                                                     |
 | 11   | Design tokens — `frontend/DESIGN.md` + `globals.css`, density axis, LKR money format                                   | ⬜ not started                                                                                                                                                                     |
 | 12   | Claude Design — `/design-sync` push, screens generated against real tokens                                             | ⬜ not started                                                                                                                                                                     |
@@ -151,7 +151,7 @@ owner:
 - **Generators both run a command and write source.** `create-next-app`, `shadcn add`,
   `openapi-typescript` are all "developer runs commands" _and_ "agent writes files" at once. Rule:
   **the developer runs the generator; the agent edits the generated output afterward.**
-- **Generated code is build output, not source.** `frontend/lib/api/schema.d.ts` is committed — so
+- **Generated code is build output, not source.** `frontend/src/lib/api/schema.d.ts` is committed — so
   contract drift shows up as a reviewable diff — but is **never hand-edited** by either party. If it
   is wrong, the backend schema is wrong; fix that and regenerate.
 - **Verification needs two servers running.** From Gate 13, checking a screen needs `uvicorn` _and_

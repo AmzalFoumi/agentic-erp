@@ -32,6 +32,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the committed template. This negation is load-bearing: without it
+# the rule above swallows .env.example and the frontend has no documented config.
+!.env.example
 
 # vercel
 .vercel

@@ -33,7 +33,7 @@ treatment or it will drift.
 
 **Two rules, both mechanical (ESLint `no-restricted-imports`), landing in Gate 10:**
 
-1. Only the `lib/api` tree may import the generated client or call `fetch`. Everything else goes
+1. Only the `src/lib/api` tree may import the generated client or call `fetch`. Everything else goes
    through that module. This is the frontend restatement of "the UI is a client of the API and
    nothing more".
 2. No route handlers under the `app/api` tree mirroring FastAPI endpoints. A Next route handler
@@ -68,7 +68,7 @@ is not duplicated here.
 
 What lands in this codebase, at Gate 10:
 
-`frontend/lib/auth/current-user.ts` — a single module returning the current caller, today hardcoding
+`frontend/src/lib/auth/current-user.ts` — a single module returning the current caller, today hardcoding
 `"system"` to match the backend's `SystemActor`. All data access goes through it. This mirrors
 exactly what `backend/core/actor.py` did for the backend: identity is a parameter, obtained in one
 place, so adopting a provider later changes one file rather than every call site.
@@ -109,12 +109,54 @@ a thin `postcss.config.mjs` with `@tailwindcss/postcss` — Tailwind v4's zero-c
 
 Note `.gitignore`'s `.env.*` rule swallows any env example not named exactly `.env.example`.
 
+### As built (2026-08-03)
+
+Installed: **next 16.2.12, react / react-dom 19.2.4, tailwindcss 4.3.3.** React is 19.2.4 rather than
+the 19.2.8 in the table above because Next 16.2.12 pins it — the pin wins, and this is the kind of
+drift the re-verify rule exists to surface.
+
+The first scaffold landed on **Next 15.4.6 / React 19.1.0** — a stale `npx` cache, not the pinned
+versions. It was re-scaffolded rather than codemodded: twelve generated files existed and no
+application code had been written, so a clean v16 template beat a patched v15 one. Lesson worth
+keeping: **pass `@latest` explicitly to `create-next-app`, then check the installed version in
+`node_modules` before believing the scaffold.**
+
+**Layout: `src/`.** Still a first-class `create-next-app` option in v16, just not in the
+"recommended defaults" prompt set. Everything the other docs describe at `frontend/lib/...` therefore
+lives at `frontend/src/lib/...`; the path references were updated rather than the layout moved.
+
+**Four Next 16 changes that show up in the scaffold**, verified against the v16 upgrade guide on
+2026-08-03:
+
+- `next lint` is **removed**. `npm run lint` calls `eslint` directly, and `next build` no longer lints.
+- **Turbopack is the default** for `next dev` / `next build`, so `--turbopack` is dropped from the
+  scripts.
+- ESLint is **flat config** natively — `@eslint/eslintrc` is gone from `devDependencies`.
+- `create-next-app` generates **`AGENTS.md` + `CLAUDE.md`** by default. Both are kept. Their single
+  instruction — read `node_modules/next/dist/docs/` rather than trusting training data about
+  Next.js — is `PLAN.md`'s standing verify-docs rule restated at the point of use. They sit **below**
+  the four plan docs in precedence: they say nothing about this project's architecture, only about
+  the framework.
+
+**shadcn style: `base-nova`**, which pulls **`@base-ui/react` instead of Radix**. Recorded because it
+is invisible from `components.json` alone and determines which primitive library Gate 11's component
+kit is built on. `rsc: true`, `baseColor: neutral`, `iconLibrary: lucide`, CSS at `src/app/globals.css`.
+
+`shadcn` itself is a CLI, so it lives in `devDependencies` — it is not shipped to the browser.
+
+`frontend/.env.example` exists with `API_BASE_URL` and `AGENT_BASE_URL`, both server-side, plus the
+`!.env.example` negation in `frontend/.gitignore` that the note above warns is needed.
+
+**Not done at this gate, and deliberately:** the ESLint `no-restricted-imports` architecture rules
+have nothing to restrict until the `src/lib/api` tree exists. They land with the typed client at
+Gate 10, together with the `api:types` script the README already documents.
+
 ---
 
 ## Gate 10 — Typed client and capability inventory
 
 **Typed client.** `openapi-typescript` + `openapi-fetch`, generated from FastAPI's `/openapi.json`
-into `frontend/lib/api/schema.d.ts` via `npm run api:types`.
+into `frontend/src/lib/api/schema.d.ts` via `npm run api:types`.
 
 `schema.d.ts` is **build output**: committed, so contract drift shows up as a reviewable diff, but
 never hand-edited. If it is wrong, the backend schema is wrong — fix that.

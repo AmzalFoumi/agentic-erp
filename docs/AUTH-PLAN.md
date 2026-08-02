@@ -102,7 +102,7 @@ default" line above.
 
 **Nothing in gates 7–13 implements authentication, and nothing in them should.** No provider is
 chosen, no login screen is built, no token is issued or validated. `SystemActor` remains the only
-`Actor` implementation; `frontend/lib/auth/current-user.ts` will hardcode `"system"` to match it.
+`Actor` implementation; `frontend/src/lib/auth/current-user.ts` will hardcode `"system"` to match it.
 
 Why, restated so it is not mistaken for an oversight: the hard half is _agent_ identity, not human
 identity. Human auth is commoditized and can be added in a week. Agent delegation is unsettled — the
@@ -111,7 +111,7 @@ of the shipping alternative. Choosing now would mean choosing on the easy half a
 hard half afterward.
 
 Cost of deferring: three functions — `api/deps.py`'s `get_actor()`, `mcp_server/server.py`'s
-`_actor()`, and `frontend/lib/auth/current-user.ts`. Cost of _forgetting_: the privilege-escalation
+`_actor()`, and `frontend/src/lib/auth/current-user.ts`. Cost of _forgetting_: the privilege-escalation
 bypass described under "three deployment shapes" in `docs/BACKEND-PLAN.md`, with no log entry
 distinguishing it from
 legitimate use.
