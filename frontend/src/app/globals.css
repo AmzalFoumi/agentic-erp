@@ -4,12 +4,45 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/**
+ * Density is a first-class axis, composing with `dark` exactly as shadcn's
+ * theming already does. `data-density="dense"` is the default and is set on
+ * <html>; "comfortable" is the opt-out. See frontend/DESIGN.md.
+ *
+ * The variant exists for the rare component that needs a structural change at
+ * a given density rather than a different token value. Reach for the tokens
+ * first — a component that reads `--spacing-row` needs no variant at all.
+ */
+@custom-variant comfortable (&:is([data-density="comfortable"] *));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  /*
+   * next/font sets --font-geist-sans on <html> (see app/layout.tsx). This
+   * previously read `var(--font-sans)` — a self-reference that resolved to
+   * nothing, so `font-sans` silently fell back to the browser default.
+   */
+  --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
+
+  /*
+   * Density tokens. These land in the --spacing namespace, so they generate
+   * the whole sizing family at once: p-cell-x, py-cell-y, h-row, gap-stack.
+   *
+   * `inline` is load-bearing here. It emits `var(--row-h)` into each utility
+   * rather than the resolved value, so the declarations under
+   * [data-density] below actually take effect at runtime. Without it the
+   * value would be frozen at build time and the toggle would do nothing.
+   */
+  --spacing-cell-x: var(--cell-x);
+  --spacing-cell-y: var(--cell-y);
+  --spacing-row: var(--row-h);
+  --spacing-control: var(--control-h);
+  --spacing-stack: var(--stack);
+  --spacing-section: var(--section);
+
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -117,6 +150,51 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/**
+ * The two densities. Values live here and nowhere else — DESIGN.md names these
+ * tokens and explains them but never restates a number, because two files that
+ * must agree by hand are a drift machine.
+ *
+ * Dense is the default rather than an option. This is an operational tool for
+ * someone scanning hundreds of stock rows, not a marketing page. Comfortable
+ * exists for touch and for long sessions.
+ *
+ * Selectors are unqualified attribute selectors so they match <html> itself
+ * (the [data-density] element), unlike the variant above which matches
+ * descendants.
+ */
+[data-density="dense"] {
+  --cell-x: 0.625rem;
+  --cell-y: 0.25rem;
+  --row-h: 2rem;
+  --control-h: 1.75rem;
+  --stack: 0.5rem;
+  --section: 1.25rem;
+}
+
+[data-density="comfortable"] {
+  --cell-x: 1rem;
+  --cell-y: 0.625rem;
+  --row-h: 2.75rem;
+  --control-h: 2.25rem;
+  --stack: 0.875rem;
+  --section: 2rem;
+}
+
+/*
+ * Fallback: if the attribute is ever missing — a stray <html> in a test, a
+ * fragment rendered outside the app shell — the tokens still resolve to dense
+ * rather than collapsing every padding to zero.
+ */
+:root {
+  --cell-x: 0.625rem;
+  --cell-y: 0.25rem;
+  --row-h: 2rem;
+  --control-h: 1.75rem;
+  --stack: 0.5rem;
+  --section: 1.25rem;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -126,5 +204,16 @@
   }
   html {
     @apply font-sans;
+  }
+
+  /*
+   * Money and quantity columns are read down, not across. Proportional digits
+   * make the ones column wander between rows and defeat that entirely, so
+   * tabular figures are applied to the elements that carry numbers rather than
+   * left to each screen to remember.
+   */
+  table,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
   }
 }

@@ -274,10 +274,40 @@ authoring time.
 
 Money and quantity columns use tabular numerals.
 
-**Palette and type are chosen by the developer in the Claude Design UI, not invented by the agent.**
-The named failure mode is the generic AI aesthetic — the same gradients and the same rounded cards
-every recent site has. Sequence: the agent defines the token _slots_; the developer browses themes
-and styles in Claude Design; the chosen values are synced down into `globals.css`.
+**Palette and type are chosen by the developer, not invented by the agent.** The named failure mode
+is the generic AI aesthetic — the same gradients and the same rounded cards every recent site has.
+The agent defines the token _slots_; the values are supplied by the developer and synced down into
+`globals.css`.
+
+> **Corrected 2026-08-04, against the Claude Design setup docs.** This section previously said the
+> developer "browses themes and styles in Claude Design." **There is no theme picker or style
+> gallery.** Claude Design _generates_ a design system from inputs you give it — a linked or uploaded
+> repo, screenshots, existing design files, a PDF/PPTX carrying the brand, or individual assets like
+> a logo, a palette, or type specimens — and extracts colours, typography, components, and layout
+> patterns from those. The original wording described a feature that does not exist: an assumption
+> written down without being checked, which is the exact failure the standing verify-docs rule in
+> `PLAN.md` exists to prevent.
+
+**The consequence, and it is the trap in this gate.** Pushing the repo as the sole input means Claude
+Design faithfully extracts what the repo currently contains — shadcn's default neutral greys, Geist,
+the default radius. Not wrong, but characterless, and it would reproduce the generic aesthetic above
+while laundering it through a design system so it looks deliberate.
+
+**Decided: the developer supplies real brand input first (2026-08-04).** Ordering matters, because
+whatever exists first is what the extraction anchors on:
+
+1. **Developer, at claude.ai/design, before any push.** Onboarding: create or pick the org, then
+   upload the inspiration — screenshots, reference apps, a palette, anything with an opinion in it.
+   This establishes the **identity**: colour and type. A browser activity with file uploads; the
+   agent cannot do this half.
+2. **Then `/design-sync` push from Claude Code.** This sends the **structure** — token slots, the
+   density axis, the primitives, and `DESIGN.md`'s rules. Note it is not a repo link: the tool builds
+   a bundle from local files and uploads it under a plan the developer approves path-by-path.
+3. **Then pull down**, landing the chosen values in `globals.css`. Gate 11 closes at this step, not
+   before — which is why its progress row sits at 🟡 until the values arrive.
+
+The two inputs are complementary rather than competing: step 1 supplies the look, step 2 supplies the
+skeleton and the constraints the look has to survive.
 
 ### Two formatting decisions, recorded once in `DESIGN.md`
 
@@ -307,6 +337,17 @@ exist, and pre-empting them means reconciling two component kits at Gate 13.
 **bidirectional** — push sends local tokens and primitives up so generated screens use real
 components rather than placeholders; pull brings canvas work back down. Work can therefore continue
 in the Claude Design web UI or in Claude Code; neither surface is a dead end.
+
+**Verified 2026-08-04.** Claude Design is a design-system project surface at **claude.ai/design**,
+under the normal claude.ai login; two-way sync with Claude Code shipped in the 2026-06-17 overhaul.
+The brand-input step happens in the web UI **before** the first push — see the corrected sequence
+under Gate 11, which this gate assumes has already run. Two mechanics worth knowing before starting:
+
+- **The first call prompts for design-system scopes** beyond the normal login.
+- **Writes are gated on an explicit approved plan.** The tool locks the exact set of paths it will
+  write and delete, plus the local directory it may read from, and the developer sees that list
+  independently of anything the agent says about it. Run it on a clean tree so the resulting diff is
+  reviewable.
 
 **The brief's centerpiece is the NOT-SUPPORTED list above**, stated as loudly as the supported half.
 Left unconstrained, a design tool will produce per-row trash icons, sortable column headers,
