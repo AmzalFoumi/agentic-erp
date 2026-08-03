@@ -13,6 +13,24 @@ import nextTs from "eslint-config-next/typescript";
  * They are `error`, not `warn`, deliberately. A warning is a rule that has
  * already been broken and nobody noticed.
  */
+/**
+ * Shared between the two `no-restricted-imports` blocks below. ESLint resolves
+ * that rule by last-match-wins rather than by merging, so the second block has
+ * to restate everything the first one says. Declaring the entries once is what
+ * keeps "restate" from turning into "drift".
+ */
+const restrictedOpenapiFetch = {
+  name: "openapi-fetch",
+  message:
+    "Only src/lib/api may construct an API client. Import { api } from '@/lib/api/client' instead.",
+};
+
+const restrictedSchema = {
+  group: ["**/lib/api/schema", "**/lib/api/schema.d"],
+  message:
+    "schema.d.ts is generated build output. Import types from '@/lib/api/client', which re-exports them.",
+};
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -45,29 +63,8 @@ const eslintConfig = defineConfig([
       "no-restricted-imports": [
         "error",
         {
-          paths: [
-            {
-              name: "openapi-fetch",
-              message:
-                "Only src/lib/api may construct an API client. Import { api } from '@/lib/api/client' instead.",
-            },
-            {
-              name: "server-only",
-              // Not an architecture rule — a correctness one. This module is a
-              // marker that makes bundling into client code a build error; it
-              // belongs on modules that hold secrets or server state, not
-              // sprinkled through the UI where it just breaks Client Components.
-              message:
-                "server-only marks transport and identity modules under src/lib. Components should not import it.",
-            },
-          ],
-          patterns: [
-            {
-              group: ["**/lib/api/schema", "**/lib/api/schema.d"],
-              message:
-                "schema.d.ts is generated build output. Import types from '@/lib/api/client', which re-exports them.",
-            },
-          ],
+          paths: [restrictedOpenapiFetch],
+          patterns: [restrictedSchema],
         },
       ],
       "no-restricted-globals": [
@@ -76,6 +73,42 @@ const eslintConfig = defineConfig([
           name: "fetch",
           message:
             "Only src/lib/api may call fetch. Use the typed client from '@/lib/api/client'.",
+        },
+      ],
+    },
+  },
+
+  /**
+   * Rule 1b — `server-only` is scoped to `src/lib`, not to `src/lib/api`.
+   *
+   * Not an architecture rule but a correctness one. `server-only` is a marker
+   * that turns bundling a module into client code into a build error. It
+   * belongs on the modules that hold secrets or server state — the transport
+   * client and the identity seam — and nowhere else, because in a component it
+   * does not protect anything, it just breaks Client Components.
+   *
+   * Scoped one directory wider than rule 1 on purpose: `src/lib/auth` must
+   * still not call `fetch`, but it is exactly the kind of module that should
+   * carry the marker. This block comes after rule 1 and both would set
+   * `no-restricted-imports`, where the last match wins — hence the shared
+   * constants above, so the two lists cannot drift apart.
+   */
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/lib/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            restrictedOpenapiFetch,
+            {
+              name: "server-only",
+              message:
+                "server-only marks transport and identity modules under src/lib. Components should not import it.",
+            },
+          ],
+          patterns: [restrictedSchema],
         },
       ],
     },
