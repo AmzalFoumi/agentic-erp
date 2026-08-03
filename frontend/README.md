@@ -13,9 +13,13 @@ Source lives under `src/`. Check `docs/PLAN.md`'s progress table for the current
 npm run dev          # dev server -> http://localhost:3000
 npm run build        # production build
 npx tsc --noEmit     # type check
-npm run lint         # ESLint, incl. the restricted-import architecture rules
+npm run lint         # ESLint
 npm run api:types    # regenerate src/lib/api/schema.d.ts from FastAPI's /openapi.json (Gate 10)
 ```
+
+`api:types`, and the `no-restricted-imports` architecture rules that make `lint` enforce the
+boundary described in `docs/FRONTEND-PLAN.md`, both land at Gate 10 — there is nothing to restrict
+until `src/lib/api` exists.
 
 Next 16 runs Turbopack by default, so `--turbopack` is not passed, and `next lint` no longer exists —
 `npm run lint` calls `eslint` directly.

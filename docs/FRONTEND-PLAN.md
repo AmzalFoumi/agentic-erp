@@ -198,6 +198,39 @@ Three things Gate 8 added that the design may rely on:
 The `error` field is a closed union of ten values, so a `switch` over it can be exhaustively checked
 by TypeScript. Handle every case; the compiler will insist.
 
+### Found at Gate 10: the error envelope is not in `/openapi.json` — one file is hand-written
+
+**The finding.** `backend/api/errors.py` produces error responses from app-level exception handlers
+that return raw `JSONResponse` dicts. There is no Pydantic model and no `responses={...}` declaration
+on any route, and FastAPI documents only what it is told about — so the envelope
+(`{error, detail, fields?}`) never reaches `/openapi.json`. The generator cannot see it, and
+`openapi-fetch`'s `error` branch would be `unknown`.
+
+**The stopgap, shipped at Gate 10.** `frontend/src/lib/api/errors.ts` — hand-written: the
+`ApiErrorCode` union of ten names, the `ApiError` interface, and an `isApiError` type guard. It is
+the **only** file in `src/lib/api` that is not generated, and therefore the only place the frontend
+restates the backend from memory — precisely the failure mode the rest of this gate removes. Add an
+eleventh error name in Python and nothing here notices.
+
+It is contained to one module on purpose, so the debt stays visible rather than spreading into
+per-screen error handling.
+
+**The real fix — a backend gate, owed after the frontend gates land.** Declare the envelope once and
+let it flow into the document:
+
+1. Add an `ErrorResponse` Pydantic model in `backend/api/` with `error`, `detail`, and optional
+   `fields`. Type `error` as the same `Literal` union Gate 8 already introduced, so the ten names
+   have exactly one definition.
+2. Attach `responses={...: {"model": ErrorResponse}}` at router/app level for the statuses
+   `errors.py` can emit. This is documentation only — the handlers keep working unchanged.
+3. Have the handlers construct `ErrorResponse` and dump it rather than building dicts inline, so what
+   is documented and what is sent cannot drift.
+4. Regenerate `schema.d.ts`, then **delete `frontend/src/lib/api/errors.ts`** and import the
+   generated types instead. The stopgap deleting itself is the signal the fix is complete.
+
+Not done during Gate 10 deliberately: it touches `backend/api/`, its tests, and its `lint-imports`
+contract in the middle of a frontend gate. Ten strings hold fine until then.
+
 **NOT supported — do not design:**
 
 no delete or archive · no sorting UI · no bulk operations · no auth, users, avatars, or sign-out ·
@@ -313,7 +346,9 @@ either.
 
 ## Deferred, as decisions rather than oversights
 
-Soft-delete / archive · a sort parameter · clearing `category` back to NULL · a stock-movement ledger
+**`ErrorResponse` as a documented Pydantic model** so `errors.ts` can be generated rather than
+hand-maintained (see Gate 10 above — this one is owed as soon as the frontend gates close) ·
+soft-delete / archive · a sort parameter · clearing `category` back to NULL · a stock-movement ledger
 so adjustment `reason` is stored · **auth provider** (see `AUTH-PLAN.md`) · **MCP Streamable HTTP
 transport and its OAuth resource-server stack** (see `BACKEND-PLAN.md`) · **the agent service
 itself** · deployment shape, production origin, and therefore the real `CORS_ORIGINS` and
