@@ -1,0 +1,46 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+import { cn } from "@/lib/utils";
+
+const links = [
+  { href: "/products", label: "Products" },
+  { href: "/products/new", label: "New product" },
+];
+
+/**
+ * Exactly two destinations, deliberately — see the capability inventory in
+ * docs/FRONTEND-PLAN.md. No dashboard, no reports, no settings.
+ */
+export function Nav() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="flex w-48 shrink-0 flex-col gap-stack border-r border-border bg-sidebar px-3 py-section">
+      {links.map((link) => {
+        // "/products" must not stay highlighted while on "/products/new".
+        const active =
+          link.href === "/products"
+            ? pathname === "/products" || /^\/products\/\d+/.test(pathname)
+            : pathname.startsWith(link.href);
+
+        return (
+          <Link
+            key={link.href}
+            href={link.href}
+            className={cn(
+              "rounded-(--radius) px-3 text-left text-sm h-control flex items-center",
+              active
+                ? "bg-secondary font-medium text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {link.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}

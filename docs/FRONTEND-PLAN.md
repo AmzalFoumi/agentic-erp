@@ -619,17 +619,42 @@ been abused.
 
 ## Gate 13 — Handoff and build
 
-**Capability audit first, before a line of TSX.** Every interactive element in the handoff bundle
-maps to a real endpoint, or it is deleted from the design. Anything genuinely wanted becomes a new
-backend gate.
+**Amended 2026-08-05: the ordering above is reversed for this build, by explicit developer decision.**
+The plan as originally written ran the capability audit *before* any TSX, deleting unsupported
+affordances in the canvas where it costs nothing. The developer reviewed the generated
+`Inventory.dc.html` (Gate 12d/e) and found it already close to the capability inventory — no delete
+button, no sort headers, no reason field, money formatted, `category` nullable, `created_by`/
+`updated_by` literal `"system"`. Given that, the call was: **build the six screens as generated, and
+surface whatever doesn't match the capability inventory afterward, as a decision list — not a
+pre-build deletion pass.** This is a scope decision, not an oversight; it trades "cheapest possible
+fix" for "see the real thing before judging it." Recorded here so a later reader does not mistake the
+order for the original plan.
 
-Explicitly forbidden: shipping a disabled button with `// TODO: no endpoint yet`. That permanently
-moves the design's problems into the codebase, where they stop being visible as design decisions.
+Explicitly still forbidden: shipping a disabled button with `// TODO: no endpoint yet`. The reversal
+above is about *when* mismatches are surfaced, not about hiding them — 13g exists precisely so nothing
+found while building gets silently shipped or silently dropped.
 
-Then: extract the domain component kit _from_ the generated screens rather than reconciling against a
-pre-built one; wire to the typed client; RSC for reads, Server Actions for mutations. Component tests
-run against MSW handlers typed from the generated schema, so fixtures cannot drift from the contract
-either.
+Broken into stop gates, each ending with a suggested commit for manual `git commit`:
+
+| Gate | What | 
+|---|---|
+| 13a | Primitives (`table`, `input`, `label`, `card`, `badge`, `skeleton` via developer-run `shadcn add`) + app shell — nav, density toggle, light/dark toggle, agent region |
+| 13b | Product list — four states, search, pagination, wired to the typed client |
+| 13c | Product detail |
+| 13d | Create + Edit forms — Server Actions, duplicate-SKU error under the `sku` field |
+| 13e | Adjust stock |
+| 13f | Agent panel, shipped in its one real state: **unavailable**. The design specifies six states; five have no backing service yet — see the carve-out in "The agent chat surface" above. Building those five is a 13g item, not done here |
+| 13g | Capability/deviation list — everything found while building that doesn't match the brief exactly, for the developer to decide, not delete unilaterally |
+| 13h | Cleanup — delete `dev-tokens/page.tsx` (only after density tokens have a real consumer, so Tailwind doesn't purge them from under it — see the Gate 12d note above) and `src/lib/api/errors.ts` (once a real screen reads the generated `ErrorResponse`) |
+
+**Also decided 2026-08-05: light/dark is in scope**, alongside density, not just density. The generated
+design added a `Light`/`Dark` toggle beyond what Gate 11 specified; `globals.css` already carries a
+full `.dark` palette from shadcn's default theming, so this costs nothing to keep and was kept.
+
+Then, once the screens exist: extract the domain component kit _from_ them rather than reconciling
+against a pre-built one; wire to the typed client; RSC for reads, Server Actions for mutations.
+Component tests run against MSW handlers typed from the generated schema, so fixtures cannot drift
+from the contract either.
 
 ---
 

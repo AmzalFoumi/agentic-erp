@@ -2,6 +2,11 @@ import type { Metadata } from "next";
 import { Figtree, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
+import { AgentPanel } from "@/components/shell/agent-panel";
+import { DensityToggle } from "@/components/shell/density-toggle";
+import { Nav } from "@/components/shell/nav";
+import { ThemeToggle } from "@/components/shell/theme-toggle";
+
 /*
  * The design system specifies Figtree for UI and IBM Plex Mono for data. It
  * delivered them as an @import from fonts.googleapis.com, which is not shippable
@@ -43,7 +48,24 @@ export default function RootLayout({
       data-density="dense"
       className={`${fontSans.variable} ${fontMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {/* App header */}
+        <div className="flex items-center justify-between border-b border-border bg-card px-5 py-3">
+          <div className="text-sm font-semibold">Inventory</div>
+          <div className="flex items-center gap-4">
+            <DensityToggle />
+            <ThemeToggle />
+          </div>
+        </div>
+
+        <div className="flex flex-1 min-h-0">
+          <Nav />
+          <main className="flex-1 min-w-0 overflow-auto p-section">
+            {children}
+          </main>
+          <AgentPanel />
+        </div>
+      </body>
     </html>
   );
 }
