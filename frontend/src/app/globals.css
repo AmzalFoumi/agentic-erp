@@ -19,12 +19,13 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   /*
-   * next/font sets --font-geist-sans on <html> (see app/layout.tsx). This
-   * previously read `var(--font-sans)` — a self-reference that resolved to
-   * nothing, so `font-sans` silently fell back to the browser default.
+   * next/font sets --font-app-sans / --font-app-mono on <html> (see
+   * app/layout.tsx). This once read `var(--font-sans)` — a self-reference that
+   * resolved to nothing, so `font-sans` silently fell back to the browser
+   * default. Figtree for UI, IBM Plex Mono for numeric columns.
    */
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-app-sans);
+  --font-mono: var(--font-app-mono);
   --font-heading: var(--font-sans);
 
   /*
@@ -72,6 +73,14 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-stock-ok: var(--stock-ok);
+  --color-stock-ok-surface: var(--stock-ok-surface);
+  --color-stock-low: var(--stock-low);
+  --color-stock-low-surface: var(--stock-low-surface);
+  --color-stock-out: var(--stock-out);
+  --color-stock-out-surface: var(--stock-out-surface);
+  --color-stock-over: var(--stock-over);
+  --color-stock-over-surface: var(--stock-over-surface);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -81,73 +90,121 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/**
+ * Values from the Claude Design system ("ERP Design System Setup", 2026-08-04),
+ * mapped onto shadcn's semantic names rather than adopting theirs.
+ *
+ * That mapping is the whole trick. shadcn components read --background,
+ * --border, --primary and so on; keep the names and every component ever
+ * installed inherits this system for free. Adopt --bg-page / --text-primary
+ * instead and each one needs patching on install.
+ *
+ * Their identity, preserved: Figtree + IBM Plex Mono, accent hue 258
+ * (violet-blue), true-neutral greys at chroma ~0.005 hue 260, and a sharp
+ * shape language — radius drops from shadcn's 0.625rem to 0.25rem.
+ *
+ * Their px type scale is deliberately NOT carried over. px ignores the reader's
+ * browser font size, which is a real regression on a screen someone reads all
+ * day. Tailwind's rem-based scale stays.
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.99 0.002 260);
+  --foreground: oklch(0.205 0.005 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.205 0.005 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.205 0.005 260);
+  --primary: oklch(0.5 0.18 258);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.953 0.004 260);
+  --secondary-foreground: oklch(0.205 0.005 260);
+  --muted: oklch(0.977 0.003 260);
+  --muted-foreground: oklch(0.5 0.008 260);
+  --accent: oklch(0.953 0.004 260);
+  --accent-foreground: oklch(0.205 0.005 260);
+  --destructive: oklch(0.52 0.2 25);
+  --border: oklch(0.885 0.005 260);
+  --input: oklch(0.885 0.005 260);
+  --ring: oklch(0.5 0.18 258);
+  --chart-1: oklch(0.5 0.18 258);
+  --chart-2: oklch(0.62 0.15 152);
+  --chart-3: oklch(0.72 0.16 75);
+  --chart-4: oklch(0.6 0.14 300);
+  --chart-5: oklch(0.5 0.008 260);
+  --radius: 0.25rem;
+  --sidebar: oklch(0.977 0.003 260);
+  --sidebar-foreground: oklch(0.205 0.005 260);
+  --sidebar-primary: oklch(0.5 0.18 258);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.953 0.004 260);
+  --sidebar-accent-foreground: oklch(0.205 0.005 260);
+  --sidebar-border: oklch(0.885 0.005 260);
+  --sidebar-ring: oklch(0.5 0.18 258);
+
+  /*
+   * Stock status. Not part of shadcn's set — added, not substituted.
+   *
+   * Four states because stock has four meanings, and `--destructive` is not one
+   * of them: destructive is for an irreversible action the user is about to
+   * take, whereas out-of-stock is a fact about the world. Sharing the token
+   * would make "delete this" and "we sold out" the same colour.
+   */
+  --stock-ok: oklch(0.52 0.15 152);
+  --stock-ok-surface: oklch(0.93 0.05 152);
+  --stock-low: oklch(0.58 0.17 70);
+  --stock-low-surface: oklch(0.94 0.06 80);
+  --stock-out: oklch(0.52 0.2 25);
+  --stock-out-surface: oklch(0.93 0.05 25);
+  --stock-over: oklch(0.5 0.14 300);
+  --stock-over-surface: oklch(0.93 0.04 305);
 }
 
+/*
+ * Their dark theme keyed on [data-theme="dark"]; rewritten onto `.dark`, which
+ * is what shadcn's components and the `dark:` variant above already use.
+ */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(0.19 0.005 260);
+  --foreground: oklch(0.95 0.003 260);
+  --card: oklch(0.23 0.005 260);
+  --card-foreground: oklch(0.95 0.003 260);
+  --popover: oklch(0.23 0.005 260);
+  --popover-foreground: oklch(0.95 0.003 260);
+  --primary: oklch(0.68 0.14 258);
+  --primary-foreground: oklch(0.16 0.01 258);
+  --secondary: oklch(0.27 0.006 260);
+  --secondary-foreground: oklch(0.95 0.003 260);
+  --muted: oklch(0.27 0.006 260);
+  --muted-foreground: oklch(0.74 0.006 260);
+  --accent: oklch(0.27 0.006 260);
+  --accent-foreground: oklch(0.95 0.003 260);
+  --destructive: oklch(0.6 0.2 25);
+  --border: oklch(0.34 0.006 260);
+  --input: oklch(0.34 0.006 260);
+  --ring: oklch(0.68 0.14 258);
+  --chart-1: oklch(0.68 0.14 258);
+  --chart-2: oklch(0.62 0.15 152);
+  --chart-3: oklch(0.72 0.16 75);
+  --chart-4: oklch(0.6 0.14 300);
+  --chart-5: oklch(0.74 0.006 260);
+  --sidebar: oklch(0.23 0.005 260);
+  --sidebar-foreground: oklch(0.95 0.003 260);
+  --sidebar-primary: oklch(0.68 0.14 258);
+  --sidebar-primary-foreground: oklch(0.16 0.01 258);
+  --sidebar-accent: oklch(0.27 0.006 260);
+  --sidebar-accent-foreground: oklch(0.95 0.003 260);
+  --sidebar-border: oklch(0.34 0.006 260);
+  --sidebar-ring: oklch(0.68 0.14 258);
+
+  /* Lifted for contrast against dark surfaces; surfaces darkened to match. */
+  --stock-ok: oklch(0.72 0.15 152);
+  --stock-ok-surface: oklch(0.3 0.06 152);
+  --stock-low: oklch(0.78 0.15 75);
+  --stock-low-surface: oklch(0.32 0.07 70);
+  --stock-out: oklch(0.7 0.18 25);
+  --stock-out-surface: oklch(0.3 0.09 25);
+  --stock-over: oklch(0.7 0.13 300);
+  --stock-over-surface: oklch(0.3 0.08 300);
 }
 
 /**

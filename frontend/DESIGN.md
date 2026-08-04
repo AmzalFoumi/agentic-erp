@@ -31,9 +31,43 @@ browse, so the quality of the result is set by the quality of the inspiration up
 current greys are shadcn defaults and a placeholder, not a decision — until this paragraph says
 otherwise, nothing has chosen them. See `docs/FRONTEND-PLAN.md`, Gate 11.
 
-`--destructive` is the only colour with a fixed meaning: a real, irreversible-feeling failure. It is
-not the colour of low stock. Low stock is a normal operating condition and gets a warning treatment,
-not an alarm; if everything on the screen is red, nothing is.
+`--destructive` is the only shadcn colour with a fixed meaning: an irreversible action the user is
+about to take. **It is not the colour of out-of-stock.** Destructive is about intent; stock status is
+a fact about the world. Sharing the token would make "delete this" and "we sold out" read as the same
+kind of event.
+
+### Stock status — four states, added alongside shadcn's set
+
+`stock-ok`, `stock-low`, `stock-out`, `stock-over`, each with a matching `-surface` for badge
+backgrounds. Green, amber, red, violet.
+
+Low stock is a **normal operating condition** and gets a warning treatment, not an alarm — if every
+row is red, nothing is. Only `stock-out` reads as urgent, because only that one means a customer is
+standing in front of an empty shelf.
+
+> **These four states need a threshold the API does not have yet.** "Low" and "over" are meaningless
+> without a per-product reorder level and maximum. The design defines them anyway — deliberately, as
+> a decision — and the backend work is recorded in `docs/PLAN.md`. Until that field exists, screens
+> render `stock-ok` and `stock-out` only; `stock-low` and `stock-over` are defined, unused, and
+> visible in the design as what the data is missing rather than as a hardcoded guess.
+
+The hardcoded `qty <= 12` in the imported design's test page is exactly the failure this rule
+prevents: a threshold invented in a stylesheet, applying equally to milk and to rice.
+
+---
+
+## Type
+
+**Figtree** for UI, **IBM Plex Mono** for numeric columns — money, quantities, SKUs — where
+fixed-width digits are the point rather than a preference. Both SIL OFL 1.1, both loaded through
+`next/font` and self-hosted rather than fetched from Google at runtime.
+
+Self-hosting means the build redistributes the font files, which carries an attribution obligation.
+See [`THIRD-PARTY.md`](./THIRD-PARTY.md) — that file is load-bearing, not boilerplate.
+
+The design system delivered a **px** type scale. It was not adopted: px ignores the reader's browser
+font size, which is a real accessibility regression on a screen someone reads for hours. Tailwind's
+rem scale stays.
 
 ---
 

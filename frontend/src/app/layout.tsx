@@ -1,14 +1,25 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Figtree, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+/*
+ * The design system specifies Figtree for UI and IBM Plex Mono for data. It
+ * delivered them as an @import from fonts.googleapis.com, which is not shippable
+ * here: a runtime @import is a render-blocking round trip on every load and
+ * discloses every visitor's IP to a third party. next/font downloads at build
+ * time and self-hosts, so the same typefaces cost nothing at runtime.
+ *
+ * IBM Plex Mono carries the numeric columns — money, quantities, SKUs — where
+ * fixed-width digits are the point rather than a stylistic preference.
+ */
+const fontSans = Figtree({
+  variable: "--font-app-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const fontMono = IBM_Plex_Mono({
+  variable: "--font-app-mono",
+  weight: ["400", "500", "600"],
   subsets: ["latin"],
 });
 
@@ -30,7 +41,7 @@ export default function RootLayout({
     <html
       lang="en"
       data-density="dense"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${fontSans.variable} ${fontMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

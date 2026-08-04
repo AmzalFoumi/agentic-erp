@@ -38,8 +38,8 @@
 | 8.5  | Docs split — `PLAN.md` reduced to index + shared rules; gates 0–8 to `BACKEND-PLAN.md`, auth to `AUTH-PLAN.md`, `FRONTEND.md` renamed | ✅ done — docs only, no code; every block moved verbatim, nothing removed                                                                                                            |
 | 9    | Scaffold Next.js + TypeScript + Tailwind v4 + shadcn/ui in `frontend/`                                                 | ✅ done on `feat/client/web`; next `16.2.12`, react `19.2.4`, tailwindcss `4.3.3`, `src/` layout, shadcn `base-nova` (Base UI, not Radix) — re-scaffolded off a stale-cache v15                                                                                                                                                                     |
 | 10   | Typed client from `/openapi.json`, contract-drift check, capability inventory, identity seam                           | ✅ done on `feat/client/web`; `openapi-fetch` + `openapi-typescript`, `schema.d.ts` generated and committed, `api:types:check` drift gate, two ESLint architecture rules, `getCurrentUser()` seam. Error envelope hand-written — backend debt recorded below |
-| 11   | Design tokens — `frontend/DESIGN.md` + `globals.css`, density axis, LKR money format                                   | 🟡 token *slots* defined on `feat/client/web`; `data-density` axis, tabular numerals, `DESIGN.md` with the LKR and timestamp rules. Palette and type still to be chosen in Claude Design |
-| 12   | Claude Design — `/design-sync` push, screens generated against real tokens                                             | ⬜ not started                                                                                                                                                                     |
+| 11   | Design tokens — `frontend/DESIGN.md` + `globals.css`, density axis, LKR money format                                   | ✅ done on `feat/client/web`; slots + `data-density` axis + tabular numerals, then real values reconciled in at 12b — Figtree/IBM Plex Mono, accent hue 258, sharp radius, four stock-status tokens |
+| 12   | Claude Design — reconcile the generated system, brief, screens. Subgates **12a–12e** in `FRONTEND-PLAN.md`              | 🟡 flow ran design→code, so this gate is a **reconciliation**. **12a** survey and **12b** token reconciliation done — values landed, Gate 11 closed. Next: **12c** the brief. Handed-back project is type `PROJECT_TYPE_PROJECT`, so 12d needs a new design-system project |
 | 13   | Handoff — capability audit, extract component kit, wire screens to the API                                             | ⬜ not started                                                                                                                                                                     |
 
 Gates 0–8 are detailed in **`docs/BACKEND-PLAN.md`**, gates 9–13 in **`docs/FRONTEND-PLAN.md`**.
@@ -110,6 +110,21 @@ backend from memory.
 **Do it after Gate 13, before further feature work on either side.** The full four-step fix, and the
 reason it was not done inside Gate 10, are in `docs/FRONTEND-PLAN.md` under Gate 10. Completion is
 unambiguous: `frontend/src/lib/api/errors.ts` gets deleted.
+
+**Add a per-product reorder level (and maximum) to `Product`.** Surfaced at Gate 12a: the design
+system defines four stock states — ok, low, out, over — but the API has no threshold field, so "low"
+and "over" are currently uncomputable. The imported design papered over this with a hardcoded
+`qty <= 12` in a stylesheet, which would apply the same threshold to milk and to rice.
+
+Scope: two nullable integer columns on `Product`, a migration, exposure through the existing
+read/update endpoints, and the same field on the MCP tool so the agent can set it. Nullable because
+most products will not have one, and a product without a reorder level simply has no low state rather
+than a default one.
+
+**This is a real feature, not debt** — it is design running ahead of the API, decided deliberately at
+Gate 12 rather than discovered at Gate 13. Until it lands the frontend renders only `stock-ok` and
+`stock-out`; the two unused tokens stay defined so the gap is visible in the code rather than
+forgotten. Sequence it with the `ErrorResponse` work above, after Gate 13.
 
 ---
 
