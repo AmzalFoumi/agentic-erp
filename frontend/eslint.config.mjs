@@ -46,6 +46,10 @@ const eslintConfig = defineConfig([
     // Committed so drift is a reviewable diff, never hand-edited, and there is
     // nothing to gain from linting it. See docs/FRONTEND-PLAN.md.
     "src/lib/api/schema.d.ts",
+    // DesignSync's own tool bundle and vendored dependencies — gitignored,
+    // not application code, not ours to fix.
+    ".ds-sync/**",
+    "ds-bundle/**",
   ]),
 
   /**

@@ -634,6 +634,27 @@ been abused.
 unavailable state described above. The other five states are item 1 in the Gate 13g list below —
 revisit once the agent service exists.
 
+**The five unbuilt states, recorded here so the spec outlives this chat (2026-08-05).** Read
+verbatim from `Inventory.dc.html` in the Claude Design project (`f94c1986-e4eb-4cf2-a320-f3c68181a901`,
+via the DesignSync MCP tool's `get_file`) rather than paraphrased from memory — the panel occupies the
+same `w-64`-ish right-hand region as the shipped `agent-panel.tsx`, swapping only its body. If the
+design project moves or the markup changes, re-fetch rather than trusting this snapshot.
+
+| State | Trigger | Content | Notes for the future build |
+|---|---|---|---|
+| **Idle / empty** | Default, before any message sent | A one-line description ("Ask it to look something up or make a change. It can do exactly what the forms can do — nothing more.") plus 3 example-prompt chips: *"What's low on stock right now?"*, *"Add 8 units to Sourdough loaf 800g"*, *"Create a new product for oat milk"* | Chips are static examples, not a saved-prompts feature — clicking one presumably fills the input, not shown as wired in the mock |
+| **Thinking** | Message sent, before any tokens/tool calls | "Thinking" label + three animated dots (staggered `shimmer` keyframe) | Pure animation state, no content to get wrong |
+| **Streaming reply** | Model producing a plain-text answer (no tool call) | Body text growing, trailing blinking cursor (`▍`, `blink` keyframe). Mock example: a two-product low-stock summary | Confirms the agent can answer *read* questions without a tool call — not every turn is a mutation |
+| **Tool call in progress** | Model about to call an MCP tool that mutates data | Uppercase label ("About to adjust stock"), a card naming the product and showing `12 → 20 (+8)` in tabular numerals, then **Confirm** / **Cancel** buttons | **This is the state the whole design exists to protect** — see "the tool-call-visible state is the one that gets skipped" above. The user approves the exact delta before it's applied; this is not optional UX polish |
+| **Success** | Tool call completed | "Done — updated Sourdough loaf 800g to 20 units.", a "View product →" link (routes to the affected product's detail page), and `updated_by: system` shown in mono, small and muted | The `updated_by: system` line is deliberate per the attribution rule above — it doesn't hide that agent writes and human writes are indistinguishable today |
+| **Refusal** | Model declines — asked for something outside the capability inventory | Plain sentence in a muted card, e.g. "I can't do that — deleting products isn't supported by this system." | Confirms refusal text should name *why* (maps to a NOT-SUPPORTED item), not a generic "I can't help with that" |
+
+Two behaviours shared across all six interactive states, visible in the mock's input footer: a
+disabled-vs-enabled input (`agentInputDisabled`) and its placeholder text swaps to "Assistant
+unavailable" only in the unavailable state — every other state shows "Ask the assistant…" and is
+enabled. Density and dark-mode toggles apply to the panel exactly as elsewhere; no agent-specific
+styling exists outside the states above.
+
 ---
 
 ## Gate 13 — Handoff and build
@@ -669,6 +690,18 @@ Broken into stop gates, each ending with a suggested commit for manual `git comm
 **Also decided 2026-08-05: light/dark is in scope**, alongside density, not just density. The generated
 design added a `Light`/`Dark` toggle beyond what Gate 11 specified; `globals.css` already carries a
 full `.dark` palette from shadcn's default theming, so this costs nothing to keep and was kept.
+
+**Amended 2026-08-05: dark-mode toggling moved onto `next-themes`.** The first pass hand-rolled it —
+`useState` + `localStorage` + a `useEffect` toggling the `.dark` class — which is exactly the pattern
+`react-hooks/set-state-in-effect` flags (`npm run lint` caught it) and which cannot avoid a
+flash-of-wrong-theme or a hydration mismatch on its own, because the server has no way to know the
+stored preference before it renders. `next-themes` is shadcn's own documented pairing for the class
+strategy already in use: it sets `.dark` from an inline script before hydration, so server and client
+never disagree. `frontend/src/components/shell/theme-provider.tsx` wraps it (one seam, same reasoning
+as `src/lib/api/client.ts`); `theme-toggle.tsx` now calls `useTheme()` and gates its label behind a
+`mounted` flag, the one place a deliberate client/server text mismatch is still allowed and is
+suppressed with `suppressHydrationWarning`. The density toggle keeps its own hand-rolled version —
+there's no equivalent library for a project-specific concept.
 
 Then, once the screens exist: extract the domain component kit _from_ them rather than reconciling
 against a pre-built one; wire to the typed client; RSC for reads, Server Actions for mutations.

@@ -5,6 +5,7 @@ import "./globals.css";
 import { AgentPanel } from "@/components/shell/agent-panel";
 import { DensityToggle } from "@/components/shell/density-toggle";
 import { Nav } from "@/components/shell/nav";
+import { ThemeProvider } from "@/components/shell/theme-provider";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 
 /*
@@ -43,28 +44,35 @@ export default function RootLayout({
     // an effect, so the first paint is already at the right row height. A
     // client toggle can overwrite the attribute later; nothing else changes.
     // See frontend/DESIGN.md.
+    // suppressHydrationWarning is next-themes' documented requirement on
+    // <html>: it sets the `.dark` class from an inline script before React
+    // hydrates, which is an intentional, expected mismatch React would
+    // otherwise warn about.
     <html
       lang="en"
       data-density="dense"
       className={`${fontSans.variable} ${fontMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
-        {/* App header */}
-        <div className="flex items-center justify-between border-b border-border bg-card px-5 py-3">
-          <div className="text-sm font-semibold">Inventory</div>
-          <div className="flex items-center gap-4">
-            <DensityToggle />
-            <ThemeToggle />
+        <ThemeProvider>
+          {/* App header */}
+          <div className="flex items-center justify-between border-b border-border bg-card px-5 py-3">
+            <div className="text-sm font-semibold">Inventory</div>
+            <div className="flex items-center gap-4">
+              <DensityToggle />
+              <ThemeToggle />
+            </div>
           </div>
-        </div>
 
-        <div className="flex flex-1 min-h-0">
-          <Nav />
-          <main className="flex-1 min-w-0 overflow-auto p-section">
-            {children}
-          </main>
-          <AgentPanel />
-        </div>
+          <div className="flex flex-1 min-h-0">
+            <Nav />
+            <main className="flex-1 min-w-0 overflow-auto p-section">
+              {children}
+            </main>
+            <AgentPanel />
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -12,16 +12,18 @@ type Density = "dense" | "comfortable";
  * to restore a returning user's choice — nothing here decides the first
  * paint. See frontend/DESIGN.md's Density section.
  */
+function initialDensity(): Density {
+  if (typeof window === "undefined") return "dense";
+  const stored = window.localStorage.getItem("density");
+  return stored === "dense" || stored === "comfortable" ? stored : "dense";
+}
+
 export function DensityToggle() {
-  const [density, setDensity] = useState<Density>("dense");
+  const [density, setDensity] = useState<Density>(initialDensity);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem("density");
-    if (stored === "dense" || stored === "comfortable") {
-      setDensity(stored);
-      document.documentElement.setAttribute("data-density", stored);
-    }
-  }, []);
+    document.documentElement.setAttribute("data-density", density);
+  }, [density]);
 
   function apply(next: Density) {
     setDensity(next);
