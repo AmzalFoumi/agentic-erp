@@ -21,15 +21,16 @@ never a palette step. That indirection is the whole point: retheming is editing 
 grepping the component tree.
 
 **The concrete palette is supplied by the developer, not invented here.** This file defines the
-*slots*; the values arrive via Claude Design and get synced into `globals.css`. The named failure
+*slots*; the values arrive via Claude Design and get synced into `globals.css` — which happened at
+Gate 12b, so the values in there now are real decisions, not placeholders. The named failure
 mode is the generic AI aesthetic — the same gradients and the same soft rounded cards on every recent
 site — and the way to avoid it is to have a human supply real brand input, not to have the agent try
 harder.
 
-Note that Claude Design *generates* a system from what it is given rather than offering themes to
-browse, so the quality of the result is set by the quality of the inspiration uploaded first. The
-current greys are shadcn defaults and a placeholder, not a decision — until this paragraph says
-otherwise, nothing has chosen them. See `docs/FRONTEND-PLAN.md`, Gate 11.
+Claude Design does offer built-in systems to browse, but they are generic starting points rather than
+anything tied to this brand — so this project uses the other path, where the system is *generated*
+from real inputs. The quality of the result is set by the quality of the inspiration uploaded first.
+See `docs/FRONTEND-PLAN.md`, Gate 11, for the correction history behind that sentence.
 
 `--destructive` is the only shadcn colour with a fixed meaning: an irreversible action the user is
 about to take. **It is not the colour of out-of-stock.** Destructive is about intent; stock status is

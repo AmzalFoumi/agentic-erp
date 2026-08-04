@@ -265,7 +265,7 @@ Two of these deserve their reasoning recorded, because they will be asked about 
 
 Two artifacts with one strict anti-drift rule:
 
-> **`frontend/app/globals.css`'s `@theme` block is the only place a value exists.
+> **`frontend/src/app/globals.css`'s `@theme` block is the only place a value exists.
 > `frontend/DESIGN.md` names tokens and explains rationale but never restates a hex, rem, or ratio.**
 
 Two files that must agree by hand is a drift machine — the same mistake at file level that this
@@ -289,13 +289,24 @@ The agent defines the token _slots_; the values are supplied by the developer an
 `globals.css`.
 
 > **Corrected 2026-08-04, against the Claude Design setup docs.** This section previously said the
-> developer "browses themes and styles in Claude Design." **There is no theme picker or style
-> gallery.** Claude Design _generates_ a design system from inputs you give it — a linked or uploaded
-> repo, screenshots, existing design files, a PDF/PPTX carrying the brand, or individual assets like
-> a logo, a palette, or type specimens — and extracts colours, typography, components, and layout
-> patterns from those. The original wording described a feature that does not exist: an assumption
-> written down without being checked, which is the exact failure the standing verify-docs rule in
-> `PLAN.md` exists to prevent.
+> developer "browses themes and styles in Claude Design," which was too loose. Claude Design
+> _generates_ a design system from inputs you give it — a linked or uploaded repo, screenshots,
+> existing design files, a PDF/PPTX carrying the brand, or individual assets like a logo, a palette,
+> or type specimens — and extracts colours, typography, components, and layout patterns from those.
+> Generation, not selection, is how a system tied to *this* brand comes into being, and the quality
+> of the result is set by the quality of the input.
+>
+> **Corrected again the same day, from the UI itself.** The first correction overshot: it asserted
+> "there is no theme picker or style gallery," and the Add-a-design-system screen shows six
+> browsable built-ins — Modernist, Classical, Nocturne, Organic, Broadsheet, Industry. They exist and
+> they are selectable. What is true is narrower: **the built-ins are generic starting points, not
+> this project's brand**, so picking one would reintroduce the templated look this section is about.
+> The right sentence is "we are not using the gallery," not "there is no gallery."
+>
+> Both errors have the same shape — a claim about a system's capabilities written from a fragment
+> (a support article that omitted a feature) rather than from the system. The standing verify-docs
+> rule in `PLAN.md` covers the first; the second is the reminder that a correction is a claim too,
+> and gets checked on the same terms as what it replaced.
 
 **The consequence, and it is the trap in this gate.** Pushing the repo as the sole input means Claude
 Design faithfully extracts what the repo currently contains — shadcn's default neutral greys, Geist,
@@ -505,6 +516,37 @@ remove a feature.
 > Editing the system later is org settings → **Open** → **Remix**, which chats against the system
 > rather than a project. Not to be done mid-12d: changing the system while generating screens
 > against it leaves the screens disagreeing with `globals.css`.
+
+**Then a push happened anyway — commit `71c6abc`, 2026-08-04.** "No push is needed" was true of the
+*values* and false of the *direction of travel*. 12b pulled the design system's decisions into
+`globals.css` by hand, which leaves `globals.css` as the source of truth and the design system as a
+stale copy of an earlier conversation. Screens generated against a stale system would drift from the
+repo the moment anything in `globals.css` moved. The push closes that loop, so 12d generates against
+what the code actually says.
+
+Scope was **tokens and fonts only**, into a `PROJECT_TYPE_DESIGN_SYSTEM` project named
+*agentic-erp frontend*. No components: `src/components/ui/` holds one file, and seeding a kit into
+the design system is precisely the reconciliation Gate 13 exists to avoid. `dev-tokens/`, `src/lib/`,
+and everything outside `frontend/` were excluded — the last of those because `backend/.env` holds
+live database credentials, which is a permanent constraint on this operation and not a one-off.
+
+The sync is recorded in **`frontend/.design-sync/`** (config, conventions header, notes), committed
+so a re-sync starts from what the last one decided rather than from scratch. Two live cautions
+carried there rather than restated here: `config.json` points at **uncommitted `.next` dev-build
+artifacts** for both the compiled CSS and the fonts, so those paths go stale on any `.next` clean;
+and the render check was skipped deliberately, which stops being acceptable once components exist.
+
+**The density axis was verified to survive the compile, 2026-08-04.** This was the one failure that
+would have been silent. The compiled stylesheet keeps `[data-density="dense"]`,
+`[data-density="comfortable"]`, and the `:root` fallback as three separate blocks, and emits
+`.h-row { height: var(--row-h) }` — unresolved, so the attribute swap still works at runtime. That is
+what `@theme inline` is for and it held.
+
+> **A consequence to carry into Gate 13.** Those utilities exist in the build *only because
+> `dev-tokens/page.tsx` uses them*. That page is deleted at Gate 13. Delete it before components
+> reference the density tokens and Tailwind purges `h-row`, `p-cell-x`, and the rest from the output
+> — the tokens stay defined, the utilities vanish, and the axis quietly stops doing anything. Order
+> matters: build the components first, delete the page second.
 
 #### Gate 12e — Pull down
 
