@@ -202,7 +202,12 @@ Three things Gate 8 added that the design may rely on:
 The `error` field is a closed union of ten values, so a `switch` over it can be exhaustively checked
 by TypeScript. Handle every case; the compiler will insist.
 
-### Found at Gate 10: the error envelope is not in `/openapi.json` — one file is hand-written
+### ~~Found at Gate 10: the error envelope is not in `/openapi.json`~~ — **retracted at 12c**
+
+> **This whole section is wrong and is kept only so the mistake is legible.** `ErrorResponse` is
+> declared, attached to every route via `responses=`, tested, and present in the committed
+> `schema.d.ts` — all of it since Gate 8's commit `0c8c97e`. What remains is one deletion, recorded
+> in `PLAN.md`. Read the correction there, not the four-step plan below.
 
 **The finding.** `backend/api/errors.py` produces error responses from app-level exception handlers
 that return raw `JSONResponse` dicts. There is no Pydantic model and no `responses={...}` declaration
@@ -396,7 +401,88 @@ progress row goes 🟡 → ✅ here — the first point at which real values exi
 
 #### Gate 12c — The brief
 
-Written after 12b, so the brief can speak in tokens that exist. Contents below.
+Written after 12b, so the brief can speak in tokens that exist.
+
+> **The brief is a build artifact, not a document. It is assembled at handoff time and never
+> committed.** It was briefly written as `docs/DESIGN-BRIEF.md` on 2026-08-04 and deleted the same
+> day: roughly 70% of it restated the capability inventory below, the NOT-SUPPORTED list, and
+> `DESIGN.md`'s formatting rules, because its reader is a tool that cannot follow a link into this
+> repository. That is precisely the drift machine this project refuses everywhere else — a fifth
+> place where the endpoint table has to be kept true by hand, mitigated only by a note asking the
+> reader to be careful. `schema.d.ts` is the precedent: generated from the source of truth, never
+> authored. The brief is the same category, minus a generator.
+>
+> **So: assemble it into the scratchpad when a design tool needs it, paste it, discard it.** The
+> sources are this file's capability inventory, the screen list immediately below, `DESIGN.md`, and
+> a fresh read of `/openapi.json`. What survived into version control is only the part that had no
+> home — the screen list and the error-state table — and it lives here, where the rest of the
+> frontend plan already is.
+
+**Writing it turned up two errors in this project's own records**, both corrected in `PLAN.md`:
+`ErrorResponse` was already documented and generated (the Gate 10 finding above is retracted), and
+`reorder_level` already exists, so `stock-low` is backed by `needs_reorder` and only `stock-over` has
+nothing behind it. Both were assumptions carried forward instead of re-read — the standing
+verify-docs rule aimed at our own code rather than a third party's.
+
+---
+
+### Screen inventory — the fixed list
+
+Design and build these, and only these. An open brief ("design an inventory app") produces a
+Figma-grade product for an API with six endpoints.
+
+**1. App shell.** Persistent navigation, the density toggle, the agent region. Navigation has exactly
+two destinations — Products and New product. No dashboard, no reports, no account settings.
+
+**2. Product list — the primary screen**, the one someone has open all day. The table, one search
+input (name and SKU together, not an advanced filter panel), page-number pagination with a total, a
+row that navigates to detail, a link to create. Columns: SKU, name, category, cost, sell, stock,
+status.
+
+Four required states, and the third is the one that gets missed:
+
+- **Populated** — the default.
+- **Empty catalogue** — no products exist. The first-run screen; its only call to action is "add your
+  first product", because nothing else works with zero rows.
+- **Search returned nothing** — *different from the above*. The catalogue is fine, this query missed.
+  Offer clearing the search, not creating a product.
+- **Loading** — a skeleton at the real row height, so the page does not jump when data lands.
+
+**3. Product detail.** Every field including the audit columns. Two actions: edit, adjust stock. No
+delete.
+
+**4. Create form.** `sku`, `name`, `category` (optional), `unit`, `cost_price`, `sell_price`,
+`quantity_on_hand` as opening stock, `reorder_level`. Must show the duplicate-SKU error under the
+`sku` field — it is the failure that actually happens.
+
+**5. Edit form.** The same minus `sku` and `quantity_on_hand`. Show the SKU as read-only context, not
+a disabled input — a disabled input implies it could be enabled.
+
+**6. Adjust stock.** Signed delta. Show current quantity, the delta, and the resulting quantity
+before submitting; that arithmetic is the whole point of the screen. No reason field (see the
+capability inventory). Zero is rejected, and the result cannot go below zero — both need visible
+states.
+
+### Error states — mandatory, mapped to real codes
+
+Happy-path-only designs push these into the build, where they get invented ad hoc by whoever hits
+them first.
+
+| Situation | `error` | Treatment |
+|---|---|---|
+| Field validation failed | `RequestValidationError` | Per-input message from `fields`. Not a toast |
+| SKU already exists | `DuplicateError` | Under the `sku` input |
+| Business rule rejected it — zero delta, stock would go negative, negative price | `ValidationError` | Form-level, near the submit |
+| Product not found — stale link | `NotFoundError` | Full-page state with a way back to the list |
+| Backend unreachable | *(no response)* | Full-page state, offer retry. **Never fake an empty list** |
+
+Two standing rules: never show a raw error code to a user, and never show a bare "Something went
+wrong" when `detail` carries a real sentence.
+
+**The judging rule, which belongs in the brief every time it is assembled:** at Gate 13 every
+interactive element is checked against the capability inventory, and anything that does not map to a
+real endpoint is *deleted* rather than shipped disabled. Deleting in the canvas costs nothing. So a
+design with fewer affordances than feel natural is the constraint working, not a gap to fill.
 
 #### Gate 12d — Generate and review screens
 

@@ -45,14 +45,25 @@ Low stock is a **normal operating condition** and gets a warning treatment, not 
 row is red, nothing is. Only `stock-out` reads as urgent, because only that one means a customer is
 standing in front of an empty shelf.
 
-> **These four states need a threshold the API does not have yet.** "Low" and "over" are meaningless
-> without a per-product reorder level and maximum. The design defines them anyway — deliberately, as
-> a decision — and the backend work is recorded in `docs/PLAN.md`. Until that field exists, screens
-> render `stock-ok` and `stock-out` only; `stock-low` and `stock-over` are defined, unused, and
-> visible in the design as what the data is missing rather than as a hardcoded guess.
+**Three of the four are backed by the API; each maps to a field, never to a number written here.**
 
-The hardcoded `qty <= 12` in the imported design's test page is exactly the failure this rule
-prevents: a threshold invented in a stylesheet, applying equally to milk and to rice.
+| State | Comes from |
+|---|---|
+| `stock-out` | `quantity_on_hand === 0` |
+| `stock-low` | `needs_reorder` — computed by the backend, **never recomputed in the UI** |
+| `stock-ok` | neither of the above |
+| `stock-over` | nothing yet. Defined, unused. |
+
+`needs_reorder` is the important one. It is `quantity_on_hand <= reorder_level` *today*, and tomorrow
+it might account for lead time or seasonality. Deriving it in the UI would put that business rule in
+a third place neither adapter can see, so the UI and the agent could disagree about which products
+need reordering. Read the boolean; ignore the two numbers it came from.
+
+`stock-over` needs a per-product maximum that does not exist. It stays defined and unused so the gap
+is visible in the code rather than forgotten — see `docs/PLAN.md`.
+
+The hardcoded `qty <= 12` in the imported design's test page is exactly the failure this prevents: a
+threshold invented in a stylesheet, applying equally to milk and to rice.
 
 ---
 
