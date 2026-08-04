@@ -490,6 +490,22 @@ In the Claude Design web UI, against the brief. Reviewed against the capability 
 canvas**, where deleting something costs nothing. This is the cheapest place in the whole project to
 remove a feature.
 
+> **Corrected 2026-08-04, against the Claude Design setup docs.** 12a concluded this gate needed a
+> *new design-system project*, because the handed-back one was type `PROJECT_TYPE_PROJECT`. Wrong on
+> the premise: **a design system is not a project.** It lives in Claude Design *organization
+> settings*, and once its **Published** toggle is on, every project created in that org inherits its
+> colours, typography, and components automatically. `PROJECT_TYPE_PROJECT` is the right type for
+> generating screens.
+>
+> The type distinction only ever mattered for a `/design-sync` **push**, and no push is needed —
+> 12b already reconciled their values into `globals.css`, so the repo and the design system agree.
+> So 12d is: confirm Published is on, create an ordinary project in that org, paste the assembled
+> brief. Nothing to upload; the brand assets went in at onboarding.
+>
+> Editing the system later is org settings → **Open** → **Remix**, which chats against the system
+> rather than a project. Not to be done mid-12d: changing the system while generating screens
+> against it leaves the screens disagreeing with `globals.css`.
+
 #### Gate 12e — Pull down
 
 Bring the generated screens into the repo. Still no TSX — the build is Gate 13, and its capability
