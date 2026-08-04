@@ -37,9 +37,9 @@
 | 8    | Backend contract closure — `needs_reorder`, `{items,total}`, 422 `fields`, `Literal` error union, settings-driven CORS | ✅ done on `feat/fastapi/contract`; `pytest` green and `lint-imports` 3 contracts kept, both verified by the developer                                                              |
 | 8.5  | Docs split — `PLAN.md` reduced to index + shared rules; gates 0–8 to `BACKEND-PLAN.md`, auth to `AUTH-PLAN.md`, `FRONTEND.md` renamed | ✅ done — docs only, no code; every block moved verbatim, nothing removed                                                                                                            |
 | 9    | Scaffold Next.js + TypeScript + Tailwind v4 + shadcn/ui in `frontend/`                                                 | ✅ done on `feat/client/web`; next `16.2.12`, react `19.2.4`, tailwindcss `4.3.3`, `src/` layout, shadcn `base-nova` (Base UI, not Radix) — re-scaffolded off a stale-cache v15                                                                                                                                                                     |
-| 10   | Typed client from `/openapi.json`, contract-drift check, capability inventory, identity seam                           | ✅ done on `feat/client/web`; `openapi-fetch` + `openapi-typescript`, `schema.d.ts` generated and committed, `api:types:check` drift gate, two ESLint architecture rules, `getCurrentUser()` seam. Error envelope hand-written — backend debt recorded below |
-| 11   | Design tokens — `frontend/DESIGN.md` + `globals.css`, density axis, LKR money format                                   | ⬜ not started                                                                                                                                                                     |
-| 12   | Claude Design — `/design-sync` push, screens generated against real tokens                                             | ⬜ not started                                                                                                                                                                     |
+| 10   | Typed client from `/openapi.json`, contract-drift check, capability inventory, identity seam                           | ✅ done on `feat/client/web`; `openapi-fetch` + `openapi-typescript`, `schema.d.ts` generated and committed, `api:types:check` drift gate, two ESLint architecture rules, `getCurrentUser()` seam. Its "error envelope is undocumented" finding was **retracted at 12c** — see below |
+| 11   | Design tokens — `frontend/DESIGN.md` + `globals.css`, density axis, LKR money format                                   | ✅ done on `feat/client/web`; slots + `data-density` axis + tabular numerals, then real values reconciled in at 12b — Figtree/IBM Plex Mono, accent hue 258, sharp radius, four stock-status tokens |
+| 12   | Claude Design — reconcile the generated system, brief, screens. Subgates **12a–12e** in `FRONTEND-PLAN.md`              | 🟡 flow ran design→code, so this gate is a **reconciliation**. **12a** survey, **12b** token reconciliation, **12c** brief done — values landed, Gate 11 closed, two stale records corrected. The brief is a **build artifact, assembled at handoff and never committed**; there is no `docs/DESIGN-BRIEF.md`. **12d** half done: tokens + fonts pushed back to the design system (`71c6abc`, tokens-only, config in `frontend/.design-sync/`) and the density axis verified to survive the compile. Remaining: create a project in the org, paste the assembled brief, generate and review screens |
 | 13   | Handoff — capability audit, extract component kit, wire screens to the API                                             | ⬜ not started                                                                                                                                                                     |
 
 Gates 0–8 are detailed in **`docs/BACKEND-PLAN.md`**, gates 9–13 in **`docs/FRONTEND-PLAN.md`**.
@@ -100,16 +100,41 @@ Until both are false, `SystemActor` is acceptable _only_ because no unauthentica
 Kept here, in the always-read file, because it is work created by one half of the project and paid by
 the other — the kind of item that is otherwise only remembered by whoever wrote it.
 
-**Document the error envelope as a Pydantic model (`ErrorResponse`) in `backend/api/`.** Discovered
-at Gate 10: `api/errors.py` builds error responses as raw `JSONResponse` dicts, so the
-`{error, detail, fields?}` shape never reaches `/openapi.json` and the typed frontend client cannot
-generate it. The stopgap is `frontend/src/lib/api/errors.ts` — the one hand-written file in an
-otherwise fully generated `src/lib/api`, and therefore the one place the frontend restates the
-backend from memory.
+### ~~Document the error envelope as a Pydantic model~~ — **already done. Retracted 2026-08-04**
 
-**Do it after Gate 13, before further feature work on either side.** The full four-step fix, and the
-reason it was not done inside Gate 10, are in `docs/FRONTEND-PLAN.md` under Gate 10. Completion is
-unambiguous: `frontend/src/lib/api/errors.ts` gets deleted.
+Gate 10 recorded that `api/errors.py` returns raw `JSONResponse` dicts, so `{error, detail, fields?}`
+never reaches `/openapi.json`, and shipped `frontend/src/lib/api/errors.ts` as a hand-written
+stopgap. **That finding was wrong**, and it was wrong when it was written: `ErrorResponse` is
+declared in `backend/api/schemas.py`, attached to every route through `_errors(...)` in
+`backend/api/routes/products.py`, asserted by `test_api_products.py`, and already present in the
+committed `frontend/src/lib/api/schema.d.ts` — `fields` included. All of it landed in Gate 8's commit
+`0c8c97e`, two gates before it was reported missing.
+
+The lesson is the standing verify-docs rule turned inward: the claim was carried forward from an
+earlier reading of the backend rather than re-checked against the file, which is exactly the mistake
+the rule exists to prevent, aimed at our own code instead of a third party's.
+
+**What is actually owed, and it is now small and frontend-only:** delete
+`frontend/src/lib/api/errors.ts` and re-export the generated `ErrorResponse` from
+`src/lib/api/client.ts` instead. Nothing imports the stopgap today, so this is a deletion, not a
+migration. No backend gate. Do it at Gate 13, when the first screen needs to read an error.
+
+### Stock states: three of four are backed today
+
+`reorder_level` **exists** — a non-nullable integer on `Product`, settable on create and PATCH, and
+the backend already ships the computed `needs_reorder` on every product response. An earlier note
+here claimed the field was missing and scoped a migration for it; that was wrong for the same reason
+as the entry above.
+
+So the mapping is: `stock-out` is `quantity_on_hand == 0`, `stock-low` is `needs_reorder`, `stock-ok`
+is neither. **Only `stock-over` has nothing behind it** — that needs a per-product maximum, which
+genuinely does not exist.
+
+That one is deferred rather than built: overstock is a real concern for a supermarket, but it is a
+second threshold that every product would need populated to be useful, and no screen has yet
+demonstrated it is worth the column. The `stock-over` token stays defined and unused, so the gap is
+visible in the code rather than forgotten. Revisit after Gate 13, when real screens can say whether
+anyone would look at it.
 
 ---
 
