@@ -240,6 +240,13 @@ let it flow into the document:
 Not done during Gate 10 deliberately: it touches `backend/api/`, its tests, and its `lint-imports`
 contract in the middle of a frontend gate. Ten strings hold fine until then.
 
+**Moot, per the 12c retraction above.** The four-step plan assumed `ErrorResponse` needed to be
+*added* to the backend. It didn't — the retraction found it was already declared, attached via
+`responses=`, tested, and present in `schema.d.ts` since Gate 8's commit `0c8c97e`. No backend gate
+was ever owed; the only real step was always step 4, deleting the stopgap. That happened at Gate 13h
+(2026-08-05): `frontend/src/lib/api/errors.ts` deleted, no importers found, generated `ErrorResponse`
+already in use throughout (`lib/api-error.ts`'s `mapApiError`, every error-state screen).
+
 **NOT supported — do not design:**
 
 no delete or archive · no sorting UI · no bulk operations · no auth, users, avatars, or sign-out ·
@@ -553,6 +560,14 @@ what `@theme inline` is for and it held.
 Bring the generated screens into the repo. Still no TSX — the build is Gate 13, and its capability
 audit is the real gate. What lands here is design output for that audit to work against.
 
+**Closed 2026-08-05, by a different mechanism than planned.** The plan above assumed a manual
+export-and-paste. What actually happened: the six screens plus the agent panel's seven states were
+read directly out of the Claude Design project (`f94c1986-e4eb-4cf2-a320-f3c68181a901`) via the
+DesignSync MCP tool's `get_file` on `Inventory.dc.html` — no file left the design project and landed
+in the repo as an artifact; the markup was read into context and built from directly. Same review
+(against the capability inventory), same result (design output ready for Gate 13 to build against),
+no intermediate file. Gate 12 closes here — see the progress table in `PLAN.md`.
+
 ---
 
 ### What the brief must contain
@@ -615,6 +630,10 @@ behind something that looks finished; a region that says the assistant is unavai
 a service that is planned and reserved. If that region ever ships looking enabled, this exception has
 been abused.
 
+**Shipped 2026-08-05 (Gate 13f):** `frontend/src/components/shell/agent-panel.tsx`, exactly in the
+unavailable state described above. The other five states are item 1 in the Gate 13g list below —
+revisit once the agent service exists.
+
 ---
 
 ## Gate 13 — Handoff and build
@@ -643,9 +662,9 @@ Broken into stop gates, each ending with a suggested commit for manual `git comm
 | 13c | Product detail |
 | 13d | Create + Edit forms — Server Actions, duplicate-SKU error under the `sku` field |
 | 13e | Adjust stock |
-| 13f | Agent panel, shipped in its one real state: **unavailable**. The design specifies six states; five have no backing service yet — see the carve-out in "The agent chat surface" above. Building those five is a 13g item, not done here |
-| 13g | Capability/deviation list — everything found while building that doesn't match the brief exactly, for the developer to decide, not delete unilaterally |
-| 13h | Cleanup — delete `dev-tokens/page.tsx` (only after density tokens have a real consumer, so Tailwind doesn't purge them from under it — see the Gate 12d note above) and `src/lib/api/errors.ts` (once a real screen reads the generated `ErrorResponse`) |
+| 13f | Agent panel, shipped in its one real state: **unavailable**. The design specifies six states; five have no backing service yet — see the carve-out in "The agent chat surface" above. Building those five is a 13g item, not done here — ✅ done, built as part of 13a's shell work |
+| 13g | Capability/deviation list — everything found while building that doesn't match the brief exactly, for the developer to decide, not delete unilaterally — ✅ done, see "Gate 13g — Capability/deviation list" below |
+| 13h | Cleanup — delete `dev-tokens/page.tsx` (only after density tokens have a real consumer, so Tailwind doesn't purge them from under it — see the Gate 12d note above) and `src/lib/api/errors.ts` (once a real screen reads the generated `ErrorResponse`) — ✅ done, both deleted, no importers of `errors.ts` remained; see the Gate 10 "moot" note above |
 
 **Also decided 2026-08-05: light/dark is in scope**, alongside density, not just density. The generated
 design added a `Light`/`Dark` toggle beyond what Gate 11 specified; `globals.css` already carries a
@@ -656,14 +675,45 @@ against a pre-built one; wire to the typed client; RSC for reads, Server Actions
 Component tests run against MSW handlers typed from the generated schema, so fixtures cannot drift
 from the contract either.
 
+### Gate 13g — Capability/deviation list (2026-08-05)
+
+Written after all six screens (13a–13f) were built, per the developer's explicit reversal recorded
+above: build first, judge after. Nothing below was deleted or silently worked around — each is a
+place the build diverged from the generated mock or from an "ideal" behaviour, kept because it either
+matches a real constraint or was a reasonable call, flagged so the reasoning is visible rather than
+assumed.
+
+1. **Agent panel ships in one of the six designed states.** Only "unavailable" is real — see the
+   carve-out under "The agent chat surface" above. **Revisit once the agent service exists**: the
+   other five states (thinking, streaming, tool-call-in-progress, success, refusal) are designed
+   already (read via DesignSync at 12e) and just need wiring, not redesign.
+2. **Pagination is Prev/Next + "Page X of Y" text, not numbered page buttons.** The mock's fixture
+   data never showed more than one page, so numbered buttons were never actually exercised in the
+   design. Text pagination is simpler and correct against the real API's `limit`/`offset` shape.
+   Revisit only if numbered pages are wanted later — not agent-dependent.
+3. **Pagination Prev/Next use `aria-disabled` + `pointer-events-none` on an `<a>`, not a native
+   `disabled` attribute.** `<a>` has no disabled state; this is the standard accessible substitute.
+   No action pending.
+4. **`ClickableRow` (`frontend/src/app/products/_components/clickable-row.tsx`) uses `role="link"` +
+   `tabIndex` + `onKeyDown` on a `<tr>`, not a real `<a>`.** Table rows can't be wrapped in `<Link>`
+   without breaking table semantics. Functionally accessible, but a screen reader announces it
+   slightly differently than a native anchor. No action pending.
+5. **Adjust-stock sends no `reason` field**, though the mock shows one. Matches the capability
+   inventory above (`services/products.py` accepts and discards it) — not a deviation from what's
+   buildable, a deviation from the mock. Revisit if a stock-movement ledger ever lands (see
+   "Deferred" below).
+6. **No delete anywhere.** Matches the capability inventory; confirms it wasn't silently dropped.
+7. **No sorting on the product list.** The capability inventory has no server-side sort, and
+   client-side sorting a paginated-from-server list would only sort the visible page, which is
+   misleading. Left out entirely rather than half-implemented.
+
 ---
 
 ## Deferred, as decisions rather than oversights
 
-**`ErrorResponse` as a documented Pydantic model** so `errors.ts` can be generated rather than
-hand-maintained (see Gate 10 above — this one is owed as soon as the frontend gates close) ·
 soft-delete / archive · a sort parameter · clearing `category` back to NULL · a stock-movement ledger
 so adjustment `reason` is stored · **auth provider** (see `AUTH-PLAN.md`) · **MCP Streamable HTTP
 transport and its OAuth resource-server stack** (see `BACKEND-PLAN.md`) · **the agent service
-itself** · deployment shape, production origin, and therefore the real `CORS_ORIGINS` and
-`API_BASE_URL` values.
+itself, and with it the agent panel's five unbuilt states** (already designed at Gate 12e, wiring is
+a Gate 13g item — see above) · deployment shape, production origin, and therefore the real
+`CORS_ORIGINS` and `API_BASE_URL` values.
