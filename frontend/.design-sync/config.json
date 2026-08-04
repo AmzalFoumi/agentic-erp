@@ -1,0 +1,13 @@
+{
+  "projectId": "77b1dcd6-d0dc-453a-84a4-c8124bd8547f",
+  "pkg": "frontend",
+  "globalName": "InventoryDS",
+  "shape": "package",
+  "componentSrcMap": {},
+  "cssEntry": ".next/dev/static/chunks/src_app_globals_css_1igg3k2._.single.css",
+  "readmeHeader": ".design-sync/conventions.md",
+  "extraFonts": [
+    ".next/dev/static/chunks/[next]_internal_font_google_figtree_5bfed60f_module_css_1igg3k2._.single.css",
+    ".next/dev/static/chunks/[next]_internal_font_google_ibm_plex_mono_7f558fc3_module_css_1igg3k2._.single.css"
+  ]
+}
