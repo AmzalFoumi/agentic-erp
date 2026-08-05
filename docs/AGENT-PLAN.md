@@ -107,6 +107,21 @@ scoped to Flash-class models. Flash is also the right call on merit here — the
 loop is short, the tools are well described, and the latency of a demo panel matters more
 than the marginal reasoning quality.
 
+**Which Flash, settled at Gate 15a (2026-08-06): `gemini-3.5-flash-lite`, pinned.** The first
+version used the `gemini-flash-latest` alias, on the reasoning that a moving pointer never
+retires while a dated model does. The first real call returned **503 UNAVAILABLE** — the alias
+resolves to the newest release, which is the one under the heaviest load. "Always current" and
+"actually available" pull in opposite directions on a free tier, and availability won.
+
+The cost is not argued away: a dated model eventually retires and that pin is what breaks. It
+is acceptable only because the model is a **setting** (`GEMINI_MODEL` in `agent/.env`, read by
+`agent/config.py`), so the failure costs one line of config rather than a code change. Fallback
+order if it becomes unavailable: `gemini-3.5-flash`, then `gemini-2.5-flash`.
+
+**Open until Gate 16:** whether Flash-Lite is strong enough at *choosing tools*, which is a
+different skill from answering well and is not exercised at all by Gate 15a's single call.
+Re-check it against the real loop; move up to `gemini-3.5-flash` if it picks wrongly.
+
 ### Free-tier limits: what is knowable, and what is not
 
 **⚠️ Uncertain — settled at Gate 16.** Google's
@@ -245,14 +260,25 @@ The agent is **its own directory with its own venv**, a sibling of `backend/` an
 `backend/services/` — that restriction is the point of the whole design, and importing across
 the venv boundary would quietly undo it.
 
-### The four modules
+### The modules
 
 | Module | What it does | How it is used | What it depends on |
 |---|---|---|---|
+| `config.py` | Settings from `agent/.env`, validated at import | Imported by everything, including `_learning/` | `pydantic-settings` |
 | `mcp_client.py` | Owns the connection to the MCP server and exposes its tools as a toolset | Constructed once at startup, handed to `conversation.py` | Pydantic AI's `MCPToolset`, the running MCP server |
 | `conversation.py` | Runs a turn: model call, tool calls, approval interrupts, the reply | Called by `app.py` with our own types in and out | **The only module allowed to import `pydantic_ai`** |
 | `store.py` | Persists and loads conversations and messages | Called by `app.py` around each turn | SQLAlchemy, the `agent` Postgres schema |
 | `app.py` | The HTTP surface the Next proxy calls; streams responses | The agent's front door | FastAPI, `conversation.py`, `store.py` |
+
+**`config.py` was added at Gate 15a** and the heading changed from "the four modules"; the
+original sketch listed only the four that carry behaviour, which quietly assumed settings would
+appear from somewhere. It mirrors `backend/core/config.py` — same `BaseSettings` pattern, same
+fail-loudly-at-the-boundary reasoning — and is a **copy rather than an import**, because
+importing `backend.core.config` would cross the venv boundary that the MCP-only rule above
+exists to hold. A dozen duplicated lines is the price of that boundary and it is a good price.
+
+It also holds `mcp_base_url`, which makes it the file where the localhost stop condition is
+physically enforced rather than merely documented — commented there in full.
 
 Identity stays a **parameter**, exactly as in `backend/services/` — nothing in `agent/` reads
 ambient request state to decide who is acting. That seam is where the auth gate lands here,
@@ -510,6 +536,25 @@ SDK (`google-genai`) and the MCP Python SDK client, with nothing between them:
   layer, no clever error handling. Ugly and readable beats elegant and opaque. This is the one
   gate in the project where that is the correct trade, and it is only correct because the
   output is quarantined.
+- **But flat means the *logic*, not the *plumbing*. Amended 2026-08-05, during 15a.** The
+  first cut of `15a_raw_call.py` read `os.environ["GEMINI_API_KEY"]` directly and skipped
+  `config.py`, on the reasoning that a settings object was ceremony a teaching script did not
+  need. **That was wrong**, and the developer corrected it: the teaching scripts must stand on
+  the *same infrastructure the real agent will use* — the same `BaseSettings` config, the same
+  `.env`, later the same session and store — with only the agent reasoning left flat.
+
+  The reason it was wrong is the reason `_learning/` is kept at all. Its value is that it is
+  **the same system with fewer layers**, so that six months from now, when something misbehaves
+  inside Pydantic AI, these files are still a true picture of what the framework is doing. A
+  script wired to throwaway config is a *different* system, and the moment the real config
+  landed, the loop the developer had read would stop being the loop that runs. The lesson
+  evaporates precisely when it is needed.
+
+  So the rule, stated so it survives into 15b–15d: **flatten the thinking, not the plumbing.**
+  No helper layer over the model call, no wrapper class over the loop, nothing to jump to in
+  order to follow the flow — and real settings, real clients, real error types underneath it.
+  The one concession is `sys.path` scaffolding in each script, because `agent/` does not become
+  an importable package until Gate 17; it is commented as scaffolding wherever it appears.
 - **Comments explain the protocol, not the Python.** What a tool-use block is, what shape a
   result goes back in, why the whole conversation is resent each time. Not what a `while` loop
   does.
@@ -664,3 +709,27 @@ decisions settled with the developer this session all survived being written out
 The one correction made in the writing is the import-linter enforcement, which is a second
 config and a second command rather than a fourth contract — recorded accurately above, because
 the version that was assumed would have produced a rule that passed without ever looking.
+
+### Added 2026-08-05, at Gate 15a
+
+**6. "Deliberately under-abstracted" was ambiguous, and the ambiguity produced a wrong first
+cut.** The constraint was read as licence to skip real infrastructure — the first
+`15a_raw_call.py` read `os.environ` directly rather than using a settings object. The developer
+rejected it: the teaching scripts are how they learn the system, so the scripts must *be* the
+system, minus the abstraction. The constraint is now stated as **flatten the thinking, not the
+plumbing**, in full under Gate 15.
+
+Two consequences beyond the wording. `config.py` joined the module table, which had listed only
+the four behaviour-carrying modules and silently assumed settings would materialise. And the
+scope of Gate 15a grew slightly — it now lands the agent's config, its `requirements.txt`, its
+`.env.example` and its own `.gitignore`, not just a script. That is the right growth: those
+files were going to be written at Gate 16 regardless, and writing them now means the teaching
+scripts and the real agent never diverge.
+
+**7. `agent/` gets its own `.gitignore`, duplicating the root's secret rules.** Developer's
+call, and the reasoning generalises: the root `.gitignore` already covers `.env`, so the second
+file adds no rule — it adds a second thing that must fail before a key escapes. The asymmetry
+justifies it. A redundant ignore rule costs nothing and is never noticed; a leaked API key
+cannot be un-leaked, since `git rm --cached` clears the tip but not the history and the key
+still has to be revoked. Worth applying to `backend/` and `frontend/` at whichever gate next
+touches them.

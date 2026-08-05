@@ -1,0 +1,26 @@
+# Python dependencies for the agent service.
+#
+# Its own venv at agent/.venv, separate from backend/.venv. Not an arbitrary
+# split: agent/ reaches the ERP only over the MCP protocol and never by
+# importing backend/services/ (docs/AGENT-PLAN.md, "Architecture"). Sharing a
+# virtualenv would make crossing that boundary a one-line import away, which
+# is exactly the mistake the boundary exists to prevent.
+#
+# Same conventions as backend/requirements.txt: `==` pins everything, so a
+# build today and a build in six months are identical.
+#
+# Verified against PyPI on 2026-08-05.
+
+# ---------- The model (gates 15-16) ----------
+
+# Google's GenAI SDK - the Gemini Developer API client. Gate 15 writes against
+# this directly; Gate 16 wraps this same package in Pydantic AI's GoogleModel,
+# which is why the teaching code does not get thrown away.
+google-genai==2.16.0
+
+# ---------- Configuration ----------
+
+# Same package and same version as backend/requirements.txt, for the same
+# reason: settings read once into a typed object, so a missing key fails
+# loudly at startup instead of mysteriously mid-turn. Used by config.py.
+pydantic-settings==2.14.2
