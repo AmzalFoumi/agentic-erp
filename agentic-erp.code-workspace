@@ -1,0 +1,66 @@
+{
+  // Multi-root workspace. Open THIS FILE rather than the repo folder:
+  //   File > Open Workspace from File... > agentic-erp.code-workspace
+  //
+  // Why it exists: this repo has two Python virtualenvs (backend/.venv and
+  // agent/.venv) plus a Node toolchain in frontend/. With the repo root open
+  // as a single folder, VS Code holds ONE selected interpreter for the whole
+  // window and activates it in every terminal regardless of which directory
+  // you are in - so it is wrong roughly half the time. Each folder below is
+  // its own root with its own interpreter, set in that folder's
+  // .vscode/settings.json.
+  //
+  // Deliberately NOT including "." as a root. Nesting the repo root alongside
+  // backend/ and agent/ would make every file appear in two trees and leaves
+  // it ambiguous which root's settings apply to a file inside backend/ -
+  // which is precisely the ambiguity this workspace exists to remove.
+  //
+  // The cost of that choice: files at the repo root itself - CLAUDE.md,
+  // README.md, .gitignore - are not in the explorer tree. They are still
+  // openable with Ctrl+P by name, and the plan docs (the ones actually read
+  // day to day) are covered by the "docs" root below.
+  "folders": [
+    {
+      "name": "backend",
+      "path": "backend"
+    },
+    {
+      "name": "agent",
+      "path": "agent"
+    },
+    {
+      "name": "frontend",
+      "path": "frontend"
+    },
+    {
+      "name": "docs",
+      "path": "docs"
+    }
+  ],
+
+  // Workspace-wide settings. Per-folder Python interpreters CANNOT live here -
+  // VS Code does not read folder-scoped settings out of the "folders" entries
+  // above - so each one is in <folder>/.vscode/settings.json instead.
+  "settings": {
+    // Activate the folder's selected interpreter automatically in new
+    // integrated terminals. This is the default; stated explicitly because it
+    // is the behaviour the whole file exists to make correct.
+    "python.terminal.activateEnvironment": true,
+
+    // Keep the two toolchains' junk out of search and the file watcher.
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/*.pyc": true
+    },
+    "search.exclude": {
+      "**/.venv": true,
+      "**/node_modules": true,
+      "**/.next": true
+    },
+    "files.watcherExclude": {
+      "**/.venv/**": true,
+      "**/node_modules/**": true,
+      "**/.next/**": true
+    }
+  }
+}
