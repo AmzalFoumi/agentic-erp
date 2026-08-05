@@ -40,7 +40,7 @@
 | 10   | Typed client from `/openapi.json`, contract-drift check, capability inventory, identity seam                           | ✅ done on `feat/client/web`; `openapi-fetch` + `openapi-typescript`, `schema.d.ts` generated and committed, `api:types:check` drift gate, two ESLint architecture rules, `getCurrentUser()` seam. Its "error envelope is undocumented" finding was **retracted at 12c** — see below |
 | 11   | Design tokens — `frontend/DESIGN.md` + `globals.css`, density axis, LKR money format                                   | ✅ done on `feat/client/web`; slots + `data-density` axis + tabular numerals, then real values reconciled in at 12b — Figtree/IBM Plex Mono, accent hue 258, sharp radius, four stock-status tokens |
 | 12   | Claude Design — reconcile the generated system, brief, screens. Subgates **12a–12e** in `FRONTEND-PLAN.md`              | ✅ done — **12a** survey, **12b** token reconciliation, **12c** brief done — values landed, Gate 11 closed, two stale records corrected. The brief is a **build artifact, assembled at handoff and never committed**; there is no `docs/DESIGN-BRIEF.md`. **12d**: tokens + fonts pushed back to the design system (`71c6abc`, tokens-only, config in `frontend/.design-sync/`), density axis verified to survive the compile, project created in the org and six screens + agent panel generated (`Inventory.dc.html`), read directly via the DesignSync MCP tool rather than a manual paste-and-review — same review, different mechanism. **12e**: pulled — the read screens are what Gate 13 built from |
-| 13   | Handoff — build from the generated screens, extract component kit, wire to the API. Subgates **13a–13h** in `FRONTEND-PLAN.md` | 🟡 order reversed by developer decision 2026-08-05: build first, capability review at 13g. **13a–13f done** (shell, list, detail, create/edit, adjust stock, agent panel in its one real state), each committed by the developer. **13g** (capability/deviation list) written up in `FRONTEND-PLAN.md`. **13h** (delete `dev-tokens/page.tsx` and `errors.ts`) not yet done |
+| 13   | Handoff — build from the generated screens, extract component kit, wire to the API. Subgates **13a–13h** in `FRONTEND-PLAN.md` | ✅ done — merged to `main` and `dev` at `af3234b`. Order reversed by developer decision 2026-08-05: build first, capability review at 13g. **13a–13f** (shell, list, detail, create/edit, adjust stock, agent panel in its one real state), each committed by the developer. **13g** capability/deviation list written up in `FRONTEND-PLAN.md` — nothing deleted unilaterally. **13h** cleanup done (`dev-tokens/page.tsx` and `src/lib/api/errors.ts` deleted, no importers remained), plus `032c88f` — lint errors resolved, vendor dirs excluded from ESLint, `next-themes` adopted for the light/dark toggle. Frontend gates 9–13 are closed; the agent panel's five unbuilt states wait on the agent service |
 
 Gates 0–8 are detailed in **`docs/BACKEND-PLAN.md`**, gates 9–13 in **`docs/FRONTEND-PLAN.md`**.
 Numbering stays flat deliberately: a parallel `F0…Fn` sequence would mean "which gate are we on" has
@@ -74,6 +74,12 @@ slice · backend only, frontend deferred · execution is **gated**.
 > `docs/FRONTEND-PLAN.md`. Two things stay deferred and are _not_ part of it: the **auth provider**
 > (see `docs/AUTH-PLAN.md`) and the **agent service** itself. The frontend's job in gates
 > 9–13 is to leave clean seams for both, not to implement either.
+>
+> **Amended 2026-08-05 (close of Gate 13): the frontend gates are done**, merged at `af3234b`, and
+> both seams were left as specified — `lib/auth/current-user.ts` for auth, `components/shell/agent-panel.tsx`
+> visibly unavailable for the agent. The **agent service is now the active work**, and it is the last
+> of the three deferrals to be taken up; the auth provider stays deferred behind it, on the reasoning
+> in `docs/AUTH-PLAN.md` that agent identity is the hard half and must be shaped first.
 
 ## Authentication: deferred, by decision
 
@@ -114,10 +120,12 @@ The lesson is the standing verify-docs rule turned inward: the claim was carried
 earlier reading of the backend rather than re-checked against the file, which is exactly the mistake
 the rule exists to prevent, aimed at our own code instead of a third party's.
 
-**What is actually owed, and it is now small and frontend-only:** delete
-`frontend/src/lib/api/errors.ts` and re-export the generated `ErrorResponse` from
-`src/lib/api/client.ts` instead. Nothing imports the stopgap today, so this is a deletion, not a
-migration. No backend gate. Do it at Gate 13, when the first screen needs to read an error.
+**What was actually owed, and it was small and frontend-only:** delete
+`frontend/src/lib/api/errors.ts` and use the generated `ErrorResponse` instead. Nothing imported the
+stopgap, so it was a deletion, not a migration. No backend gate.
+
+**Done at Gate 13h (2026-08-05).** `errors.ts` is gone; the generated `ErrorResponse` is what
+`lib/api-error.ts`'s `mapApiError` and every error-state screen read. This item is closed.
 
 ### Stock states: three of four are backed today
 
@@ -133,8 +141,13 @@ genuinely does not exist.
 That one is deferred rather than built: overstock is a real concern for a supermarket, but it is a
 second threshold that every product would need populated to be useful, and no screen has yet
 demonstrated it is worth the column. The `stock-over` token stays defined and unused, so the gap is
-visible in the code rather than forgotten. Revisit after Gate 13, when real screens can say whether
-anyone would look at it.
+visible in the code rather than forgotten. The revisit was scheduled for after Gate 13, when real
+screens could say whether anyone would look at it.
+
+**Checked at the close of Gate 13 (2026-08-05): still deferred.** All six screens shipped and the
+13g capability/deviation list does not raise overstock — no screen asked for the threshold while
+being built. That is weak evidence rather than a verdict, so the token stays defined and unused and
+the question moves to the next gate that touches product data.
 
 ---
 
@@ -213,7 +226,7 @@ checked against PyPI.
 
 ---
 
-## Structure — as actually built (refreshed 2026-07-31, Gate 7)
+## Structure — as actually built (refreshed 2026-08-05, close of Gate 13)
 
 ```
 agentic-erp/
@@ -232,7 +245,19 @@ agentic-erp/
 │   ├── api/         main.py  schemas.py  deps.py  errors.py  routes/products.py
 │   ├── mcp_server/  server.py  errors.py
 │   └── tests/       conftest.py  test_products.py  test_api_products.py  test_mcp_products.py
-└── frontend/        README.md     # pointer only until Gate 9 scaffolds Next.js here
+└── frontend/                       # Next.js 16, src/ layout — scaffolded Gate 9, built out 9-13
+    ├── .env.example, package.json, next.config.ts, eslint.config.mjs, components.json
+    ├── DESIGN.md                   # the token contract; THIRD-PARTY.md, AGENTS.md, CLAUDE.md alongside
+    ├── .design-sync/               # Claude Design push config (tokens + fonts only)
+    └── src/
+        ├── app/         layout.tsx  globals.css  products/{list,[id],[id]/edit,[id]/adjust-stock,new}
+        │                            # each route: page.tsx + actions.ts + _components/ for its own parts
+        ├── components/  ui/        # shadcn primitives, developer-generated
+        │                domain/    # extracted from the built screens: stock-badge, money-display,
+        │                           # form-field, api-error-state
+        │                shell/     # nav, density-toggle, theme-toggle/-provider, agent-panel
+        └── lib/         api/client.ts  api/schema.d.ts (generated, never hand-edited)
+                         api-error.ts  format.ts  auth/current-user.ts (the identity seam)
 ```
 
 Four files exist that the original sketch did not anticipate, each for a reason recorded in
@@ -241,6 +266,13 @@ request is); `api/deps.py` (the DI seam, and the one place a real auth provider 
 matched pair `api/errors.py` / `mcp_server/errors.py` — one vocabulary in `core/exceptions.py`, two
 dialects. `pyproject.toml` holds pytest and import-linter config only; dependencies stay in
 `requirements.txt` (see the deferred note under Gate 1 in `docs/BACKEND-PLAN.md`).
+
+On the frontend side, three directories carry the rules rather than just the code. `components/ui/`
+is generated and treated as vendor — excluded from ESLint since `032c88f`. `components/domain/` was
+extracted _from_ the built screens rather than designed ahead of them, per Gate 13. And `lib/api/` is
+the only tree permitted to import the generated client or call `fetch`, which is the frontend's
+equivalent of `lint-imports` and is enforced by ESLint `no-restricted-imports`. `lib/auth/current-user.ts`
+is the third identity seam, hardcoded to `"system"` to match `SystemActor` — see `docs/AUTH-PLAN.md`.
 
 Note: the original sketch had `services/inventory.py` as the main file. `products.py` is the slice-1
 entity because inventory movements need products to exist first; `inventory.py` remains a stub for
