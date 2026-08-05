@@ -48,7 +48,7 @@
 | 18   | Persistence — `agent/alembic/`, the `agent` schema, RLS. Verification includes confirming backend autogenerate proposes nothing | ⬜ not started |
 | 19   | Approval gating on the three mutating tools, at the API level before any UI                          | ⬜ not started |
 | 20   | The agent's HTTP surface with SSE streaming, plus the Next proxy route and its ESLint amendment       | ⬜ not started |
-| 21   | The frontend panel — build the five unbuilt states specified in `FRONTEND-PLAN.md`                   | ⬜ not started — also revisits the resumability deferral, the first point at which turn duration is observable |
+| 21   | The frontend panel — build the six unbuilt states specified in `FRONTEND-PLAN.md`                    | ⬜ not started — also revisits the resumability deferral, the first point at which turn duration is observable |
 
 Gates 0–8 are detailed in **`docs/BACKEND-PLAN.md`**, gates 9–13 in **`docs/FRONTEND-PLAN.md`**,
 gates 14–21 in **`docs/AGENT-PLAN.md`**.

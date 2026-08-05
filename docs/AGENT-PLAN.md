@@ -15,9 +15,9 @@
 > cross-references both and restates neither.
 >
 > Every external claim below carries a source and the date it was checked, per the standing
-> verify-against-current-docs rule in `PLAN.md`. Three things are flagged as **uncertain**
+> verify-against-current-docs rule in `PLAN.md`. Five things are flagged as **uncertain**
 > rather than asserted; they are marked inline and each is assigned to the gate that settles
-> it.
+> it — enumerated in the re-evaluation at the end.
 
 ---
 
@@ -605,9 +605,14 @@ lands here: transport-only proxying to `AGENT_BASE_URL` permitted in exactly tha
 
 ### Gate 21 — the frontend panel
 
-Build the five unbuilt states specified in `docs/FRONTEND-PLAN.md` — idle/empty, thinking,
+Build the **six** unbuilt states specified in `docs/FRONTEND-PLAN.md` — idle/empty, thinking,
 streaming reply, tool call in progress, success, refusal — against the shipped
 `agent-panel.tsx`, which currently exists only in the unavailable state.
+
+*(Gate 12e's write-up says "five" in three places while its own state table lists six rows and
+its footnote says "six interactive states". Six is correct; the count is corrected in
+`FRONTEND-PLAN.md` and `PLAN.md` too. Recorded because a gate whose "done" is a count should
+not disagree with itself.)*
 
 **The tool-call-in-progress state is the one this whole design exists to protect.**
 `FRONTEND-PLAN.md` already specifies it precisely: an uppercase label, a card naming the
@@ -625,7 +630,7 @@ first point at which real turn duration is observable.
 
 ## Re-evaluation, per step 4 of the stop-gate ritual
 
-Writing this file surfaced four things that were not visible when the plan was agreed.
+Writing this file surfaced five things that were not visible when the plan was agreed.
 
 **1. The teaching gate got better, not just longer.** The discovery that Pydantic AI's
 `GoogleModel` sits on top of `google-genai` means Gate 15 and Gate 16 use the *same package*.
