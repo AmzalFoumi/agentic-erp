@@ -12,6 +12,7 @@
 > | `docs/BACKEND-PLAN.md` | Gates 0–8 as built, backend decisions and deferrals | Changing backend code |
 > | `docs/FRONTEND-PLAN.md` | Gates 9–13, screen and capability inventories, design rationale | Changing frontend code |
 > | `docs/AUTH-PLAN.md` | The auth decision, verified provider landscape, the deferral | The auth gate |
+> | `docs/AGENT-PLAN.md` | Gates 14-21, the agent flow | Changing Agent Code |
 >
 > **A decision is recorded once, where it is enforced**; the other files link to it rather than
 > restating it. Cross-cutting rules — stop gates, division of labour, verify-against-current-docs —
@@ -42,8 +43,8 @@
 | 12   | Claude Design — reconcile the generated system, brief, screens. Subgates **12a–12e** in `FRONTEND-PLAN.md`              | ✅ done — **12a** survey, **12b** token reconciliation, **12c** brief done — values landed, Gate 11 closed, two stale records corrected. The brief is a **build artifact, assembled at handoff and never committed**; there is no `docs/DESIGN-BRIEF.md`. **12d**: tokens + fonts pushed back to the design system (`71c6abc`, tokens-only, config in `frontend/.design-sync/`), density axis verified to survive the compile, project created in the org and six screens + agent panel generated (`Inventory.dc.html`), read directly via the DesignSync MCP tool rather than a manual paste-and-review — same review, different mechanism. **12e**: pulled — the read screens are what Gate 13 built from |
 | 13   | Handoff — build from the generated screens, extract component kit, wire to the API. Subgates **13a–13h** in `FRONTEND-PLAN.md` | ✅ done — merged to `main` and `dev` at `af3234b`. Order reversed by developer decision 2026-08-05: build first, capability review at 13g. **13a–13f** (shell, list, detail, create/edit, adjust stock, agent panel in its one real state), each committed by the developer. **13g** capability/deviation list written up in `FRONTEND-PLAN.md` — nothing deleted unilaterally. **13h** cleanup done (`dev-tokens/page.tsx` and `src/lib/api/errors.ts` deleted, no importers remained), plus `032c88f` — lint errors resolved, vendor dirs excluded from ESLint, `next-themes` adopted for the light/dark toggle. Frontend gates 9–13 are closed; the agent panel's five unbuilt states wait on the agent service |
 | 14   | Agent workstream — write `docs/AGENT-PLAN.md`, record the runtime/model/persistence decisions        | ✅ done — docs only, no code. Runtime **Pydantic AI** over LangGraph (its Python Postgres checkpointer cannot target a non-`public` schema, and `interrupt()` requires a checkpointer) and ADK (2.0 broke the agent API, event model and session schema). Model **Gemini Flash**, free tier — Pro is not free-tier. MCP over **Streamable HTTP bound to `127.0.0.1`**, with the stop condition recorded above. Conversation state in the agent's **own `agent` Postgres schema with its own Alembic**. Resumability deferred; three uncertainty flags carried into Gate 16 |
-| 15   | The teaching loop — a bare agent loop, no framework, deliberately under-abstracted. Subgates **15a–15d** in `AGENT-PLAN.md` | ⬜ not started — closes on four comprehension questions, not on tests. Output is **kept, quarantined** at `agent/_learning/` |
-| 16   | Pydantic AI + `MCPToolset` against the running MCP server over Streamable HTTP                        | ⬜ not started — also closes the Gemini free-tier limits and the `mcp==2.0.0` HTTP API uncertainty flags |
+| 15   | The teaching loop — a bare agent loop, no framework. **Ran; findings kept, code deleted** | ✅ closed 2026-08-06 — built as 15a–15d (`38ac202` for 15a), then **the loop code was deleted by developer decision as not worth maintaining**. What survives: `agent/`'s real infrastructure (own venv, `config.py`, `requirements.txt`, `.env.example`, a second `.gitignore`), one diagnostic at **`agent/scripts/check_mcp.py`** (drives the six MCP tools with no model in the path — the fastest way to tell tool faults from agent faults), and **six findings** written up in `AGENT-PLAN.md` that change gates 16/18/19/21: thought signatures settled (append history as objects, never rebuilt from text; Gate 18 must persist provider-opaque bytes), optional params arrive as `anyOf` and need flattening before Gemini sees them, `FunctionResponse.id` must be echoed or parallel calls mismatch silently, a single response can request **several** tools (so an approval card may show several mutations — unanswered in `FRONTEND-PLAN.md`), and `google-genai` 2.16.0 ships **two** generation APIs with `ai.google.dev` documenting the one we do not use. Also: **async/await arrives here, not Gate 16**, and "under-abstracted" was restated as **flatten the thinking, not the plumbing**. The four comprehension questions move to Gate 16 — the accepted cost of the deletion |
+| 16   | Pydantic AI + `MCPToolset` against the running MCP server over Streamable HTTP                        | ⬜ not started — **does not close with any of four flags open**: the Gemini free-tier limits, the `mcp==2.0.0` Streamable HTTP API (the *server* half — a `backend/mcp_server/server.py` change landing in an agent gate, easy to miss), whether `gemini-3.5-flash-lite` chooses tools well enough, and which `google-genai` API surface Pydantic AI's `GoogleModel` drives |
 | 17   | The conversation loop with our own boundary types; the `conversation.py` isolation rule + `agent/pyproject.toml` import-linter contract | ⬜ not started |
 | 18   | Persistence — `agent/alembic/`, the `agent` schema, RLS. Verification includes confirming backend autogenerate proposes nothing | ⬜ not started |
 | 19   | Approval gating on the three mutating tools, at the API level before any UI                          | ⬜ not started |
@@ -245,7 +246,7 @@ checked against PyPI.
 
 ---
 
-## Structure — as actually built (refreshed 2026-08-05, close of Gate 13)
+## Structure — as actually built (refreshed 2026-08-05 at close of Gate 13; `agent/` added 2026-08-06 at Gate 15a)
 
 ```
 agentic-erp/
@@ -264,6 +265,15 @@ agentic-erp/
 │   ├── api/         main.py  schemas.py  deps.py  errors.py  routes/products.py
 │   ├── mcp_server/  server.py  errors.py
 │   └── tests/       conftest.py  test_products.py  test_api_products.py  test_mcp_products.py
+├── agent/                          # the agent service — started Gate 15a, its OWN venv
+│   ├── .env (gitignored), .env.example, .gitignore, requirements.txt
+│   │                               # second .gitignore is deliberate: two layers must both
+│   │                               # fail before an API key escapes
+│   ├── config.py                   # BaseSettings, mirrors backend/core/config.py. A COPY,
+│   │                               # not an import — importing backend/ would cross the
+│   │                               # venv boundary the MCP-only rule exists to hold
+│   └── scripts/check_mcp.py        # diagnostic: drives the MCP tools with NO model in the
+│                                    # path. Gate 15's loop code was deleted; this survived
 └── frontend/                       # Next.js 16, src/ layout — scaffolded Gate 9, built out 9-13
     ├── .env.example, package.json, next.config.ts, eslint.config.mjs, components.json
     ├── DESIGN.md                   # the token contract; THIRD-PARTY.md, AGENTS.md, CLAUDE.md alongside

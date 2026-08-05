@@ -15,9 +15,12 @@
 > cross-references both and restates neither.
 >
 > Every external claim below carries a source and the date it was checked, per the standing
-> verify-against-current-docs rule in `PLAN.md`. Five things are flagged as **uncertain**
-> rather than asserted; they are marked inline and each is assigned to the gate that settles
-> it — enumerated in the re-evaluation at the end.
+> verify-against-current-docs rule in `PLAN.md`. Things that are **uncertain** are flagged as
+> such rather than asserted; each is marked inline and assigned to the gate that settles it —
+> enumerated in the re-evaluation at the end. The count started at five and moves as gates
+> open and close: Gate 15 closed one (thought signatures) and opened two (Flash-Lite's
+> tool-choosing ability, and which `google-genai` API surface Pydantic AI drives). **Four now
+> sit on Gate 16, which does not close with any of them open.**
 
 ---
 
@@ -98,9 +101,13 @@ via an AI Studio key, surfaced under the `google:` prefix. `GoogleModel` uses th
 `google-genai` package underneath
 ([Pydantic AI Google docs](https://ai.pydantic.dev/models/google/), checked 2026-08-05).
 
-That underneath matters for the teaching gate: **Gate 15 writes against `google-genai`
-directly, and Gate 16 wraps the same package in `GoogleModel`.** The framework is added to
-code the developer has already read, rather than substituted for code they never saw.
+That underneath was the basis of the teaching gate's design — Gate 15 wrote against
+`google-genai` directly so that Gate 16 would wrap a package the developer had already read.
+**Gate 15's code was deleted, so that property no longer does any work**, but the dependency
+itself still matters: it is why the `anyOf` schema finding and the thought-signature rule from
+Gate 15 apply to Gate 16 unchanged, rather than being observations about a package we stopped
+using. **Which `google-genai` API surface `GoogleModel` drives is now an open question** — see
+Gate 16.
 
 **Pro is not available on the free tier.** Neither Gemini 2.5 Pro nor 3 Pro; the free tier is
 scoped to Flash-class models. Flash is also the right call on merit here — the tool-calling
@@ -264,7 +271,7 @@ the venv boundary would quietly undo it.
 
 | Module | What it does | How it is used | What it depends on |
 |---|---|---|---|
-| `config.py` | Settings from `agent/.env`, validated at import | Imported by everything, including `_learning/` | `pydantic-settings` |
+| `config.py` | Settings from `agent/.env`, validated at import | Imported by everything, incl. `scripts/` | `pydantic-settings` |
 | `mcp_client.py` | Owns the connection to the MCP server and exposes its tools as a toolset | Constructed once at startup, handed to `conversation.py` | Pydantic AI's `MCPToolset`, the running MCP server |
 | `conversation.py` | Runs a turn: model call, tool calls, approval interrupts, the reply | Called by `app.py` with our own types in and out | **The only module allowed to import `pydantic_ai`** |
 | `store.py` | Persists and loads conversations and messages | Called by `app.py` around each turn | SQLAlchemy, the `agent` Postgres schema |
@@ -334,8 +341,17 @@ remember, run from `agent/`. That is a real ongoing tax, and it is accepted beca
 alternative — enforcing the rule by memory — is what `import-linter` was adopted to replace
 in the first place.
 
-`agent/_learning/` is excluded from this contract. It is teaching code, it imports whatever
-makes the lesson clearest, and nothing that runs imports it.
+**`agent/scripts/` is excluded from this contract**, and the exclusion is narrower than the one
+originally written here. The first version exempted `agent/_learning/` on the grounds that
+teaching code should import whatever makes the lesson clearest; that directory was deleted at
+Gate 15 (see below), so what remains is `scripts/check_mcp.py`, a diagnostic that talks to the
+MCP server with no model or runtime involved.
+
+It is excluded because it is deliberately *below* the runtime rather than beside it — it exists
+to test the layer the agent sits on, so a rule about which module may import `pydantic_ai` has
+nothing to say about it. Worth watching, though: the exemption is safe only while `scripts/`
+stays free of the runtime. A diagnostic that starts importing `pydantic_ai` has stopped being a
+diagnostic, and should be moved rather than exempted.
 
 ---
 
@@ -514,71 +530,154 @@ with a manual commit.
 The gates are small on purpose. The developer is new to agentic AI, and the failure mode being
 designed against is a single large gate that works without being understood.
 
-### Gate 15 — the teaching loop (no framework)
+### Gate 15 — the teaching loop (no framework). Ran; findings kept, code deleted
 
-**Before any framework is installed.** A bare agent loop written directly against the Gemini
-SDK (`google-genai`) and the MCP Python SDK client, with nothing between them:
+**Outcome, 2026-08-06.** The gate was built and run, produced six findings that changed four
+later gates, and then **its code was deleted at the developer's decision as not worth
+maintaining.** One script survives, repurposed as a diagnostic. This section records what
+happened and why, because "we tried a hand-written teaching loop and did not keep it" is a
+decision worth not re-litigating.
+
+The original intent stands as written history: a bare agent loop against the Gemini SDK
+(`google-genai`) and the MCP Python SDK client, with nothing between them —
 
 > model call → tool-use response → dispatch to the MCP client → feed the result back → repeat
 
-**Sub-gates**, broken up the way 12 and 13 were:
+— built as four sub-gates (15a a raw call; 15b one tool declared by hand and deliberately not
+executed; 15c the MCP client with no model; 15d the two joined, shipped with its tool-dispatch
+block raising `NotImplementedError` for the developer to complete).
 
-| Sub-gate | What is built | What it teaches |
+#### What was kept
+
+| Kept | Where | Why |
 |---|---|---|
-| **15a** | A raw model call, no tools. Send a string, print the response. | The SDK's request/response shape; where the API key lives; what a "turn" is |
-| **15b** | One tool declared **by hand** (`list_products`). Print the tool-use response. **Do not execute it.** | That the model does not call anything — it *asks*, and control returns to your code. This is the single most important idea in the gate |
-| **15c** | The MCP client alone against the running server. List tools, call one by hand. | That MCP is just a protocol; the server is already built and already works |
-| **15d** | The two joined into the loop. | Where the loop lives, and that it is ordinary Python |
+| `config.py`, `requirements.txt`, `.env.example`, `agent/.gitignore` | `agent/` | Real infrastructure, not gate artifacts. Would have been written at Gate 16 regardless |
+| The MCP-client script, as a **diagnostic** | `agent/scripts/check_mcp.py` | Operational value, not teaching value — see below |
+| Six findings | This file | The gate's actual output |
 
-**Constraints, because the purpose is comprehension rather than shipped code:**
+**`agent/scripts/check_mcp.py`** drives the six MCP tools with no model in the path. When the
+agent misbehaves at gates 16–21, running it settles whether the tools work — halving the search
+space without guessing. It also prints the raw parameter schemas, which is how a Gemini 400 that
+names a schema rather than a tool gets diagnosed. It needs a three-line change at Gate 16 when
+the server goes HTTP: the subprocess block collapses to `Client(settings.mcp_base_url)`.
 
-- **Deliberately under-abstracted.** One flat function, an explicit `while` loop, no helper
-  layer, no clever error handling. Ugly and readable beats elegant and opaque. This is the one
-  gate in the project where that is the correct trade, and it is only correct because the
-  output is quarantined.
-- **But flat means the *logic*, not the *plumbing*. Amended 2026-08-05, during 15a.** The
-  first cut of `15a_raw_call.py` read `os.environ["GEMINI_API_KEY"]` directly and skipped
-  `config.py`, on the reasoning that a settings object was ceremony a teaching script did not
-  need. **That was wrong**, and the developer corrected it: the teaching scripts must stand on
-  the *same infrastructure the real agent will use* — the same `BaseSettings` config, the same
-  `.env`, later the same session and store — with only the agent reasoning left flat.
+Note it connects over **stdio**, not HTTP — `mcp_server/server.py` still ends with
+`mcp.run(transport="stdio")` and the HTTP run mode is Gate 16 work. So it spawns the server as a
+child process and hardcodes the path to *the backend's* interpreter, because the server needs
+`sqlalchemy` and `psycopg` and `agent/`'s venv has neither. That is exactly the coupling the
+Streamable-HTTP decision above rejected; it is commented as such in the file.
 
-  The reason it was wrong is the reason `_learning/` is kept at all. Its value is that it is
-  **the same system with fewer layers**, so that six months from now, when something misbehaves
-  inside Pydantic AI, these files are still a true picture of what the framework is doing. A
-  script wired to throwaway config is a *different* system, and the moment the real config
-  landed, the loop the developer had read would stop being the loop that runs. The lesson
-  evaporates precisely when it is needed.
+#### Why the rest was deleted
 
-  So the rule, stated so it survives into 15b–15d: **flatten the thinking, not the plumbing.**
-  No helper layer over the model call, no wrapper class over the loop, nothing to jump to in
-  order to follow the flow — and real settings, real clients, real error types underneath it.
-  The one concession is `sys.path` scaffolding in each script, because `agent/` does not become
-  an importable package until Gate 17; it is commented as scaffolding wherever it appears.
-- **Comments explain the protocol, not the Python.** What a tool-use block is, what shape a
-  result goes back in, why the whole conversation is resent each time. Not what a `while` loop
-  does.
-- **The tool-dispatch block is left as `raise NotImplementedError`**, with a comment
-  describing what belongs there. The developer fills it in. Reading a working loop teaches
-  less than completing a broken one.
+**The stated reason for keeping it did not survive contact.** The plan said the code's value was
+highest six months out, when the framework has hidden all of this and something breaks inside
+it. Against that: nothing tests these files, nothing imports them, and they were excluded from
+the import-linter contract by design — so they cannot rot loudly. And this gate itself proved
+they *would* rot, by discovering that `google-genai` already ships two competing generation APIs
+with Google's own docs site documenting the one we are not using. A teaching artifact frozen
+against a superseded API is not a true picture of what the framework replaced; it is a
+confidently wrong one, read by someone debugging.
 
-**This gate does not close on tests passing.** There are no tests. It closes when the developer
-can answer these four, unprompted:
+`15d` had a second problem specific to it: a permanently committed file that raises
+`NotImplementedError` reads as broken code to anyone who has not read this plan. It made sense
+only as a live exercise.
 
-1. **Where does the loop terminate, and what stops runaway tool calls?**
-2. **What exact shape does a tool result take going back to the model?**
-3. **Which line would an approval check sit on?**
-4. **What is lost if the process dies mid-turn?**
+**What was genuinely produced was the findings, and they are recorded where they are enforced**
+— in the gate write-ups below, not in code comments. Deleting the scripts costs none of them.
 
-Those are the exit criteria, and they are chosen deliberately: each one is a design decision
-made in a later gate. Question 3 is Gate 19. Question 4 is the resumability deferral. A
-developer who can answer them can evaluate the framework's choices instead of accepting them.
+#### The six findings, and where each lands
 
-**This code is kept**, at `agent/_learning/`, excluded from the import-linter contract and
-imported by nothing that runs, with a header stating it is a teaching artifact and not the real
-loop. Kept rather than deleted because its value is highest six months from now, when the
-framework has hidden all of this and something has gone wrong inside it. A framework is much
-easier to debug when you have read the thing it replaced.
+1. **Thought signatures — settled.** Recorded in full below; the rule is that history is
+   appended as *objects*, never rebuilt from `part.text`. Consequence for Gate 18.
+2. **Optional parameters arrive as `anyOf`.** `@mcp.tool()` renders `search: str | None` as a
+   union of string and null, in five of the six tools. Gemini's function-calling schema handles
+   that unreliably, so tool schemas must be normalised before being declared — collapse
+   `anyOf: [X, null]` to `X` (already optional by absence from `required`) and drop pydantic's
+   generated `title`, keeping `default`. Lands at **Gate 16**, in whatever code declares tools.
+3. **`FunctionResponse.id` must be echoed from the request.** It is how the model matches a
+   result to its call; without it, *parallel* tool calls are silently mismatched rather than
+   rejected. Lands at **Gate 19**.
+4. **`FunctionResponse.response` is a keyed dict** — `"output"` for success, `"error"` for
+   failure. Which converges with MCP's own choice to report tool failures as results rather than
+   protocol errors: both protocols independently decided a failed tool is information the model
+   should read, not an exception to raise. Good sign the approval design cuts with the grain.
+5. **A response can request several tools at once.** This file described "the tool-use response"
+   in the singular throughout. A loop written from that description works against one call and
+   silently drops the rest of a parallel batch. Consequence for **Gate 21**: an approval card may
+   have to present several pending mutations from one turn, which `FRONTEND-PLAN.md`'s state
+   table — one card, one product — does not currently answer.
+6. **`google-genai` 2.16.0 ships two generation APIs**, and the docs site documents the one we
+   are not using. Full note under Gate 16, where it is a blocking item.
+
+Also noted: `google-genai`'s `types.Tool` has an `mcp_servers` field — the SDK can act as an MCP
+client and run the whole tool loop itself. Deliberately unused. It would have hidden the entire
+lesson at Gate 15, and from Gate 16 the loop belongs to Pydantic AI; two frameworks racing to
+own it is not a design.
+
+#### Two corrections to the plan that the gate forced, worth keeping
+
+**async/await arrives here, not at Gate 16.** The MCP client is async to the bottom — a
+connection is a long-lived thing with a subprocess or socket behind it — so there is no
+synchronous way to write the client script at all. Gate 16's Python-concepts note is corrected
+there.
+
+**"Deliberately under-abstracted" was ambiguous, and the ambiguity produced a wrong first
+cut.** The first version of the raw-call script read `os.environ["GEMINI_API_KEY"]` directly and
+skipped `config.py`, reasoning that a settings object was ceremony a teaching script did not
+need. The developer rejected it: teaching code must stand on the *same infrastructure the real
+agent uses*, with only the reasoning left flat. The rule was restated as **flatten the thinking,
+not the plumbing**, and it is the reason `config.py` exists as production code from Gate 15
+rather than Gate 16. It is recorded here because it outlived the code it was written for —
+`agent/scripts/check_mcp.py` still follows it, and so should anything else written to be read.
+
+#### The four comprehension questions, unretired
+
+The gate was specified to close on these rather than on tests, and deleting the code does not
+answer them. They remain the right questions and each is a decision made in a later gate —
+question 3 is Gate 19, question 4 is the resumability deferral:
+
+1. Where does the loop terminate, and what stops runaway tool calls?
+2. What exact shape does a tool result take going back to the model?
+3. Which line would an approval check sit on?
+4. What is lost if the process dies mid-turn?
+
+**They now land at Gate 16 instead**, against Pydantic AI's loop rather than a hand-written one.
+That is a weaker position than the plan intended — the questions were chosen so the framework's
+choices could be *judged* rather than accepted, and judging them is harder without having built
+the alternative. Stated plainly rather than smoothed over: this is the cost of the deletion, and
+it was accepted knowingly.
+
+**Settled at Gate 15b — thought signatures, and why history is handled as objects.**
+
+Gemini 3.x attaches an opaque `thought_signature` (bytes) to response parts. The SDK's own
+field description calls it "an opaque signature for the thought so it can be reused in
+subsequent requests"; Google's [thinking guide](https://ai.google.dev/gemini-api/docs/thinking)
+is explicit that a client managing its own history **must resend the model's parts exactly as
+received**, and must not remove or modify them, because the signatures are what let the model
+continue its reasoning (checked 2026-08-06 — flagged as unverified when it entered this plan,
+now confirmed against both the docs and the installed `google-genai` 2.16.0 type).
+
+Dropping them is not an error. There is no exception and no warning — just a model that gets
+quietly worse at multi-step work. Which makes it exactly the class of bug worth spending a
+paragraph on before it happens rather than an afternoon on afterwards.
+
+**The rule this produces, and it outlives the teaching gate:** append the model's `Content`
+**object** to the history untouched. Never rebuild one from `part.text`. Handle the object; do
+not copy the value.
+
+**This has a consequence for Gate 18 that should be decided there, not assumed.** `store.py`
+persists *our* shapes, not Pydantic AI's (the isolation rule). But an opaque signature is not
+one of our shapes — it is a blob whose only meaning is to the model. So conversation history
+that round-trips through Postgres has to carry it, or a reloaded conversation resumes with its
+reasoning thread cut. That is a real design question for the persistence gate: **our message
+type needs somewhere to keep provider-opaque bytes without letting the provider's message
+format into the schema.** Recorded here so it arrives at Gate 18 as a known requirement rather
+than a surprise.
+
+**Also noted at 15b:** `google-genai`'s `types.Tool` has an `mcp_servers` field — the SDK can
+act as an MCP client and run the whole tool loop itself. Deliberately unused here and later.
+At Gate 15 it would hide the entire lesson; from Gate 16 the loop belongs to Pydantic AI, and
+two frameworks racing to own it is not a design.
 
 **Not in this gate:** Pydantic AI, persistence, approval, HTTP, the frontend.
 
@@ -588,13 +687,44 @@ Pydantic AI installed and pinned (verified against PyPI on the day). `GoogleMode
 `GoogleProvider` with an AI Studio key. `MCPToolset` connected to the MCP server over
 **Streamable HTTP**; the server's HTTP run mode lands here.
 
-**Also in this gate:** confirm the account's real free-tier limits from
-<https://aistudio.google.com/rate-limit> and record them with the date, closing the first of
-the three uncertainty flags above. Verify the `mcp==2.0.0` Streamable HTTP API against current
-docs, closing the second.
+**Also in this gate — four items, and the gate does not close with any of them open:**
 
-**Python concepts introduced:** async/await and async context managers, which Pydantic AI's
-MCP client requires and which the rest of this codebase has so far avoided.
+1. Confirm the account's real free-tier limits from <https://aistudio.google.com/rate-limit>
+   and record them with the date.
+2. Verify the `mcp==2.0.0` Streamable HTTP API against current docs. Gate 15c settled the
+   *client* half by introspecting the installed package — `Client(url)` selects
+   `streamable_http_client` internally, so the agent side is likely one line. **The server
+   half is the unverified part**, and it is a change to `backend/mcp_server/server.py`, not to
+   `agent/` — easy to overlook in an agent gate.
+3. Judge whether `gemini-3.5-flash-lite` is strong enough at *choosing tools*. Gate 15
+   exercised tool choice only against a hand-written declaration; whether Lite picks correctly
+   among all six real tools is untested.
+4. **Settle which google-genai API surface Pydantic AI's `GoogleModel` uses** — see below.
+   This is new, found at Gate 15.
+
+**⚠️ New uncertainty flag, opened 2026-08-06 at Gate 15b.** The installed `google-genai`
+2.16.0 ships **two** generation APIs: `client.models.generate_content` (what its own README
+documents, and what Gate 15 is written against) and `client.interactions.create` (what
+<https://ai.google.dev>'s current quickstart and function-calling pages document, with a
+different shape — `input=`, `steps`, `previous_interaction_id`, server-side state). Both
+modules exist in the package; neither source acknowledges the other.
+
+Gate 15 uses `generate_content` deliberately. It is what the package's own README shows, and
+more importantly it is stateless — history is a list we own and resend, which is the property
+Gate 18's persistence design depends on. `interactions.create` with `previous_interaction_id`
+puts conversation state on **Google's** servers, which would quietly relocate the thing this
+project has decided to store in its own Postgres schema.
+
+**Why it matters at Gate 16 rather than now:** re-evaluation item 1 below says Gate 15 and 16
+share a package, so the framework is added to code already read. That property only holds if
+`GoogleModel` also uses `generate_content`. If it has moved to the Interactions API, the
+teaching gate still teaches the protocol correctly but no longer teaches *this* framework's
+mechanics — and the stateless-history assumption needs re-checking against how Pydantic AI
+drives it. Check `GoogleModel`'s source on the day, not its docs.
+
+**Python concepts introduced:** none new — async/await and async context managers arrive
+earlier, at 15c, because the MCP client has no synchronous form. Corrected 2026-08-06; see the
+note under Gate 15.
 
 **Done looks like:** a script that answers "what's low on stock?" by calling the real
 `list_products` tool against the real database.
@@ -683,6 +813,14 @@ The framework is added to code the developer has already read, rather than subst
 code they never saw. That was luck rather than design, and it is worth protecting: if the model
 choice changes, check whether this property survives.
 
+> **Superseded 2026-08-06.** Gate 15's code was deleted, so there is no longer any
+> already-read code for the framework to be added to. The shared dependency still matters for a
+> different reason — Gate 15's findings about `google-genai` carry into Gate 16 unchanged
+> instead of being observations about a package we abandoned — but the pedagogical benefit
+> claimed here is gone. Kept rather than edited away, because the item's real lesson is the one
+> it ends on: a property arrived at by luck is worth *checking* rather than relying on, and this
+> one did not survive its first contact with a scope decision.
+
 **2. The resumability deferral is less clean than it first looked.** The stated upgrade path —
 wrap the agent for durable execution — reintroduces framework-owned tables, which is the
 headline reason LangGraph was rejected. The deferral still holds, but the file now says so
@@ -713,19 +851,17 @@ the version that was assumed would have produced a rule that passed without ever
 ### Added 2026-08-05, at Gate 15a
 
 **6. "Deliberately under-abstracted" was ambiguous, and the ambiguity produced a wrong first
-cut.** The constraint was read as licence to skip real infrastructure — the first
-`15a_raw_call.py` read `os.environ` directly rather than using a settings object. The developer
-rejected it: the teaching scripts are how they learn the system, so the scripts must *be* the
-system, minus the abstraction. The constraint is now stated as **flatten the thinking, not the
-plumbing**, in full under Gate 15.
+cut.** The constraint was read as licence to skip real infrastructure — the first raw-call script
+read `os.environ` directly rather than using a settings object. The developer rejected it:
+teaching code must stand on the *same infrastructure the real agent uses*, with only the
+reasoning left flat. Restated as **flatten the thinking, not the plumbing** — recorded under
+Gate 15, where it outlived the code it was written for.
 
 Two consequences beyond the wording. `config.py` joined the module table, which had listed only
-the four behaviour-carrying modules and silently assumed settings would materialise. And the
-scope of Gate 15a grew slightly — it now lands the agent's config, its `requirements.txt`, its
-`.env.example` and its own `.gitignore`, not just a script. That is the right growth: those
-files were going to be written at Gate 16 regardless, and writing them now means the teaching
-scripts and the real agent never diverge.
-
+the four behaviour-carrying modules and silently assumed settings would materialise. And Gate
+15a's scope grew to land the agent's config, `requirements.txt`, `.env.example` and its own
+`.gitignore` — the right growth, since all four were due at Gate 16 anyway and are the part of
+Gate 15 that survived it.
 **7. `agent/` gets its own `.gitignore`, duplicating the root's secret rules.** Developer's
 call, and the reasoning generalises: the root `.gitignore` already covers `.env`, so the second
 file adds no rule — it adds a second thing that must fail before a key escapes. The asymmetry
@@ -733,3 +869,39 @@ justifies it. A redundant ignore rule costs nothing and is never noticed; a leak
 cannot be un-leaked, since `git rm --cached` clears the tip but not the history and the key
 still has to be revoked. Worth applying to `backend/` and `frontend/` at whichever gate next
 touches them.
+
+### Added 2026-08-06, at Gates 15b–15d, and revised the same day when the code was deleted
+
+**8. Google's own documentation site could not be trusted for the SDK's API, and introspecting
+the installed package was the thing that worked.** Three separate fetches of `ai.google.dev` —
+quickstart, function calling, models — returned an `interactions.create` API that contradicts
+the `google-genai` README and is not what this project uses. Both surfaces genuinely exist in
+2.16.0. Every API detail at Gate 15 was therefore verified by reading the installed `types.py`
+and `client.py`, not by reading docs.
+
+Worth generalising, because `PLAN.md`'s standing rule says *verify against current docs rather
+than training data* and this is a case the rule did not anticipate: **docs and installed package
+can both be current and still disagree.** When they do, the package wins for what a call
+accepts, and the docs win for what the *service* requires. The thought-signature rule came from
+the docs for exactly that reason — no amount of reading `types.py` tells you signatures must be
+resent.
+
+**9. The gate's findings are recorded under Gate 15 rather than here**, deliberately: five of the
+six are enforced by later gates (16, 18, 19, 21) and belong beside the gate that acts on them,
+not in a re-evaluation list nobody reads while implementing. This item exists only to say where
+they went.
+
+**10. The gate's code was deleted, and the plan records that rather than hiding it.** The
+developer's judgement was that the teaching loop was not worth its maintenance; on review the
+plan's own justification for keeping it — value six months out — was found to be weaker than
+written, since nothing tests or imports the files and this very gate proved the underlying SDK
+is moving fast enough to make a frozen artifact misleading rather than instructive.
+
+**The cost was accepted knowingly and is stated at Gate 15 rather than argued away:** the four
+comprehension questions were chosen so the framework's choices could be *judged* rather than
+accepted, and judging them is harder without having built the alternative. They move to Gate 16.
+
+The generalisable part: **a gate can be worth running and not worth keeping.** Six findings
+changed four later gates; the artifact that produced them changed nothing after the day it was
+written. Recording the deletion with its reasoning is what stops the idea being re-proposed at
+the next gate that feels under-understood.

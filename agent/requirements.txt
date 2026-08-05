@@ -9,14 +9,39 @@
 # Same conventions as backend/requirements.txt: `==` pins everything, so a
 # build today and a build in six months are identical.
 #
-# Verified against PyPI on 2026-08-05.
+# Verified against PyPI on 2026-08-05; mcp added and re-verified 2026-08-06.
 
-# ---------- The model (gates 15-16) ----------
+# ---------- The model ----------
 
-# Google's GenAI SDK - the Gemini Developer API client. Gate 15 writes against
-# this directly; Gate 16 wraps this same package in Pydantic AI's GoogleModel,
-# which is why the teaching code does not get thrown away.
+# Google's GenAI SDK - the Gemini Developer API client, and the package Pydantic
+# AI's GoogleModel uses underneath.
+#
+# **Nothing in agent/ imports this right now.** Gate 15's code called it
+# directly and that code was deleted; Gate 16 reaches it through Pydantic AI,
+# which depends on it anyway. So this is an explicit pin for a package no local
+# file imports, which is exactly the kind of line that rots unnoticed.
+#
+# Kept for now rather than removed, because Gate 16 needs it either way and a
+# deleted-then-restored pin is churn. **Decide at Gate 16:** keep the direct pin
+# (we care which version we get, and pydantic-ai's range may be wider than we
+# want) or drop it and let pydantic-ai own the dependency. Do not leave it
+# undecided a second time.
 google-genai==2.16.0
+
+# ---------- MCP (the client half) ----------
+
+# The same package backend/ pins, and the same version - but the other half of
+# it. backend/ imports `mcp.server`; agent/ imports `mcp.client`. One SDK
+# ships both ends of the protocol, which is why the version matches rather
+# than merely happening to.
+#
+# Keeping the two pins equal is not required by anything mechanical - the
+# protocol is versioned separately and 2.0's client negotiates. It is worth
+# doing anyway while both are ours: a protocol-level mismatch between two
+# components you control is a bad way to spend an afternoon.
+#
+# Added at Gate 15. Verified on PyPI 2026-08-06 (2.0.0, released 2026-07-28).
+mcp==2.0.0
 
 # ---------- Configuration ----------
 
