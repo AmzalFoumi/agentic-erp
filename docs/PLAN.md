@@ -41,8 +41,17 @@
 | 11   | Design tokens — `frontend/DESIGN.md` + `globals.css`, density axis, LKR money format                                   | ✅ done on `feat/client/web`; slots + `data-density` axis + tabular numerals, then real values reconciled in at 12b — Figtree/IBM Plex Mono, accent hue 258, sharp radius, four stock-status tokens |
 | 12   | Claude Design — reconcile the generated system, brief, screens. Subgates **12a–12e** in `FRONTEND-PLAN.md`              | ✅ done — **12a** survey, **12b** token reconciliation, **12c** brief done — values landed, Gate 11 closed, two stale records corrected. The brief is a **build artifact, assembled at handoff and never committed**; there is no `docs/DESIGN-BRIEF.md`. **12d**: tokens + fonts pushed back to the design system (`71c6abc`, tokens-only, config in `frontend/.design-sync/`), density axis verified to survive the compile, project created in the org and six screens + agent panel generated (`Inventory.dc.html`), read directly via the DesignSync MCP tool rather than a manual paste-and-review — same review, different mechanism. **12e**: pulled — the read screens are what Gate 13 built from |
 | 13   | Handoff — build from the generated screens, extract component kit, wire to the API. Subgates **13a–13h** in `FRONTEND-PLAN.md` | ✅ done — merged to `main` and `dev` at `af3234b`. Order reversed by developer decision 2026-08-05: build first, capability review at 13g. **13a–13f** (shell, list, detail, create/edit, adjust stock, agent panel in its one real state), each committed by the developer. **13g** capability/deviation list written up in `FRONTEND-PLAN.md` — nothing deleted unilaterally. **13h** cleanup done (`dev-tokens/page.tsx` and `src/lib/api/errors.ts` deleted, no importers remained), plus `032c88f` — lint errors resolved, vendor dirs excluded from ESLint, `next-themes` adopted for the light/dark toggle. Frontend gates 9–13 are closed; the agent panel's five unbuilt states wait on the agent service |
+| 14   | Agent workstream — write `docs/AGENT-PLAN.md`, record the runtime/model/persistence decisions        | ✅ done — docs only, no code. Runtime **Pydantic AI** over LangGraph (its Python Postgres checkpointer cannot target a non-`public` schema, and `interrupt()` requires a checkpointer) and ADK (2.0 broke the agent API, event model and session schema). Model **Gemini Flash**, free tier — Pro is not free-tier. MCP over **Streamable HTTP bound to `127.0.0.1`**, with the stop condition recorded above. Conversation state in the agent's **own `agent` Postgres schema with its own Alembic**. Resumability deferred; three uncertainty flags carried into Gate 16 |
+| 15   | The teaching loop — a bare agent loop, no framework, deliberately under-abstracted. Subgates **15a–15d** in `AGENT-PLAN.md` | ⬜ not started — closes on four comprehension questions, not on tests. Output is **kept, quarantined** at `agent/_learning/` |
+| 16   | Pydantic AI + `MCPToolset` against the running MCP server over Streamable HTTP                        | ⬜ not started — also closes the Gemini free-tier limits and the `mcp==2.0.0` HTTP API uncertainty flags |
+| 17   | The conversation loop with our own boundary types; the `conversation.py` isolation rule + `agent/pyproject.toml` import-linter contract | ⬜ not started |
+| 18   | Persistence — `agent/alembic/`, the `agent` schema, RLS. Verification includes confirming backend autogenerate proposes nothing | ⬜ not started |
+| 19   | Approval gating on the three mutating tools, at the API level before any UI                          | ⬜ not started |
+| 20   | The agent's HTTP surface with SSE streaming, plus the Next proxy route and its ESLint amendment       | ⬜ not started |
+| 21   | The frontend panel — build the five unbuilt states specified in `FRONTEND-PLAN.md`                   | ⬜ not started — also revisits the resumability deferral, the first point at which turn duration is observable |
 
-Gates 0–8 are detailed in **`docs/BACKEND-PLAN.md`**, gates 9–13 in **`docs/FRONTEND-PLAN.md`**.
+Gates 0–8 are detailed in **`docs/BACKEND-PLAN.md`**, gates 9–13 in **`docs/FRONTEND-PLAN.md`**,
+gates 14–21 in **`docs/AGENT-PLAN.md`**.
 Numbering stays flat deliberately: a parallel `F0…Fn` sequence would mean "which gate are we on" has
 two answers and this table would stop being a status board. Gate 8.5 is numbered that way for the
 same reason — renumbering 9–13 to slot it in would invalidate every "Gate 11" reference in
@@ -98,6 +107,16 @@ feature work:
 2. A second human user exists.
 
 Until both are false, `SystemActor` is acceptable _only_ because no unauthenticated caller exists.
+
+**From Gate 16, condition 1 stops being hypothetical.** The MCP server gains a Streamable HTTP run
+mode so the agent service can reach it. It binds **`127.0.0.1` only**, and that loopback binding is
+the entire basis on which the agent runs unauthenticated. Three things trip condition 1 and trigger
+the auth gate **before any further agent work**: changing the bind address to `0.0.0.0` or a LAN
+address; placing the server behind a tunnel, reverse proxy, or Docker port publish; or any process on
+a second machine successfully calling it. Written as a list rather than a principle because the
+dangerous version of this is not a decision but a convenience — "I'll just tunnel it to demo from my
+phone" is a thirty-second action that exposes a mutating tool surface with no authentication and no
+log entry distinguishing the caller from the developer. Full reasoning in **`docs/AGENT-PLAN.md`**.
 
 ---
 
