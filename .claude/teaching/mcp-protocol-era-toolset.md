@@ -9,8 +9,10 @@ Legend: `[ ]` not yet demonstrated · `[~]` partial · `[x]` demonstrated
 
 ## Stage 1 — The problem
 
-- [ ] **1.1** Why `agent/` needs an MCP client at all, rather than importing
-      `backend/services/` — restate the two-adapter thesis in your own words
+- [x] **1.1** Why `agent/` needs an MCP client at all — answered well
+      ("explicit decoupling, one logic, two consumers"). Sharpened: the venv
+      split makes the boundary *unforgeable*, and the agent can never hold a
+      capability the API doesn't, since it only reaches `@mcp.tool()` surface
 - [x] **1.2** What actually failed, mechanically: the dependency chain from
       `pydantic-ai-slim[mcp]` down to `mcp<2.0`
       → taught: each arrow is a hard requirement; installing `mcp` 1.x vs 2.0
@@ -32,7 +34,24 @@ Legend: `[ ]` not yet demonstrated · `[~]` partial · `[x]` demonstrated
       is graph-orchestration vs Pydantic AI's agent-runtime — tool *count* is
       not the axis they differ on.
       ⚠️ ACTION: plan doc still cites 0.3.1/unbounded; update to 0.3.2 + #589
-- [ ] **1.7** The four options on the table, and why each was rejected or chosen
+- [x] **1.7** The four options — taught at intern level, incl. Python
+      packaging vocabulary (extras, transitive deps, pre-releases). Core idea
+      landed and confirmed: **a version cap is a factual claim about code, not
+      a policy** — overriding it moves the failure later, not away (#6661:
+      `MCPToolset` fails at *import* under SDK v2).
+
+- [x] **1.8** (added during session) **Cap-then-shim is a sequence, not a
+      choice.** User initially argued both libraries should have shipped
+      compat shims instead of capping. Corrected via the real timeline —
+      #6661 issue → #6737 cap → #6738 shim (still open). A shim can't precede
+      the release it shims; the cap holds the line and is the cheaper failure
+      point. Connected to the project's own `config.py` fail-at-startup rule.
+      Re-quizzed and confirmed.
+
+- [x] **1.9** (added) **Our exit condition is live upstream.** PR #6738 widens
+      Pydantic AI to `fastmcp-slim<5` with a field-naming compat module —
+      i.e. the same snake_case/camelCase trap we hit independently (#6661).
+      When it ships, `mcp_client.py` should shrink to an `MCPToolset`.
 
 ## Stage 2 — The solution
 
