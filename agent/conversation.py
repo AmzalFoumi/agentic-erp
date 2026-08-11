@@ -20,6 +20,7 @@ from typing import Literal
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
     ModelMessage,
+    ModelMessagesTypeAdapter,
     ModelRequest,
     ModelResponse,
     TextPart,
@@ -51,11 +52,21 @@ INSTRUCTIONS = (
 
 @dataclass(frozen=True)
 class Message:
-    """One turn of plain text. The only shape any code outside this file's
-    cluster ever needs to know about a conversation."""
+    """One turn of plain text, plus whatever provider-opaque bytes came with
+    it. The only shape any code outside this file's cluster ever needs to
+    know about a conversation.
+
+    provider_data holds a serialized Pydantic AI ModelMessage (e.g. carrying
+    Google's function-call signature) when this Message is an assistant
+    turn produced by run_turn(); None for user turns and for any assistant
+    turn where nothing provider-specific needs preserving. store.py (Gate 18)
+    persists these bytes as an opaque bytea column and never parses them -
+    only this file (via ModelMessagesTypeAdapter) ever does.
+    """
 
     role: Literal["user", "assistant"]
     content: str
+    provider_data: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -75,12 +86,21 @@ class TurnResult:
 
 
 def _to_model_history(history: list[Message]) -> list[ModelMessage]:
-    """Our Message list -> Pydantic AI's message_history kwarg shape."""
+    """Our Message list -> Pydantic AI's message_history kwarg shape.
+
+    An assistant Message with provider_data set is rebuilt from those exact
+    bytes via ModelMessagesTypeAdapter, rather than a fresh plain-text
+    ModelResponse - this is what carries the model's own reasoning/signature
+    data across a reload, instead of losing it the moment a conversation is
+    read back from the database.
+    """
 
     converted: list[ModelMessage] = []
     for message in history:
         if message.role == "user":
             converted.append(ModelRequest(parts=[UserPromptPart(content=message.content)]))
+        elif message.provider_data is not None:
+            converted.extend(ModelMessagesTypeAdapter.validate_json(message.provider_data))
         else:
             converted.append(ModelResponse(parts=[TextPart(content=message.content)]))
     return converted
@@ -109,9 +129,16 @@ async def run_turn(history: list[Message], question: str, *, settings: Settings)
         if isinstance(part, ToolCallPart)
     ]
 
+    # The last of Pydantic AI's own new_messages() is the final ModelResponse
+    # carrying the answer - serializing just that one message (not the whole
+    # turn, which also includes intermediate tool-call/tool-result messages)
+    # keeps provider_data minimal: enough to rebuild this one assistant turn
+    # on reload, no more.
+    provider_data = ModelMessagesTypeAdapter.dump_json([result.new_messages()[-1]])
+
     new_messages = [
         Message(role="user", content=question),
-        Message(role="assistant", content=result.output),
+        Message(role="assistant", content=result.output, provider_data=provider_data),
     ]
 
     return TurnResult(answer=result.output, new_messages=new_messages, tool_calls=tool_calls)
