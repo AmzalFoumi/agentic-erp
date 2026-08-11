@@ -631,10 +631,10 @@ a service that is planned and reserved. If that region ever ships looking enable
 been abused.
 
 **Shipped 2026-08-05 (Gate 13f):** `frontend/src/components/shell/agent-panel.tsx`, exactly in the
-unavailable state described above. The other five states are item 1 in the Gate 13g list below —
+unavailable state described above. The other six states are item 1 in the Gate 13g list below —
 revisit once the agent service exists.
 
-**The five unbuilt states, recorded here so the spec outlives this chat (2026-08-05).** Read
+**The six unbuilt states, recorded here so the spec outlives this chat (2026-08-05).** Read
 verbatim from `Inventory.dc.html` in the Claude Design project (`f94c1986-e4eb-4cf2-a320-f3c68181a901`,
 via the DesignSync MCP tool's `get_file`) rather than paraphrased from memory — the panel occupies the
 same `w-64`-ish right-hand region as the shipped `agent-panel.tsx`, swapping only its body. If the
@@ -747,6 +747,6 @@ assumed.
 soft-delete / archive · a sort parameter · clearing `category` back to NULL · a stock-movement ledger
 so adjustment `reason` is stored · **auth provider** (see `AUTH-PLAN.md`) · **MCP Streamable HTTP
 transport and its OAuth resource-server stack** (see `BACKEND-PLAN.md`) · **the agent service
-itself, and with it the agent panel's five unbuilt states** (already designed at Gate 12e, wiring is
+itself, and with it the agent panel's six unbuilt states** (already designed at Gate 12e, wiring is
 a Gate 13g item — see above) · deployment shape, production origin, and therefore the real
 `CORS_ORIGINS` and `API_BASE_URL` values.

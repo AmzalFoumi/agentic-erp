@@ -16,16 +16,24 @@ Everything here came from `services/products.py` and `core/`.
 An HTTP API exposes *endpoints* for a program to call, where a human developer
 read the docs and wrote the call. MCP exposes *tools* for a language model to
 call, where the model reads the description and decides to call it. The protocol
-is JSON-RPC over some transport - here, stdio: the client starts this file as a
-child process and talks to it over stdin/stdout.
+is JSON-RPC over some transport, and this file offers two (see `main()` at the
+bottom): **stdio**, where the client starts this file as a child process and
+talks to it over stdin/stdout, and **Streamable HTTP**, where the client only
+needs a URL. The tools below are identical either way - a transport is how bytes
+move, not what they mean.
 
-**Nothing in this file may print to stdout.** stdout *is* the protocol stream,
-so a stray `print()` injects garbage into the middle of a JSON-RPC message and
-the client disconnects with a parse error that names no line of our code. This
-is the single most common way a first MCP server fails, and the debugging
-experience is genuinely awful because the symptom is nowhere near the cause. If
-you need to debug, log to **stderr** (or use the `Context` object the SDK can
-inject), never `print()`.
+**Nothing in this file may print to stdout.** Under stdio, stdout *is* the
+protocol stream, so a stray `print()` injects garbage into the middle of a
+JSON-RPC message and the client disconnects with a parse error that names no
+line of our code. This is the single most common way a first MCP server fails,
+and the debugging experience is genuinely awful because the symptom is nowhere
+near the cause. If you need to debug, log to **stderr** (or use the `Context`
+object the SDK can inject), never `print()`.
+
+The rule stays absolute rather than becoming transport-conditional now that HTTP
+exists: a `print()` added while running over HTTP breaks nothing until the day
+someone runs the same file over stdio, which is the worst possible moment to
+discover it.
 
 ### The one idea to take away
 
@@ -41,6 +49,7 @@ is a tool the model misuses, in the same way an unlabelled button is a button
 users press wrongly.
 """
 
+import argparse
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -390,13 +399,73 @@ def adjust_stock(product_id: int, delta: int, reason: str | None = None) -> dict
         )
 
 
+def main(argv: list[str] | None = None) -> None:
+    """Run the server on one of its two transports.
+
+    Two, because they answer different questions. **stdio** is for a client that
+    starts this file as a child process - Claude Desktop, an inspector, or
+    `agent/scripts/check_mcp.py` before Gate 16. **Streamable HTTP** is for a
+    client that only has a URL, which is what `agent/` is: a separate directory
+    with a separate virtualenv, reaching the ERP over a protocol and nothing else
+    (docs/AGENT-PLAN.md, "Architecture"). Adding HTTP is what let that script
+    stop knowing the backend's interpreter path.
+
+    A flag rather than an environment variable because it is a per-run choice,
+    not a per-machine one: the same checkout serves both, often in the same hour.
+    """
+    parser = argparse.ArgumentParser(description=__doc__ and __doc__.splitlines()[0])
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help="stdio (default) for a client that launches this process; "
+        "streamable-http for a client that has only a URL.",
+    )
+    # 8001, not 8000: `uvicorn api.main:app` already owns 8000. The two adapters
+    # are separate processes and are expected to run at the same time.
+    parser.add_argument("--port", type=int, default=8001)
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Loopback only, deliberately. Binding this to 0.0.0.0 or a LAN "
+        "address trips the auth deferral's stop condition - read "
+        "docs/AGENT-PLAN.md, 'The stop condition', before changing it.",
+    )
+    parser.add_argument(
+        "--path",
+        default="/mcp",
+        help="Must match agent/'s MCP_BASE_URL (default http://127.0.0.1:8001/mcp).",
+    )
+    parser.add_argument(
+        "--sessions",
+        action="store_true",
+        help="Keep a server-side session per client. Off by default: the "
+        "2026-07-28 revision carries identity per request instead, which is "
+        "the property this project pinned mcp 2.0 on both halves to use. Turn "
+        "it on only to serve a 2025-era client, which needs the handshake.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.transport == "stdio":
+        mcp.run(transport="stdio")
+        return
+
+    # Note what is *not* configured here: no auth. That is only acceptable
+    # because of the host above. The SDK adds DNS-rebinding protection of its
+    # own accord for loopback hosts, which is a backstop against a browser
+    # reaching this port - not authentication, and not a substitute for it.
+    mcp.run(
+        transport="streamable-http",
+        host=args.host,
+        port=args.port,
+        streamable_http_path=args.path,
+        stateless_http=not args.sessions,
+    )
+
+
 if __name__ == "__main__":
     # `if __name__ == "__main__"` runs this block only when the file is executed
     # directly, not when it is imported. Python's equivalent of the `main`
     # guard - and load-bearing here, because without it merely importing this
     # module for a test would hang, waiting for JSON-RPC on stdin.
-    #
-    # `run()` defaults to stdio transport; the argument is written out anyway
-    # because it is the line that changes when this server goes remote, and a
-    # visible default is easier to find than an invisible one.
-    mcp.run(transport="stdio")
+    main()

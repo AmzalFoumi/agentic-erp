@@ -1,0 +1,21 @@
+# Python dependencies for the agent service, own venv at agent/.venv.
+# Full reasoning for these pins lives in docs/AGENT-PLAN.md (Gate 16) — check
+# there before changing any of them, not just here.
+#
+# Verified against PyPI on 2026-08-05; mcp added and re-verified 2026-08-06.
+
+# Pydantic AI - the framework that runs the agent's think/call-tools/reply
+# loop, so we don't write that loop by hand. [google] only, deliberately not
+# [mcp] — that extra conflicts with the mcp==2.0.0 pin below (see
+# AGENT-PLAN.md, Gate 16).
+pydantic-ai-slim[google]==2.24.0
+
+# The official MCP SDK, client half — lets the agent call the tools exposed
+# by backend/mcp_server/. Must match backend/'s server-half pin, since it's
+# one package speaking both ends of the same protocol.
+mcp==2.0.0
+
+# Reads settings from a .env file into a typed object, so a missing or wrong
+# setting fails loudly at startup instead of mysteriously mid-conversation.
+# Used by config.py.
+pydantic-settings==2.14.2

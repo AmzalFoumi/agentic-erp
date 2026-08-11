@@ -50,11 +50,11 @@ pydantic-settings==2.14.2
 # The MCP Python SDK - exposes our service functions as tools an AI agent can
 # call. Server class is `MCPServer` (older tutorials show `FastMCP`).
 #
-# NOTE: 2.0.0 was released 2026-07-28, implementing the finalised 2026-07-28
-# spec (no initialize handshake, no protocol-level sessions). It is a major
-# rework and is one day old at the time of writing. We are on it deliberately
-# to match current docs; nothing imports it until Gate 6. If it proves rough,
-# the fallback is the previous stable line: mcp==1.29.0
+# NOTE: version 2.0.0 came out 2026-07-28, brand new at the time we picked it,
+# and is a big rework (drops the old handshake/session setup for a simpler,
+# stateless one). We chose it on purpose to match current docs, not by
+# accident. If it turns out too rough to work with, fall back to the older,
+# stable version: mcp==1.29.0
 mcp==2.0.0
 
 # ---------- Testing ----------
@@ -68,9 +68,6 @@ httpx==0.28.1
 
 # ---------- Architecture enforcement ----------
 
-# Reads every import statement, builds the dependency graph, and fails the
-# build if services/ imports an adapter or a web framework. That rule is the
-# one the whole two-adapter design rests on; this stops it being enforced by
-# memory alone. Config lives in pyproject.toml; run `lint-imports` from
-# backend/. Verified on PyPI 2026-07-30 (2.13, released 2026-07-03).
+# Enforces the services/ boundary rule mechanically instead of by memory.
+# Adoption reasoning and config history: docs/BACKEND-PLAN.md, Gate 4.
 import-linter==2.13
