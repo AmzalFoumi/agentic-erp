@@ -193,6 +193,7 @@ class Settings(BaseSettings):
 
 
 # One shared instance, created when this module is first imported. Everything
-# else in agent/ does `from config import settings` (or `from agent.config
-# import settings` once there is a package to import from - Gate 17).
+# else in agent/ does `from config import settings` - Gate 17 deliberately
+# kept this flat-module + sys.path layout rather than introducing an `agent`
+# package, so there is no `agent.config` to import from.
 settings = Settings()  # type: ignore[call-arg]

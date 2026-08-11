@@ -12,8 +12,10 @@ conversation.py is the only module that may import `pydantic_ai` - true in
 spirit, not in the letter of this file. `model_provider.py` is grouped with
 conversation.py as part of the same runtime cluster: it exists solely to hand
 conversation.py a `Model`, never a request/response type, and the enforced
-`lint-imports` contract (Gate 17) forbids `pydantic_ai` in store.py/app.py/
-mcp_client.py, not here. So: conversation.py imports this module; this module
+`lint-imports` contract (Gate 17) forbids `pydantic_ai` in config.py and
+scripts/, not here. `mcp_client.py` is grouped in the same allowed cluster -
+it implements Pydantic AI's `AbstractToolset` directly and cannot avoid the
+import. So: conversation.py imports this module; this module
 imports pydantic_ai; nothing downstream of conversation.py sees either.
 
 **The pattern, and why it is sized the way it is.** This is a Strategy

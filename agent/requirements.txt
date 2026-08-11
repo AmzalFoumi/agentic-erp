@@ -19,3 +19,6 @@ mcp==2.0.0
 # setting fails loudly at startup instead of mysteriously mid-conversation.
 # Used by config.py.
 pydantic-settings==2.14.2
+
+# Enforces the Gate 17 architecture contract in agent/pyproject.toml.
+import-linter==2.13

@@ -1,0 +1,42 @@
+# Tool configuration for the agent service. Mirrors backend/pyproject.toml's
+# import-linter section - same tool, same reasoning, a narrower boundary.
+#
+# No [project] table, same as the backend: dependencies stay in
+# requirements.txt; this file is config only.
+
+[tool.importlinter]
+# **Why "agent", not the individual module names.** The backend's
+# root_packages (core, services, api, mcp_server) are real directories with
+# their own __init__.py - import-linter (2.13) requires that: running
+# lint-imports with individual top-level .py files listed here fails with
+# "'config' is a module, not a package. root_packages should only contain
+# packages (directories with __init__.py), not individual .py files." -
+# caught only when the developer actually ran the tool, not by anything in
+# the plan or review that produced this file originally.
+#
+# agent/ has no such subdirectories (config.py, conversation.py,
+# model_provider.py, mcp_client.py are flat files) except scripts/, so the
+# fix is agent/__init__.py, making the whole directory one package. This
+# does NOT change how any runtime code imports things - scripts/ask.py and
+# the rest still do `from config import settings` via the sys.path.insert
+# trick, unaffected by agent/ also being importable as a package from one
+# level up. It only changes how import-linter, specifically, sees the tree.
+root_packages = ["agent"]
+
+# Needed for the forbidden-modules contract below to see pydantic_ai at all -
+# by default the graph contains only our own code.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Only the runtime cluster speaks Pydantic AI"
+type = "forbidden"
+# agent.conversation, agent.model_provider, and agent.mcp_client are the
+# allowed cluster (see conversation.py's module docstring) and are
+# deliberately absent from source_modules below. agent.config and
+# agent.scripts are the two places that must stay ignorant of Pydantic AI -
+# config.py because it is read by every future caller (a store, an HTTP
+# route) that should never need pydantic_ai on its import path to load
+# settings; scripts/ because ask.py talking to conversation.py in plain
+# Message/TurnResult terms is the whole point of Gate 17.
+source_modules = ["agent.config", "agent.scripts"]
+forbidden_modules = ["pydantic_ai"]

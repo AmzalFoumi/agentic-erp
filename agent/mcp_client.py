@@ -119,8 +119,10 @@ class ErpToolset(AbstractToolset[Any]):
 
     Takes a URL rather than a `Client` so that nothing above this file imports
     `mcp` - the mirror of `model_provider.py` keeping `pydantic_ai` off
-    `store.py` and `app.py`. Both halves of the protocol boundary stay in one
-    module each.
+    `config.py` and `scripts/`, the files the Gate 17 `lint-imports` contract
+    actually forbids it in. `mcp_client.py` is one of the allowed runtime
+    cluster (with `conversation.py` and `model_provider.py`). Both halves of
+    the protocol boundary stay in one module each.
     """
 
     def __init__(self, base_url: str) -> None:

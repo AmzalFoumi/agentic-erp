@@ -1020,11 +1020,31 @@ isolation rule lands here, with `agent/pyproject.toml` and its `lint-imports` co
 **`mcp_client.py` moved to Gate 16** (2026-08-06) — it had to exist for Gate 16 to call a tool
 at all, and once `MCPToolset` was ruled out it was no longer the thin wrapper this gate assumed.
 
+**Design, agreed 2026-08-11.** The caller owns the growing conversation, not `conversation.py` —
+this mirrors how Pydantic AI itself works underneath (`agent.run()` is stateless; you pass
+`message_history` back in yourself), just with our own types instead of theirs so nothing outside
+the runtime cluster (`conversation.py`, `model_provider.py`, `mcp_client.py`) needs Pydantic AI to
+exist.
+
+- `Message` — dataclass: `role` ("user"/"assistant"), `content` (str).
+- `TurnResult` — dataclass: `answer` (str), `new_messages` (list[Message] to append), `tool_calls`
+  (list of tool names called, same visibility `ask.py` printed).
+- `run_turn(history: list[Message], question: str) -> TurnResult` — the one public function.
+  Builds the `Agent` from `build_model()` + `ErpToolset`, converts `history` into Pydantic AI's
+  format, runs the turn, converts the result back to our types.
+- No new error handling: a tool failure already becomes a `ModelRetry` the model recovers from
+  (`mcp_client.py`); anything else (bad key, network down) just propagates — no caller needs
+  different behaviour yet.
+- `scripts/ask.py` gets rewritten to call `run_turn` in a loop, so a second question can depend
+  on the first — that loop is the proof the gate is done, alongside `lint-imports`.
+
 **Python concepts introduced:** dataclasses as a boundary type; why a public function's
 signature is an architectural decision.
 
 **Done looks like:** `lint-imports` run from `agent/` reports the contract kept, and
-`conversation.py` is the only file that would break if `pydantic_ai` vanished.
+`conversation.py`, `model_provider.py`, and `mcp_client.py` — the runtime cluster — are the only
+files that would break if `pydantic_ai` vanished; everything else talks only in
+`Message`/`TurnResult`.
 
 **Not in this gate:** anything touching the database or the network beyond MCP.
 
