@@ -44,7 +44,7 @@
 | 13   | Handoff — build from the generated screens, extract component kit, wire to the API. Subgates **13a–13h** in `FRONTEND-PLAN.md` | ✅ done — merged to `main` and `dev` at `af3234b`. Order reversed by developer decision 2026-08-05: build first, capability review at 13g. **13a–13f** (shell, list, detail, create/edit, adjust stock, agent panel in its one real state), each committed by the developer. **13g** capability/deviation list written up in `FRONTEND-PLAN.md` — nothing deleted unilaterally. **13h** cleanup done (`dev-tokens/page.tsx` and `src/lib/api/errors.ts` deleted, no importers remained), plus `032c88f` — lint errors resolved, vendor dirs excluded from ESLint, `next-themes` adopted for the light/dark toggle. Frontend gates 9–13 are closed; the agent panel's five unbuilt states wait on the agent service |
 | 14   | Agent workstream — write `docs/AGENT-PLAN.md`, record the runtime/model/persistence decisions        | ✅ done — docs only, no code. Runtime **Pydantic AI** over LangGraph (its Python Postgres checkpointer cannot target a non-`public` schema, and `interrupt()` requires a checkpointer) and ADK (2.0 broke the agent API, event model and session schema). Model **Gemini Flash**, free tier — Pro is not free-tier. MCP over **Streamable HTTP bound to `127.0.0.1`**, with the stop condition recorded above. Conversation state in the agent's **own `agent` Postgres schema with its own Alembic**. Resumability deferred; three uncertainty flags carried into Gate 16 |
 | 15   | The teaching loop — a bare agent loop, no framework. **Ran; findings kept, code deleted** | ✅ closed 2026-08-06 — built as 15a–15d (`38ac202` for 15a), then **the loop code was deleted by developer decision as not worth maintaining**. What survives: `agent/`'s real infrastructure (own venv, `config.py`, `requirements.txt`, `.env.example`, a second `.gitignore`), one diagnostic at **`agent/scripts/check_mcp.py`** (drives the six MCP tools with no model in the path — the fastest way to tell tool faults from agent faults), and **six findings** written up in `AGENT-PLAN.md` that change gates 16/18/19/21: thought signatures settled (append history as objects, never rebuilt from text; Gate 18 must persist provider-opaque bytes), optional params arrive as `anyOf` and need flattening before Gemini sees them, `FunctionResponse.id` must be echoed or parallel calls mismatch silently, a single response can request **several** tools (so an approval card may show several mutations — unanswered in `FRONTEND-PLAN.md`), and `google-genai` 2.16.0 ships **two** generation APIs with `ai.google.dev` documenting the one we do not use. Also: **async/await arrives here, not Gate 16**, and "under-abstracted" was restated as **flatten the thinking, not the plumbing**. The four comprehension questions move to Gate 16 — the accepted cost of the deletion |
-| 16   | Pydantic AI + `MCPToolset` against the running MCP server over Streamable HTTP                        | ⬜ not started — **does not close with any of four flags open**: the Gemini free-tier limits, the `mcp==2.0.0` Streamable HTTP API (the *server* half — a `backend/mcp_server/server.py` change landing in an agent gate, easy to miss), whether `gemini-3.5-flash-lite` chooses tools well enough, and which `google-genai` API surface Pydantic AI's `GoogleModel` drives |
+| 16   | Pydantic AI against the running MCP server over Streamable HTTP                        | 🟨 in progress — the agent half is written, the server half is not. **`MCPToolset` was the plan and was dropped 2026-08-06**: `pydantic-ai-slim[mcp]` caps `fastmcp-slim<4`, which caps `mcp<2.0`, making it a legacy-handshake-era client and unsatisfiable against this project's `mcp==2.0.0`. `agent/mcp_client.py` implements Pydantic AI's `AbstractToolset` over the raw SDK instead, with a recorded expiry date (pydantic-ai PR #6738). Built: `model_provider.py`, `mcp_client.py` — neither has yet opened a connection. **Does not close with any of three flags open**: the `mcp==2.0.0` Streamable HTTP API (the *server* half — a `backend/mcp_server/server.py` change landing in an agent gate, easy to miss), whether the chosen model chooses tools well enough, and which `google-genai` API surface Pydantic AI's `GoogleModel` drives. The fourth flag, the Gemini free-tier limits, closed 2026-08-06 |
 | 17   | The conversation loop with our own boundary types; the `conversation.py` isolation rule + `agent/pyproject.toml` import-linter contract | ⬜ not started |
 | 18   | Persistence — `agent/alembic/`, the `agent` schema, RLS. Verification includes confirming backend autogenerate proposes nothing | ⬜ not started |
 | 19   | Approval gating on the three mutating tools, at the API level before any UI                          | ⬜ not started |
@@ -246,7 +246,7 @@ checked against PyPI.
 
 ---
 
-## Structure — as actually built (refreshed 2026-08-05 at close of Gate 13; `agent/` added 2026-08-06 at Gate 15a)
+## Structure — as actually built (refreshed 2026-08-05 at close of Gate 13; `agent/` added 2026-08-06 at Gate 15a, its two Gate 16 modules 2026-08-11)
 
 ```
 agentic-erp/
@@ -257,6 +257,7 @@ agentic-erp/
 ├── docs/BACKEND-PLAN.md           # gates 0-8 as built; subordinate to PLAN.md
 ├── docs/FRONTEND-PLAN.md          # gates 9-13; subordinate to PLAN.md
 ├── docs/AUTH-PLAN.md              # the auth decision and deferral; subordinate to PLAN.md
+├── docs/AGENT-PLAN.md             # gates 14-21; subordinate to PLAN.md
 ├── backend/
 │   ├── .env (gitignored), .env.example, requirements.txt, pyproject.toml
 │   ├── alembic.ini, alembic/versions/   # 2 migrations: create products, RLS on alembic_version
@@ -272,6 +273,12 @@ agentic-erp/
 │   ├── config.py                   # BaseSettings, mirrors backend/core/config.py. A COPY,
 │   │                               # not an import — importing backend/ would cross the
 │   │                               # venv boundary the MCP-only rule exists to hold
+│   ├── model_provider.py           # Gate 16: builds the pydantic-ai Model from settings.
+│   │                               # Registry keyed by provider name, so a second provider
+│   │                               # is an entry rather than a branch
+│   ├── mcp_client.py               # Gate 16: ErpToolset, an AbstractToolset over the raw
+│   │                               # mcp 2.0 Client. Hand-written because MCPToolset is
+│   │                               # stuck on mcp<2.0 — see AGENT-PLAN.md, Gate 16
 │   └── scripts/check_mcp.py        # diagnostic: drives the MCP tools with NO model in the
 │                                    # path. Gate 15's loop code was deleted; this survived
 └── frontend/                       # Next.js 16, src/ layout — scaffolded Gate 9, built out 9-13

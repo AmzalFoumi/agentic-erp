@@ -16,7 +16,7 @@ read when you are working in the area they cover.
 
 | File | Scope | Read when |
 |---|---|---|
-| `docs/PLAN.md` | Progress table (gates 0–13), stop gates, division of labour, verify-docs rule, structure | **Every gate. Root — wins over all others** |
+| `docs/PLAN.md` | Progress table (gates 0–21), stop gates, division of labour, verify-docs rule, structure | **Every gate. Root — wins over all others** |
 | `docs/BACKEND-PLAN.md` | Gates 0–8 as built, backend decisions and deferrals | Changing backend code |
 | `docs/FRONTEND-PLAN.md` | Gates 9–13, screen and capability inventories, design-system rationale | Changing frontend code |
 | `docs/AUTH-PLAN.md` | Auth decision, verified provider landscape, the deferral | The auth gate |
