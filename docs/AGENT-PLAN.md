@@ -1048,6 +1048,14 @@ files that would break if `pydantic_ai` vanished; everything else talks only in
 
 **Not in this gate:** anything touching the database or the network beyond MCP.
 
+**Gate closed 2026-08-12.** `conversation.py` built exactly as designed: `Message`
+(`role`, `content`, `provider_data: bytes | None`), `TurnResult`, and `run_turn()` as the one
+public function, with the caller owning the growing history list. `lint-imports` run from the
+repo root with `--config agent/pyproject.toml` reports the "runtime cluster" contract kept —
+`conversation.py`, `model_provider.py`, and `mcp_client.py` are the only files importing
+`pydantic_ai`. `scripts/ask.py` runs a two-question loop where the second question depends on
+the first, proving history actually threads through `run_turn`.
+
 ### Gate 18 — persistence
 
 `store.py`, `agent/alembic/`, the `agent` schema, `version_table_schema="agent"`, RLS enabled
@@ -1058,6 +1066,32 @@ run `alembic revision --autogenerate` from `backend/` and confirm the generated 
 empty — that it does **not** propose dropping the agent's tables.
 
 **Not in this gate:** resumability. History survives; an interrupted turn does not.
+
+**Gate closed 2026-08-12.** Same Supabase Postgres instance as `backend/`, isolated by a
+separate `agent` Postgres schema rather than a separate project — `database.py`'s `Base` uses
+`MetaData(schema="agent")`, and `agent/alembic/env.py` sets `version_table_schema="agent"` in
+both `context.configure()` calls. `models.py` defines `ConversationRow`/`MessageRow`; `store.py`
+exposes `start_conversation`/`append_message`/`load_history` as the only functions any caller
+needs — callers never see `database.py` or `models.py` directly. RLS enabled deny-all (no
+policies) on both new tables via a hand-written migration, mirroring backend's own pattern —
+confirmed via `pg_class.relrowsecurity`.
+
+`conversation.py`'s `Message` gained `provider_data: bytes | None`, serialized/deserialized via
+`ModelMessagesTypeAdapter` so a reloaded conversation's model-internal reasoning/signature data
+survives a round-trip instead of being flattened to plain text. Verified twice: `scripts/verify_store.py`
+proved the database round-trip across two separate process invocations (not shared process
+memory), and `scripts/ask.py`'s two-question demo against the live backend + MCP server confirmed
+`provider_data` works end-to-end in the running agent.
+
+**The negative case that is the reason for this design was hit for real, not just tested for.**
+The first `alembic revision --autogenerate` run from `agent/` proposed dropping backend's real
+`products` and `alembic_version` tables — caught by the mandatory pre-apply review, because
+`agent/alembic/env.py`'s reflection defaulted to scanning the connection's default schema
+(`public`) and diffed it against agent-only `target_metadata`. Fixed at the source: added
+`include_schemas=False` to both of **backend's** `alembic/env.py` `context.configure()` calls,
+so backend's Alembic history structurally cannot see or propose changes to the `agent` schema
+either direction. Verified clean afterward: a negative-case `alembic revision --autogenerate`
+from `backend/` produced a fully empty migration.
 
 ### Gate 19 — approval gating
 
