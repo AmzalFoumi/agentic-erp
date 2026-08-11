@@ -57,6 +57,14 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        # Explicit, not relying on the default. Gate 18 added a second Postgres
+        # schema (`agent`) reached over this same connection, with its own
+        # Alembic history. Without this, autogenerate would reflect every
+        # schema it can see, compare it against this file's target_metadata
+        # (backend's tables only), and propose dropping agent.* as "extra" -
+        # exactly the mistake this line rules out structurally rather than
+        # relying on a human to catch it in review each time.
+        include_schemas=False,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -83,6 +91,8 @@ def run_migrations_online() -> None:
             compare_type=True,
             # Same, for server-side defaults.
             compare_server_default=True,
+            # See run_migrations_offline()'s identical setting above for why.
+            include_schemas=False,
         )
         with context.begin_transaction():
             context.run_migrations()
