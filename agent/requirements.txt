@@ -22,3 +22,17 @@ pydantic-settings==2.14.2
 
 # Enforces the Gate 17 architecture contract in agent/pyproject.toml.
 import-linter==2.13
+
+# SQLAlchemy is the ORM: it maps Python classes to SQL tables. Pinned to the
+# same version as backend/requirements.txt - same library, verified the same
+# week, no reason for the two services to drift.
+sqlalchemy==2.0.51
+
+# The Postgres driver. SQLAlchemy speaks SQL; psycopg speaks to the actual
+# socket. Same pin as backend/requirements.txt.
+psycopg[binary]==3.3.4
+
+# Alembic generates and applies database migrations for the agent's own
+# schema, independent of backend/'s migration history. Same pin as
+# backend/requirements.txt.
+alembic==1.18.5

@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     # middle of a turn.
     gemini_api_key: str
 
+    # Required. Same Supabase Postgres instance backend/ already uses, reached
+    # over the session pooler - a separate setting because agent/ never
+    # imports backend/core/config.py (see this file's module docstring). The
+    # agent's tables live in their own `agent` Postgres schema, not `public`;
+    # see agent/database.py's Base for how that isolation is enforced in code.
+    database_url: str
+
     # Which model to call. A setting rather than a literal because the model
     # lines move fast (Flash went 2.5 -> 3.1 -> 3.5 -> 3.6 in roughly a year)
     # and swapping models is a thing we will actually want to do while tuning
