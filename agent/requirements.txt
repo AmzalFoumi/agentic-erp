@@ -1,51 +1,21 @@
-# Python dependencies for the agent service.
-#
-# Its own venv at agent/.venv, separate from backend/.venv. Not an arbitrary
-# split: agent/ reaches the ERP only over the MCP protocol and never by
-# importing backend/services/ (docs/AGENT-PLAN.md, "Architecture"). Sharing a
-# virtualenv would make crossing that boundary a one-line import away, which
-# is exactly the mistake the boundary exists to prevent.
-#
-# Same conventions as backend/requirements.txt: `==` pins everything, so a
-# build today and a build in six months are identical.
+# Python dependencies for the agent service, own venv at agent/.venv.
+# Full reasoning for these pins lives in docs/AGENT-PLAN.md (Gate 16) — check
+# there before changing any of them, not just here.
 #
 # Verified against PyPI on 2026-08-05; mcp added and re-verified 2026-08-06.
 
-# ---------- The model ----------
+# Pydantic AI - the framework that runs the agent's think/call-tools/reply
+# loop, so we don't write that loop by hand. [google] only, deliberately not
+# [mcp] — that extra conflicts with the mcp==2.0.0 pin below (see
+# AGENT-PLAN.md, Gate 16).
+pydantic-ai-slim[google]==2.24.0
 
-# Google's GenAI SDK - the Gemini Developer API client, and the package Pydantic
-# AI's GoogleModel uses underneath.
-#
-# **Nothing in agent/ imports this right now.** Gate 15's code called it
-# directly and that code was deleted; Gate 16 reaches it through Pydantic AI,
-# which depends on it anyway. So this is an explicit pin for a package no local
-# file imports, which is exactly the kind of line that rots unnoticed.
-#
-# Kept for now rather than removed, because Gate 16 needs it either way and a
-# deleted-then-restored pin is churn. **Decide at Gate 16:** keep the direct pin
-# (we care which version we get, and pydantic-ai's range may be wider than we
-# want) or drop it and let pydantic-ai own the dependency. Do not leave it
-# undecided a second time.
-google-genai==2.16.0
-
-# ---------- MCP (the client half) ----------
-
-# The same package backend/ pins, and the same version - but the other half of
-# it. backend/ imports `mcp.server`; agent/ imports `mcp.client`. One SDK
-# ships both ends of the protocol, which is why the version matches rather
-# than merely happening to.
-#
-# Keeping the two pins equal is not required by anything mechanical - the
-# protocol is versioned separately and 2.0's client negotiates. It is worth
-# doing anyway while both are ours: a protocol-level mismatch between two
-# components you control is a bad way to spend an afternoon.
-#
-# Added at Gate 15. Verified on PyPI 2026-08-06 (2.0.0, released 2026-07-28).
+# The official MCP SDK, client half — lets the agent call the tools exposed
+# by backend/mcp_server/. Must match backend/'s server-half pin, since it's
+# one package speaking both ends of the same protocol.
 mcp==2.0.0
 
-# ---------- Configuration ----------
-
-# Same package and same version as backend/requirements.txt, for the same
-# reason: settings read once into a typed object, so a missing key fails
-# loudly at startup instead of mysteriously mid-turn. Used by config.py.
+# Reads settings from a .env file into a typed object, so a missing or wrong
+# setting fails loudly at startup instead of mysteriously mid-conversation.
+# Used by config.py.
 pydantic-settings==2.14.2
