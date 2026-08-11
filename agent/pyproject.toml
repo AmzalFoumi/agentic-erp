@@ -40,3 +40,9 @@ type = "forbidden"
 # Message/TurnResult terms is the whole point of Gate 17.
 source_modules = ["agent.config", "agent.scripts"]
 forbidden_modules = ["pydantic_ai"]
+
+# Gate 18 note: the agent's own Alembic history (agent/alembic/) sets
+# version_table_schema="agent" directly in agent/alembic/env.py's two
+# context.configure() calls - Alembic has no pyproject.toml equivalent for
+# this setting, so it is not duplicated here. Recorded in this file only so
+# "why does agent/alembic exist and where is it configured" has one answer.
