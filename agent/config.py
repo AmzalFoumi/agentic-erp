@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     # middle of a turn.
     gemini_api_key: str
 
+    # Required. Same Supabase Postgres instance backend/ already uses, reached
+    # over the session pooler - a separate setting because agent/ never
+    # imports backend/core/config.py (see this file's module docstring). The
+    # agent's tables live in their own `agent` Postgres schema, not `public`;
+    # see agent/database.py's Base for how that isolation is enforced in code.
+    database_url: str
+
     # Which model to call. A setting rather than a literal because the model
     # lines move fast (Flash went 2.5 -> 3.1 -> 3.5 -> 3.6 in roughly a year)
     # and swapping models is a thing we will actually want to do while tuning
@@ -193,6 +200,7 @@ class Settings(BaseSettings):
 
 
 # One shared instance, created when this module is first imported. Everything
-# else in agent/ does `from config import settings` (or `from agent.config
-# import settings` once there is a package to import from - Gate 17).
+# else in agent/ does `from config import settings` - Gate 17 deliberately
+# kept this flat-module + sys.path layout rather than introducing an `agent`
+# package, so there is no `agent.config` to import from.
 settings = Settings()  # type: ignore[call-arg]

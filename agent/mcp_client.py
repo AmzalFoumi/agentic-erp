@@ -42,7 +42,7 @@ live server.
 """
 
 from contextlib import AsyncExitStack
-from typing import Any
+from typing import Any, Literal
 
 import pydantic_core
 from mcp.client import Client
@@ -62,6 +62,44 @@ _ARGS_VALIDATOR = pydantic_core.SchemaValidator(
         pydantic_core.core_schema.any_schema(),
     )
 )
+
+
+# The tools that only read. Everything else - now and in future - requires
+# human approval before it runs.
+#
+# **Why this is an allowlist of reads rather than a denylist of writes.**
+# docs/AGENT-PLAN.md's Gate 19 names the three mutating tools, and listing
+# those three here would have been the literal reading. It fails in the wrong
+# direction: a seventh @mcp.tool() added to backend/mcp_server/server.py would
+# default to ungated, execute without approval, and nothing would fail or warn.
+# Inverted, a new tool is gated until someone deliberately declares it a read,
+# and the worst case is one unnecessary confirmation.
+#
+# This also supplies the safety property that get_tools()'s existing choice
+# needs: it asks tools/list on every run rather than caching, specifically so a
+# new backend tool appears without a restart here. A new tool appearing
+# automatically is only safe if it is also gated automatically.
+READ_ONLY = frozenset({"list_products", "get_product", "get_product_by_sku"})
+
+
+def tool_kind(name: str) -> Literal["function", "unapproved"]:
+    """Whether a tool runs freely or waits for a human.
+
+    **`kind="unapproved"` is how Pydantic AI's own `requires_approval=True`
+    works one layer down.** That kwarg belongs to FunctionToolset and the
+    @agent.tool decorators, and is not reachable from a hand-written
+    AbstractToolset like ours - docs/AGENT-PLAN.md's Gate 19 wording named an
+    API surface we do not have. It is not a different mechanism, though:
+    pydantic_ai/tools.py:506 sets `kind='unapproved' if self.requires_approval
+    else 'function'`, and the run graph reads only tool_def.kind
+    (_tool_execution.py:627, result.py:1062). Verified against the installed
+    2.24.0 source on 2026-08-12.
+
+    A separate function rather than an inline conditional in get_tools() so the
+    rule can be tested without a live MCP server, and so tests/ can gate its
+    own fake tools through the same function that gates the real ones.
+    """
+    return "function" if name in READ_ONLY else "unapproved"
 
 
 def normalise_tool_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -119,8 +157,10 @@ class ErpToolset(AbstractToolset[Any]):
 
     Takes a URL rather than a `Client` so that nothing above this file imports
     `mcp` - the mirror of `model_provider.py` keeping `pydantic_ai` off
-    `store.py` and `app.py`. Both halves of the protocol boundary stay in one
-    module each.
+    `config.py` and `scripts/`, the files the Gate 17 `lint-imports` contract
+    actually forbids it in. `mcp_client.py` is one of the allowed runtime
+    cluster (with `conversation.py` and `model_provider.py`). Both halves of
+    the protocol boundary stay in one module each.
     """
 
     def __init__(self, base_url: str) -> None:
@@ -184,6 +224,10 @@ class ErpToolset(AbstractToolset[Any]):
                     # would silently discard the argument documentation the
                     # server treats as interface.
                     parameters_json_schema=normalise_tool_schema(tool.input_schema),
+                    # Gate 19: anything not in READ_ONLY stops for human
+                    # approval before it runs. See tool_kind's docstring for
+                    # why this is `kind=` rather than `requires_approval=True`.
+                    kind=tool_kind(tool.name),
                 ),
                 max_retries=ctx.max_retries,
                 args_validator=_ARGS_VALIDATOR,

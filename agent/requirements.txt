@@ -19,3 +19,31 @@ mcp==2.0.0
 # setting fails loudly at startup instead of mysteriously mid-conversation.
 # Used by config.py.
 pydantic-settings==2.14.2
+
+# Enforces the Gate 17 architecture contract in agent/pyproject.toml.
+import-linter==2.13
+
+# SQLAlchemy is the ORM: it maps Python classes to SQL tables. Pinned to the
+# same version as backend/requirements.txt - same library, verified the same
+# week, no reason for the two services to drift.
+sqlalchemy==2.0.51
+
+# The Postgres driver. SQLAlchemy speaks SQL; psycopg speaks to the actual
+# socket. Same pin as backend/requirements.txt.
+psycopg[binary]==3.3.4
+
+# Alembic generates and applies database migrations for the agent's own
+# schema, independent of backend/'s migration history. Same pin as
+# backend/requirements.txt.
+alembic==1.18.5
+
+# pytest runs the agent's own test suite (Gate 19 - the first tests in agent/).
+# Same pin as backend/requirements.txt: one library, two services, no reason
+# for them to drift. Verified against PyPI on 2026-08-12.
+pytest==9.1.1
+
+# run_turn is async, so pytest needs a plugin to await a test function at all.
+# backend/'s suite never needed this because its services are synchronous.
+# asyncio_mode="auto" in pyproject.toml means no test carries its own marker.
+# Verified against PyPI on 2026-08-12.
+pytest-asyncio==1.4.0

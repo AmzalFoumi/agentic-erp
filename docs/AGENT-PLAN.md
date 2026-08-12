@@ -1020,13 +1020,41 @@ isolation rule lands here, with `agent/pyproject.toml` and its `lint-imports` co
 **`mcp_client.py` moved to Gate 16** (2026-08-06) — it had to exist for Gate 16 to call a tool
 at all, and once `MCPToolset` was ruled out it was no longer the thin wrapper this gate assumed.
 
+**Design, agreed 2026-08-11.** The caller owns the growing conversation, not `conversation.py` —
+this mirrors how Pydantic AI itself works underneath (`agent.run()` is stateless; you pass
+`message_history` back in yourself), just with our own types instead of theirs so nothing outside
+the runtime cluster (`conversation.py`, `model_provider.py`, `mcp_client.py`) needs Pydantic AI to
+exist.
+
+- `Message` — dataclass: `role` ("user"/"assistant"), `content` (str).
+- `TurnResult` — dataclass: `answer` (str), `new_messages` (list[Message] to append), `tool_calls`
+  (list of tool names called, same visibility `ask.py` printed).
+- `run_turn(history: list[Message], question: str) -> TurnResult` — the one public function.
+  Builds the `Agent` from `build_model()` + `ErpToolset`, converts `history` into Pydantic AI's
+  format, runs the turn, converts the result back to our types.
+- No new error handling: a tool failure already becomes a `ModelRetry` the model recovers from
+  (`mcp_client.py`); anything else (bad key, network down) just propagates — no caller needs
+  different behaviour yet.
+- `scripts/ask.py` gets rewritten to call `run_turn` in a loop, so a second question can depend
+  on the first — that loop is the proof the gate is done, alongside `lint-imports`.
+
 **Python concepts introduced:** dataclasses as a boundary type; why a public function's
 signature is an architectural decision.
 
 **Done looks like:** `lint-imports` run from `agent/` reports the contract kept, and
-`conversation.py` is the only file that would break if `pydantic_ai` vanished.
+`conversation.py`, `model_provider.py`, and `mcp_client.py` — the runtime cluster — are the only
+files that would break if `pydantic_ai` vanished; everything else talks only in
+`Message`/`TurnResult`.
 
 **Not in this gate:** anything touching the database or the network beyond MCP.
+
+**Gate closed 2026-08-12.** `conversation.py` built exactly as designed: `Message`
+(`role`, `content`, `provider_data: bytes | None`), `TurnResult`, and `run_turn()` as the one
+public function, with the caller owning the growing history list. `lint-imports` run from the
+repo root with `--config agent/pyproject.toml` reports the "runtime cluster" contract kept —
+`conversation.py`, `model_provider.py`, and `mcp_client.py` are the only files importing
+`pydantic_ai`. `scripts/ask.py` runs a two-question loop where the second question depends on
+the first, proving history actually threads through `run_turn`.
 
 ### Gate 18 — persistence
 
@@ -1038,6 +1066,32 @@ run `alembic revision --autogenerate` from `backend/` and confirm the generated 
 empty — that it does **not** propose dropping the agent's tables.
 
 **Not in this gate:** resumability. History survives; an interrupted turn does not.
+
+**Gate closed 2026-08-12.** Same Supabase Postgres instance as `backend/`, isolated by a
+separate `agent` Postgres schema rather than a separate project — `database.py`'s `Base` uses
+`MetaData(schema="agent")`, and `agent/alembic/env.py` sets `version_table_schema="agent"` in
+both `context.configure()` calls. `models.py` defines `ConversationRow`/`MessageRow`; `store.py`
+exposes `start_conversation`/`append_message`/`load_history` as the only functions any caller
+needs — callers never see `database.py` or `models.py` directly. RLS enabled deny-all (no
+policies) on both new tables via a hand-written migration, mirroring backend's own pattern —
+confirmed via `pg_class.relrowsecurity`.
+
+`conversation.py`'s `Message` gained `provider_data: bytes | None`, serialized/deserialized via
+`ModelMessagesTypeAdapter` so a reloaded conversation's model-internal reasoning/signature data
+survives a round-trip instead of being flattened to plain text. Verified twice: `scripts/verify_store.py`
+proved the database round-trip across two separate process invocations (not shared process
+memory), and `scripts/ask.py`'s two-question demo against the live backend + MCP server confirmed
+`provider_data` works end-to-end in the running agent.
+
+**The negative case that is the reason for this design was hit for real, not just tested for.**
+The first `alembic revision --autogenerate` run from `agent/` proposed dropping backend's real
+`products` and `alembic_version` tables — caught by the mandatory pre-apply review, because
+`agent/alembic/env.py`'s reflection defaulted to scanning the connection's default schema
+(`public`) and diffed it against agent-only `target_metadata`. Fixed at the source: added
+`include_schemas=False` to both of **backend's** `alembic/env.py` `context.configure()` calls,
+so backend's Alembic history structurally cannot see or propose changes to the `agent` schema
+either direction. Verified clean afterward: a negative-case `alembic revision --autogenerate`
+from `backend/` produced a fully empty migration.
 
 ### Gate 19 — approval gating
 
@@ -1053,6 +1107,73 @@ approve and deny.
 
 **Not in this gate:** the UI for it. This is proven at the API level first, because a broken
 interrupt behind a nice card is very hard to diagnose.
+
+**Gate closed 2026-08-12.**
+
+**Correction to this section's own wording.** It said `requires_approval=True` on the three
+mutating tools. That kwarg belongs to `FunctionToolset` and the `@agent.tool` decorators, and is
+not reachable from a hand-written `AbstractToolset` — which `mcp_client.py` is, for the dependency
+reasons recorded at Gate 16. It is the same mechanism one layer down: `pydantic_ai/tools.py:506`
+implements it as `kind='unapproved'` on the `ToolDefinition`, and the run graph reads only
+`tool_def.kind` (`_tool_execution.py:627`, `result.py:1062`). So `get_tools()` sets `kind=`
+directly. Recorded rather than quietly fixed, because the plan named an API surface this project
+cannot use — and the second time `get_tools()` being ours has paid for itself is worth noticing;
+the first was the `anyOf` schema normalisation.
+
+**The gating rule is an allowlist of reads, not a denylist of writes.** `READ_ONLY` holds
+`list_products`, `get_product`, `get_product_by_sku`; everything else is gated. This inverts what
+this section originally described, deliberately: a denylist of the three mutating tools means a
+seventh `@mcp.tool()` added to the backend defaults to *ungated* and executes with no human check,
+with nothing failing to indicate it. Inverted, the worst case is one unnecessary confirmation.
+This also supplies the safety property that `get_tools()`'s existing no-caching choice needs — a
+new backend tool appearing automatically is only safe if it is gated automatically.
+
+`conversation.py` gained `PendingApproval` (`tool_name`, `arguments`, `call_id`), two fields on
+`TurnResult` (`pending`, `resume_state`) with `answer` becoming `str | None`, and `resume_turn()`
+as a second public function. A paused turn appends nothing to history — a half-finished turn is not
+conversation history — so `store.py` was not touched by this gate at all.
+
+**The one place Gate 18's design did not carry over.** `Message.provider_data` serializes only a
+completed turn's last message. A resume cannot use that: the decision is matched back by
+`tool_call_id`, which lives on a `ToolCallPart` in a *middle* message of the run. So `resume_state`
+is the whole run serialized — same `ModelMessagesTypeAdapter` trick, different scope and different
+lifetime.
+
+**A related finding, because it cost a wrong first implementation.** There is no flag on a
+serialized `ToolCallPart` saying "this one is awaiting approval." `ToolCallPart.tool_kind` looks
+like it would serve and does not — it is a discriminator for typed subclasses like `'tool-search'`
+and is `None` for every ordinary tool call, resolved or not. So "still pending" is *derived*:
+every `tool_call_id` that has no answering `ToolReturnPart` and no `RetryPromptPart`. Worth
+recording because Gate 20 will need the same question answered when a pending approval arrives
+from an HTTP request rather than from the object that produced it.
+
+**`resume_state` is not persisted, by decision (developer, 2026-08-12).** A pending approval lives
+in memory and dies with the process. This is acceptable only because nothing but a test asks for
+one yet, and it is not a storage problem — writing the bytes to a table would be trivial. It is
+deferred because the questions that come *with* persisting it have no answers yet: who expires
+abandoned approvals, whether a stale approval that would overwrite a newer change is still valid,
+and how sensitive a stored "when approved, write this" row is before a login system exists.
+**Gate 20 inherits this**, since that is where an HTTP boundary first sits between the pause and
+the decision.
+
+**Proven by tests, not a live demo (developer's call, 2026-08-12).** `agent/tests/` is the first
+test suite in `agent/`: nine tests, no network, `FunctionModel` for the model and a recording fake
+toolset for MCP. The two that carry the gate assert on **whether the tool ran**, not on the answer
+string — a resume that returned plausible text without executing the tool would pass an
+answer-only assertion and be entirely broken. A live demo was declined because it would mostly
+re-prove Gate 16's result, and because a denial cannot be demonstrated against a live model at
+all: the model does not choose whether it is refused. The fake toolset assigns its tool kinds by
+calling `mcp_client.tool_kind()` rather than duplicating the rule, so the tests are evidence about
+the real gating decision rather than about a copy of it.
+
+`agent.tests` is exempt from the Gate 17 `lint-imports` contract, reasoned in
+`agent/pyproject.toml`: a test that fakes the framework cannot avoid naming it. `agent.config` and
+`agent.scripts` stay forbidden, which is where the contract's real value is.
+
+**Still open, moved past this gate rather than closed at it:** `mcp_client.py`'s `call_tool`
+docstring deferred the `ModelRetry` vs `ToolFailed` question to "revisit at Gate 19 if the model is
+seen retrying a lookup that cannot succeed." No such retrying has been observed, and this gate's
+fake toolset would not surface it. The note now points past Gate 19.
 
 ### Gate 20 — the HTTP surface
 
