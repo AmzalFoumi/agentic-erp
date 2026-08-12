@@ -38,8 +38,27 @@ type = "forbidden"
 # route) that should never need pydantic_ai on its import path to load
 # settings; scripts/ because ask.py talking to conversation.py in plain
 # Message/TurnResult terms is the whole point of Gate 17.
+# **Gate 19: agent.tests is deliberately NOT listed here**, i.e. it is allowed
+# to import pydantic_ai. The tests fake the framework - FunctionModel stands in
+# for Gemini, and a fake AbstractToolset stands in for the MCP connection - so a
+# test that could not name pydantic_ai could not fake it either. This does not
+# weaken the contract: its actual purpose is that a future HTTP route can load
+# settings and run a turn without pydantic_ai on its import path, and
+# agent.config and agent.scripts, the two modules that carry that property,
+# stay forbidden below.
 source_modules = ["agent.config", "agent.scripts"]
 forbidden_modules = ["pydantic_ai"]
+
+[tool.pytest.ini_options]
+# Gate 19 added the first tests in agent/. testpaths keeps a bare `pytest` from
+# walking .venv/ and alembic/versions/.
+testpaths = ["tests"]
+
+# Every test in this suite is async, because run_turn is. "auto" means a test
+# function defined with `async def` is awaited without needing its own
+# @pytest.mark.asyncio - the marker would be on literally every test, which
+# makes it noise rather than information.
+asyncio_mode = "auto"
 
 # Gate 18 note: the agent's own Alembic history (agent/alembic/) sets
 # version_table_schema="agent" directly in agent/alembic/env.py's two

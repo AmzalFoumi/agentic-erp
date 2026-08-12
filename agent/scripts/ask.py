@@ -38,6 +38,20 @@ async def _ask(history: list[Message], question: str, *, echo: bool = True) -> l
     else:
         print("  === no tool calls - treat any number in the answer below as invented ===")
 
+    # Gate 19: a turn that asks to change data stops here instead of answering.
+    # This script deliberately cannot approve - approve/deny is exercised by
+    # agent/tests/test_approval.py, and the real thing gets a UI at Gate 21.
+    # Printing the pending calls rather than `answer` (which is None) keeps the
+    # script's output honest about what happened.
+    if result.pending:
+        print("  === stopped for approval - this script cannot approve ===")
+        for approval in result.pending:
+            print(f"      {approval.tool_name}({approval.arguments})")
+        print()
+        # new_messages is empty on a paused turn, so history does not grow -
+        # the question was asked but the turn never completed.
+        return history
+
     print(f"agent: {result.answer}")
     print()
 

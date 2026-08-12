@@ -36,3 +36,14 @@ psycopg[binary]==3.3.4
 # schema, independent of backend/'s migration history. Same pin as
 # backend/requirements.txt.
 alembic==1.18.5
+
+# pytest runs the agent's own test suite (Gate 19 - the first tests in agent/).
+# Same pin as backend/requirements.txt: one library, two services, no reason
+# for them to drift. Verified against PyPI on 2026-08-12.
+pytest==9.1.1
+
+# run_turn is async, so pytest needs a plugin to await a test function at all.
+# backend/'s suite never needed this because its services are synchronous.
+# asyncio_mode="auto" in pyproject.toml means no test carries its own marker.
+# Verified against PyPI on 2026-08-12.
+pytest-asyncio==1.4.0

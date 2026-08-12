@@ -1108,6 +1108,73 @@ approve and deny.
 **Not in this gate:** the UI for it. This is proven at the API level first, because a broken
 interrupt behind a nice card is very hard to diagnose.
 
+**Gate closed 2026-08-12.**
+
+**Correction to this section's own wording.** It said `requires_approval=True` on the three
+mutating tools. That kwarg belongs to `FunctionToolset` and the `@agent.tool` decorators, and is
+not reachable from a hand-written `AbstractToolset` — which `mcp_client.py` is, for the dependency
+reasons recorded at Gate 16. It is the same mechanism one layer down: `pydantic_ai/tools.py:506`
+implements it as `kind='unapproved'` on the `ToolDefinition`, and the run graph reads only
+`tool_def.kind` (`_tool_execution.py:627`, `result.py:1062`). So `get_tools()` sets `kind=`
+directly. Recorded rather than quietly fixed, because the plan named an API surface this project
+cannot use — and the second time `get_tools()` being ours has paid for itself is worth noticing;
+the first was the `anyOf` schema normalisation.
+
+**The gating rule is an allowlist of reads, not a denylist of writes.** `READ_ONLY` holds
+`list_products`, `get_product`, `get_product_by_sku`; everything else is gated. This inverts what
+this section originally described, deliberately: a denylist of the three mutating tools means a
+seventh `@mcp.tool()` added to the backend defaults to *ungated* and executes with no human check,
+with nothing failing to indicate it. Inverted, the worst case is one unnecessary confirmation.
+This also supplies the safety property that `get_tools()`'s existing no-caching choice needs — a
+new backend tool appearing automatically is only safe if it is gated automatically.
+
+`conversation.py` gained `PendingApproval` (`tool_name`, `arguments`, `call_id`), two fields on
+`TurnResult` (`pending`, `resume_state`) with `answer` becoming `str | None`, and `resume_turn()`
+as a second public function. A paused turn appends nothing to history — a half-finished turn is not
+conversation history — so `store.py` was not touched by this gate at all.
+
+**The one place Gate 18's design did not carry over.** `Message.provider_data` serializes only a
+completed turn's last message. A resume cannot use that: the decision is matched back by
+`tool_call_id`, which lives on a `ToolCallPart` in a *middle* message of the run. So `resume_state`
+is the whole run serialized — same `ModelMessagesTypeAdapter` trick, different scope and different
+lifetime.
+
+**A related finding, because it cost a wrong first implementation.** There is no flag on a
+serialized `ToolCallPart` saying "this one is awaiting approval." `ToolCallPart.tool_kind` looks
+like it would serve and does not — it is a discriminator for typed subclasses like `'tool-search'`
+and is `None` for every ordinary tool call, resolved or not. So "still pending" is *derived*:
+every `tool_call_id` that has no answering `ToolReturnPart` and no `RetryPromptPart`. Worth
+recording because Gate 20 will need the same question answered when a pending approval arrives
+from an HTTP request rather than from the object that produced it.
+
+**`resume_state` is not persisted, by decision (developer, 2026-08-12).** A pending approval lives
+in memory and dies with the process. This is acceptable only because nothing but a test asks for
+one yet, and it is not a storage problem — writing the bytes to a table would be trivial. It is
+deferred because the questions that come *with* persisting it have no answers yet: who expires
+abandoned approvals, whether a stale approval that would overwrite a newer change is still valid,
+and how sensitive a stored "when approved, write this" row is before a login system exists.
+**Gate 20 inherits this**, since that is where an HTTP boundary first sits between the pause and
+the decision.
+
+**Proven by tests, not a live demo (developer's call, 2026-08-12).** `agent/tests/` is the first
+test suite in `agent/`: nine tests, no network, `FunctionModel` for the model and a recording fake
+toolset for MCP. The two that carry the gate assert on **whether the tool ran**, not on the answer
+string — a resume that returned plausible text without executing the tool would pass an
+answer-only assertion and be entirely broken. A live demo was declined because it would mostly
+re-prove Gate 16's result, and because a denial cannot be demonstrated against a live model at
+all: the model does not choose whether it is refused. The fake toolset assigns its tool kinds by
+calling `mcp_client.tool_kind()` rather than duplicating the rule, so the tests are evidence about
+the real gating decision rather than about a copy of it.
+
+`agent.tests` is exempt from the Gate 17 `lint-imports` contract, reasoned in
+`agent/pyproject.toml`: a test that fakes the framework cannot avoid naming it. `agent.config` and
+`agent.scripts` stay forbidden, which is where the contract's real value is.
+
+**Still open, moved past this gate rather than closed at it:** `mcp_client.py`'s `call_tool`
+docstring deferred the `ModelRetry` vs `ToolFailed` question to "revisit at Gate 19 if the model is
+seen retrying a lookup that cannot succeed." No such retrying has been observed, and this gate's
+fake toolset would not surface it. The note now points past Gate 19.
+
 ### Gate 20 — the HTTP surface
 
 `app.py` with SSE streaming, and the Next proxy route at

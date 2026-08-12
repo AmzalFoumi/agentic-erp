@@ -50,7 +50,7 @@
 | 16   | Connecting the AI agent framework to the running agent-server                        | ✅ done 2026-08-11 — **the AI agent answered a real question about real data for the first time.** Asked "what's low on stock?", it chose the right tool by itself, read the database, and listed all nine understocked products with correct figures — no invented numbers. Three more questions were tried (a price, a product code, and a product we don't stock); it got all three right, including correctly saying we don't sell goat cheese rather than offering something similar. **One honest limit:** it used the same "list everything" tool for all four questions, so we know it prefers looking things up over guessing, but not yet that it picks correctly between all six tools. The three tools that *change* data haven't been tried at all — that's stage 19. To make the test real we also added 20 products across seven categories, since with one product in the catalogue any question had the same answer. **The originally planned approach was dropped** on 2026-08-06 because of a dependency version conflict that made it impossible to use with our agent-server. We wrote our own replacement instead, with a note to revisit once the underlying library fixes the issue. Built so far: the code that sets up the AI model, and the code that talks to the agent-server. On 2026-08-11 we added the agent-server's network mode (it can now be reached at a web address instead of only being launched as a child program), simplified the tool-testing script from thirty lines of locating the backend's files down to one web address, and wrote the small demo script this stage is judged by — one question in, a real database answer out. Two of the four open questions are now closed: free usage limits (2026-08-06) and which part of the Gemini library our framework uses (2026-08-11 — the stateless one, which is what our plan for saving conversations assumed). The exact model names were also read off Google's console on 2026-08-11 and put into the settings file — you can now write a short nickname (`gemma-31b`, `gemma-26b`, `flash-lite`) instead of the long official name, and leaving the setting blank picks the sensible default. We checked first that the Gemma models can actually use tools at all, since that's the only thing we need a model for; they can. All four of the stage's open questions are now closed |
 | 17   | Writing the agent's own conversation-handling code, with clear boundaries enforced automatically | ✅ done 2026-08-12 — `conversation.py` built with our own `Message`/`TurnResult` types and one public `run_turn()` function; the developer's own automated check confirms only three files in the whole agent talk to the AI framework directly, everything else uses our own plain types |
 | 18   | Saving conversations to the database, with the same row-level security used elsewhere, and confirming this doesn't interfere with the backend's own database setup | ✅ done 2026-08-12 — conversations and messages now persist to their own isolated area of the same database, with the same lock-it-down-by-default security switched on; proved this can't accidentally interfere with the existing website/API's own database area by triggering the exact mistake once (caught before it touched anything) and then fixing it so it structurally can't happen again |
-| 19   | Requiring human approval before the AI agent can run any of its three actions that change data, enforced at the API level before any UI exists for it                          | ⬜ not started |
+| 19   | Requiring human approval before the AI agent can run any of its three actions that change data, enforced at the API level before any UI exists for it                          | ✅ done 2026-08-12 — the agent now stops and asks before it changes anything, and correctly carries on whether the answer is yes or no. Built to **fail safe**: rather than listing the three actions that need permission, we listed the three that are safe to run freely, so any *new* action someone adds later needs permission automatically instead of slipping through unnoticed. This is also the first stage with an automated test suite for the AI agent itself — nine tests that run without the internet or the real AI model, using stand-ins for both, so the yes-and-no behaviour can be checked in seconds and a refusal can be tested at all (you can't ask a real AI model to be refused). The tests check whether the action *actually ran*, not whether the reply looked right — a version that said "done" without doing anything would pass a sloppier test. Two honest limits recorded: a pending question is held in memory only, so it's lost if the program restarts — deliberately left until stage 20, when there's a real server for that to matter on — and there's still no screen for any of this; that's stage 21. Also corrected a wrong detail in this stage's own plan: it named a feature of the AI library that isn't reachable the way we've built ours, though the same mechanism is available one level down |
 | 20   | Giving the AI agent its own web address, with live streaming responses, plus wiring it into the website           | ⬜ not started |
 | 21   | The website's AI-agent panel — building the five remaining screens/states described in `FRONTEND-PLAN.md`                    | ⬜ not started — this is also when we revisit whether conversations need to survive a page reload, once we can actually see how long a "turn" takes |
 
@@ -264,7 +264,7 @@ the real package registry.
 
 ---
 
-## Project file structure — as it actually exists (last refreshed 2026-08-05 at the end of stage 13; the `agent/` folder added 2026-08-06, its two newest files 2026-08-11)
+## Project file structure — as it actually exists (last refreshed 2026-08-12 at the end of stage 19; the `agent/` folder added 2026-08-06, its database and test files added at stages 18–19)
 
 ```
 agentic-erp/
@@ -296,9 +296,19 @@ agentic-erp/
 │   ├── mcp_client.py               # stage 16: the code that talks to the agent-server.
 │   │                               # Hand-written because the ready-made version couldn't
 │   │                               # be used — see AGENT-PLAN.md, stage 16, for why
+│   ├── conversation.py             # stage 17: runs one turn. Stage 19 added the approval
+│   │                               # pause and resume; still the only file callers import
+│   ├── store.py  models.py  database.py  alembic/
+│   │                               # stage 18: saving conversations to the agent's own
+│   │                               # separate area of the database
+│   ├── tests/                      # stage 19: the agent's own test suite, the first one.
+│   │                               # Runs with no internet and no real AI model — stand-ins
+│   │                               # for both — so approve/deny is checked in seconds
 │   └── scripts/check_mcp.py        # a diagnostic script: tests the agent-server's tools
-│                                    # directly, with NO AI model involved. Everything else
-│                                    # from stage 15 was deleted; this one script was kept
+│       scripts/ask.py              # directly, with NO AI model involved. Everything else
+│       scripts/verify_store.py     # from stage 15 was deleted; this one script was kept.
+│                                    # ask.py is the demo script; verify_store.py proves
+│                                    # stage 18's saving works across two separate runs
 └── frontend/                       # the website (Next.js 16) — set up at stage 9, built out in stages 9-13
     ├── .env.example, package.json, next.config.ts, eslint.config.mjs, components.json
     ├── DESIGN.md                   # the design rules (colors, fonts, spacing); other reference docs alongside
