@@ -156,7 +156,7 @@ caller's to supply. Internally:
 - `True` → `ToolApproved()`
 - `False` → `ToolDenied("A human reviewed this and did not approve it.")`
 
-then `agent.run("", message_history=<rebuilt from resume_state>, deferred_tool_results=results)`,
+then `agent.run(None, message_history=<rebuilt from resume_state>, deferred_tool_results=results)`,
 following the package's own documented pattern (`TOOLS-ADVANCED.md`, "Require Tool Approval").
 
 A `call_id` in `decisions` that is not pending, or a pending call missing from `decisions`, raises
@@ -174,8 +174,10 @@ approvals never surface at all — stated as one of two key rules in the package
 
 **Where the user question lives on resume.** `resume_turn` takes the original `history` and the
 `resume_state`; the interrupted turn's user question is already inside `resume_state`, so it is not
-passed again. The prompt to `agent.run` is `""` (the documented pattern uses a filler like
-`'Continue'`; empty is the same idea with less chance of the model treating it as new instruction).
+passed again. The prompt to `agent.run` is `None` — verified against `agent/__init__.py`'s signature
+(`user_prompt: str | Sequence[UserContent] | None = None`), so "no new user message" is a supported
+state rather than something to fake. The package's own example passes the filler string
+`'Continue'`; `None` says the same thing without adding a turn the user never typed.
 
 ## The test seam
 
@@ -226,10 +228,45 @@ Tests 3 and 4 are the actual content of the gate. "Resumes correctly on approve 
 proven by asserting the **side effect** — whether the tool ran — not by checking that some string
 came back, which both cases produce.
 
-A fifth check belongs with them but is a unit test rather than a turn: `READ_ONLY` and the `kind`
-assignment in `get_tools()`, asserting that a tool name absent from `READ_ONLY` comes back
-`kind="unapproved"`. This is the fail-closed property from the section above, and it is the one
-thing that would silently rot if a backend tool were renamed.
+A fifth check belongs with them but is a unit test rather than a turn: the fail-closed property
+itself. `get_tools()` cannot be called without a live MCP client, so the decision is extracted into
+a pure function beside `READ_ONLY`:
+
+```python
+def tool_kind(name: str) -> Literal["function", "unapproved"]:
+    return "function" if name in READ_ONLY else "unapproved"
+```
+
+`get_tools()` calls it, and so does the test file's fake toolset — which means the same function
+that gates the real tools is the one the approve/deny tests exercise, rather than the tests
+asserting against a hand-written duplicate of the rule. Unit tests cover all six real tool names
+plus an invented one (`delete_product`), which is the case that matters: a tool nobody has written
+yet must come back `"unapproved"`.
+
+## Two mechanical traps the implementation must handle
+
+**Test imports.** `agent/` modules are flat and import each other bare (`from config import
+settings`), which works because `scripts/ask.py` does `sys.path.insert(0, <agent dir>)` first. A
+test package has the same problem and needs the same fix, in `agent/tests/conftest.py`, before any
+test module is imported. It is worse than it looks: `agent/__init__.py` exists (added at Gate 17 so
+`lint-imports` could see the tree), so pytest would otherwise resolve the tests as
+`agent.tests.test_approval` from the repo root, at which point `from config import ...` inside
+`conversation.py` fails.
+
+**Tests build their own `Settings`.** `config.py` creates a module-level `settings = Settings()` at
+import time, so importing anything in `agent/` still requires a valid `agent/.env` — a pre-existing
+property, not something this gate introduces. Tests construct their own `Settings(...)` instance
+rather than using the shared one, so a test never depends on which model or database URL the
+developer happens to have configured.
+
+## `scripts/ask.py` must not silently break
+
+`ask.py` prints `result.answer` directly. With `answer: str | None`, asking it to change a price
+would print `agent: None` — technically correct, uselessly confusing. It gains a short branch: if
+`result.pending` is non-empty, print each pending tool call and state plainly that this script
+cannot approve them, pointing at the tests as where approve/deny is exercised. Keeping `ask.py`
+honest matters more than keeping it small; it is the script the previous three gates were
+demonstrated with.
 
 ## `lint-imports`
 
