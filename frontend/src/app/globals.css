@@ -307,4 +307,25 @@
   .animate-blink {
     animation: blink 1s step-end infinite;
   }
+
+  /*
+   * shadcn's shared <Table> wraps in its own `overflow-x-auto` div. Per the
+   * CSS overflow spec, a lone non-"visible" axis forces the other axis's
+   * "visible" to become "auto" too - so that div is *also* a vertical scroll
+   * container, even though its auto height means it never actually scrolls.
+   * A sticky <thead> inside computes against the nearest scroll container,
+   * which becomes that inert div instead of the real scrolling ancestor
+   * around it - so the header just scrolls away with everything else.
+   *
+   * Setting only `overflow-y: visible` does not escape this: the same
+   * visible/non-visible pairing rule immediately re-upgrades it back to
+   * "auto" as long as `overflow-x` stays "auto." The only way out is
+   * `overflow: visible` on *both* axes, which stops the div being a scroll
+   * container at all - sacrificing this table's horizontal scroll for a
+   * working sticky header. Scoped to `.table-scroll-fix` rather than global
+   * so it only touches tables that opt in.
+   */
+  .table-scroll-fix [data-slot="table-container"] {
+    overflow: visible;
+  }
 }
