@@ -40,6 +40,15 @@ export function classifyPanelState(
   }
 
   const last = messages[messages.length - 1];
+
+  // useChat optimistically appends the user's own message and sets status to
+  // "submitted" before any assistant message exists. If the last message
+  // isn't from the assistant yet, there's nothing to inspect for tool parts
+  // or output — the agent hasn't responded at all, so this is "thinking".
+  if (last.role !== "assistant") {
+    return { state: "thinking", pendingApprovalPart: null };
+  }
+
   const parts = toolParts(last);
   const pending = parts.find(
     (part) => part.state === "approval-requested" && !part.approval?.isAutomatic && part.approval?.id,
@@ -49,18 +58,19 @@ export function classifyPanelState(
     return { state: "approval", pendingApprovalPart: pending };
   }
 
-  const hasOutput = parts.some((part) => part.state === "output-available");
-  if (hasOutput) {
+  // Only an approved, human-confirmed mutation counts as "success". Read-only
+  // tools (list_products, get_product, ...) never go through approval — they
+  // reach "output-available" too, but with no `approval` object at all, so
+  // they fall through to the normal reply rendering instead of the mutation
+  // Success card. No tool name is hardcoded here (Global Constraint).
+  const hasApprovedOutput = parts.some(
+    (part) => part.state === "output-available" && part.approval?.approved === true,
+  );
+  if (hasApprovedOutput) {
     return { state: "success", pendingApprovalPart: null };
   }
 
-  if (status === "submitted") {
-    // Sent, nothing back yet — no text, no tool part.
-    const hasAnyContent = last.parts.some((part) => part.type === "text" && part.text.length > 0);
-    return { state: hasAnyContent ? "streaming" : "thinking", pendingApprovalPart: null };
-  }
-
-  if (status === "streaming") {
+  if (status === "submitted" || status === "streaming") {
     return { state: "streaming", pendingApprovalPart: null };
   }
 

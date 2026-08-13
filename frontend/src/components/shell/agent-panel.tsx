@@ -1,6 +1,6 @@
 "use client";
 
-import { useChat } from "@ai-sdk/react";
+import { useChat, type UIMessage } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import { useEffect, useState } from "react";
 
@@ -10,7 +10,13 @@ import { SuccessCard } from "./agent-panel/success-card";
 import { ThinkingIndicator } from "./agent-panel/thinking-indicator";
 import { ToolCallCard } from "./agent-panel/tool-call-card";
 import { classifyPanelState, type ToolUIPart } from "./agent-panel/use-panel-state";
-import { startAgentConversation } from "@/lib/api/agent";
+import { getAgentConversation, startAgentConversation } from "@/lib/api/agent";
+
+// localStorage key holding the id of the conversation currently open in the
+// panel, so a page reload can resume it (parked approval or plain history)
+// instead of silently starting a brand-new conversation. No TTL/sweeper by
+// design — a stale id just 404s and the code falls back to a fresh one.
+const CONVERSATION_STORAGE_KEY = "agent-panel-conversation-id";
 
 /**
  * The agent region. Gate 20 gave the agent its own HTTP surface and a Next.js
@@ -23,19 +29,42 @@ import { startAgentConversation } from "@/lib/api/agent";
  */
 export function AgentPanel() {
   const [conversationId, setConversationId] = useState<number | null>(null);
+  const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    startAgentConversation()
-      .then((id) => {
-        if (!cancelled) setConversationId(id);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to start agent conversation");
+
+    async function resumeOrStart() {
+      const storedId = window.localStorage.getItem(CONVERSATION_STORAGE_KEY);
+      const parsedId = storedId ? Number(storedId) : null;
+
+      if (parsedId !== null && Number.isFinite(parsedId)) {
+        const existing = await getAgentConversation(parsedId);
+        if (existing) {
+          if (!cancelled) {
+            setInitialMessages(existing.messages as UIMessage[]);
+            setConversationId(parsedId);
+          }
+          return;
         }
-      });
+        // 404 — the stored id no longer exists server-side. Fall through to
+        // starting a fresh conversation below.
+      }
+
+      const newId = await startAgentConversation();
+      if (!cancelled) {
+        window.localStorage.setItem(CONVERSATION_STORAGE_KEY, String(newId));
+        setConversationId(newId);
+      }
+    }
+
+    resumeOrStart().catch((err: unknown) => {
+      if (!cancelled) {
+        setError(err instanceof Error ? err.message : "Failed to start agent conversation");
+      }
+    });
+
     return () => {
       cancelled = true;
     };
@@ -54,14 +83,21 @@ export function AgentPanel() {
     );
   }
 
-  return <ConnectedAgentPanel conversationId={conversationId} />;
+  return <ConnectedAgentPanel conversationId={conversationId} initialMessages={initialMessages} />;
 }
 
-function ConnectedAgentPanel({ conversationId }: { conversationId: number }) {
+function ConnectedAgentPanel({
+  conversationId,
+  initialMessages,
+}: {
+  conversationId: number;
+  initialMessages: UIMessage[];
+}) {
   const [input, setInput] = useState("");
 
   const { messages, sendMessage, addToolApprovalResponse, status } = useChat({
     id: String(conversationId),
+    messages: initialMessages,
     transport: new DefaultChatTransport({
       api: `/api/agent/conversations/${conversationId}/turns`,
     }),
@@ -106,9 +142,10 @@ function ConnectedAgentPanel({ conversationId }: { conversationId: number }) {
               const last = messages[messages.length - 1];
               const outputPart = last?.parts
                 .filter((part) => part.type.startsWith("tool-"))
-                .findLast((part) => (part as unknown as ToolUIPart).state === "output-available") as
-                | ToolUIPart
-                | undefined;
+                .findLast((part) => {
+                  const toolPart = part as unknown as ToolUIPart;
+                  return toolPart.state === "output-available" && toolPart.approval?.approved === true;
+                }) as ToolUIPart | undefined;
               return outputPart ? <SuccessCard part={outputPart} /> : null;
             })()}
           </>
