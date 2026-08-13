@@ -54,7 +54,7 @@ export default function RootLayout({
       className={`${fontSans.variable} ${fontMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">
+      <body className="flex h-screen flex-col overflow-hidden">
         <ThemeProvider>
           {/* App header */}
           <div className="flex items-center justify-between border-b border-border bg-card px-5 py-3">

@@ -1382,10 +1382,13 @@ so no DesignSync re-fetch happened this gate.
 **Two deliberate deviations from the original design, recorded rather than silently dropped:**
 
 - The `12 → 20 (+8)` delta format needs the product's quantity *before* the change, which is not
-  present in a tool call's arguments (`adjust_stock` only carries the target `sku`/`quantity`).
-  Computing the real delta would need a lookup through `src/lib/api` before rendering the approval
-  card. Shipped instead: the raw tool arguments rendered as plain key/value pairs. Revisit if this
-  ever feels too vague to approve against confidently.
+  present in a tool call's arguments (`adjust_stock`/`update_product` only carry a `product_id` and
+  the target quantity). Computing the real delta would need a lookup through `src/lib/api` before
+  rendering the approval card. Shipped instead: the raw tool arguments rendered as plain key/value
+  pairs. **Partially revisited 2026-08-13:** `product_id` now resolves to `SKU — Name` via a Server
+  Action (`getProductSummary` in `src/lib/api/products.ts`, called from `tool-call-card.tsx`) with a
+  `Skeleton` shown while it loads — so the card names the product, but the quantity delta itself is
+  still not computed; that half of the original deviation stands.
 - "Refusal" has no distinct signal on the wire — no `state: 'refused'` or equivalent exists in the
   protocol, so a plain-text decline is indistinguishable at the wire level from any other finished
   plain-text reply. Shipped instead: every settled plain-text reply renders identically. A muted
@@ -1439,13 +1442,18 @@ Both rounds are why a task passing its own review is necessary but not sufficien
 existed in code that had already been individually reviewed and approved per-task, and only
 surfaced once the whole wiring was exercised end to end.
 
-**Deliberately not yet verified, and not forgotten:** a real `npx tsc --noEmit` and `npm run lint`
-pass once the developer installs `ai@7.0.64`/`@ai-sdk/react@4.0.67`, and a hand-driven browser
-walkthrough of all six states plus approve/deny/reload against the live backend and agent
-service — both require the developer's own machine and are not something this gate could do
-itself. Also not built: an aria-label on the panel's input, and any visible indication when a
-turn's `status` is `'error'` (currently renders identically to a normal settled reply) — recorded
-as follow-ups, not silently dropped.
+**Verified 2026-08-13:** `npm install ai@7.0.64 @ai-sdk/react@4.0.67`, `npx tsc --noEmit`, and
+`npm run lint` from `frontend/` — all clean, including after the `product_id` → SKU resolution
+addition above (its `useProductLabel` hook needed one fix round for
+`react-hooks/set-state-in-effect`, resolved by keying resolved labels in a `Record<number, string |
+null>` map rather than resetting a scalar state value inside the effect).
+
+**Deliberately not yet verified, and not forgotten:** a hand-driven browser walkthrough of all six
+states plus approve/deny/reload against the live backend and agent service — requires the
+developer's own machine and is not something this gate could do itself. Also not built: an
+aria-label on the panel's input, and any visible indication when a turn's `status` is `'error'`
+(currently renders identically to a normal settled reply) — recorded as follow-ups, not silently
+dropped.
 
 ---
 

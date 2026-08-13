@@ -2,7 +2,7 @@
 
 import { useChat, type UIMessage } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { IdleState } from "./agent-panel/idle-state";
 import { MessageList } from "./agent-panel/message-list";
@@ -11,6 +11,8 @@ import { ThinkingIndicator } from "./agent-panel/thinking-indicator";
 import { ToolCallCard } from "./agent-panel/tool-call-card";
 import { classifyPanelState, type ToolUIPart } from "./agent-panel/use-panel-state";
 import { getAgentConversation, startAgentConversation } from "@/lib/api/agent";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 // localStorage key holding the id of the conversation currently open in the
 // panel, so a page reload can resume it (parked approval or plain history)
@@ -72,7 +74,7 @@ export function AgentPanel() {
 
   if (conversationId === null) {
     return (
-      <aside className="flex w-64 shrink-0 flex-col gap-stack border-l border-border bg-card p-section">
+      <aside className="flex h-full w-64 min-h-0 shrink-0 flex-col gap-stack border-l border-border bg-card p-section">
         <div className="text-sm font-semibold">Assistant</div>
         {error ? (
           <div className="text-sm text-destructive">{error}</div>
@@ -95,7 +97,7 @@ function ConnectedAgentPanel({
 }) {
   const [input, setInput] = useState("");
 
-  const { messages, sendMessage, addToolApprovalResponse, status } = useChat({
+  const { messages, sendMessage, addToolApprovalResponse, status, error } = useChat({
     id: String(conversationId),
     messages: initialMessages,
     transport: new DefaultChatTransport({
@@ -106,65 +108,126 @@ function ConnectedAgentPanel({
 
   const { state, pendingApprovalPart } = classifyPanelState(status, messages);
 
+  const [refetchError, setRefetchError] = useState<string | null>(null);
+  const [isRefetching, setIsRefetching] = useState(false);
+
+  const handleRefetch = async () => {
+    setIsRefetching(true);
+    setRefetchError(null);
+    try {
+      const existing = await getAgentConversation(conversationId);
+      if (!existing) {
+        setRefetchError("Conversation no longer exists");
+      }
+    } catch (err: unknown) {
+      setRefetchError(err instanceof Error ? err.message : "Failed to refetch conversation");
+    } finally {
+      setIsRefetching(false);
+    }
+  };
+
   const submit = (text: string) => {
     if (text.trim().length === 0) return;
     sendMessage({ text });
     setInput("");
   };
 
+  const last = messages[messages.length - 1];
+  const lastHasVisibleText = (last?.parts ?? []).some(
+    (part) => part.type === "text" && (part as { text: string }).text.length > 0,
+  );
+
+  // Covers two gaps in the raw wire signal: (1) right after the user's own
+  // message is appended, `status` is already "submitted" but nothing has
+  // streamed yet - the plain "thinking" case; (2) right after an approval is
+  // confirmed, `status` goes "streaming" again for the tool-execution-and-reply
+  // leg, but there is no growing text part until the model's final reply
+  // starts, so the panel would otherwise show nothing at all in between.
+  const showThinking =
+    state === "thinking" || (state === "streaming" && !lastHasVisibleText);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Keep the latest message in view as it arrives, instead of leaving the
+  // scroll position wherever it was and making the user scroll down to see
+  // a reply, an approval card, or the success card that just appeared.
+  // Depends on text content too, not just message identity/count: a
+  // streaming assistant message keeps the same id while its text grows, and
+  // that growth is exactly when the bottom keeps moving out of view.
+  const lastText = last?.parts
+    .filter((part) => part.type === "text")
+    .map((part) => (part as { text: string }).text)
+    .join("");
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages.length, lastText, state, pendingApprovalPart]);
+
   return (
-    <aside className="flex w-64 shrink-0 flex-col gap-stack border-l border-border bg-card p-section">
+    <aside className="flex h-full w-64 min-h-0 shrink-0 flex-col gap-stack border-l border-border bg-card p-section">
       <div className="text-sm font-semibold">Assistant</div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col gap-stack overflow-y-auto">
         {state === "idle" && <IdleState onPickExample={setInput} />}
-        {state === "thinking" && <ThinkingIndicator />}
-        {state === "streaming" && (
+        {messages.length > 0 && (
           <MessageList messages={messages} isStreaming={status === "streaming"} />
         )}
+        {showThinking && <ThinkingIndicator />}
         {state === "approval" && pendingApprovalPart && (
-          <>
-            <MessageList messages={messages} isStreaming={false} />
-            <ToolCallCard
-              part={pendingApprovalPart}
-              onRespond={(approved) => {
-                if (pendingApprovalPart.approval?.id) {
-                  addToolApprovalResponse({ id: pendingApprovalPart.approval.id, approved });
-                }
-              }}
-            />
-          </>
+          <ToolCallCard
+            part={pendingApprovalPart}
+            onRespond={(approved) => {
+              if (pendingApprovalPart.approval?.id) {
+                addToolApprovalResponse({ id: pendingApprovalPart.approval.id, approved });
+              }
+            }}
+          />
         )}
-        {state === "success" && (
-          <>
-            <MessageList messages={messages} isStreaming={false} />
-            {(() => {
-              const last = messages[messages.length - 1];
-              const outputPart = last?.parts
-                .filter((part) => part.type.startsWith("tool-"))
-                .findLast((part) => {
-                  const toolPart = part as unknown as ToolUIPart;
-                  return toolPart.state === "output-available" && toolPart.approval?.approved === true;
-                }) as ToolUIPart | undefined;
-              return outputPart ? <SuccessCard part={outputPart} /> : null;
-            })()}
-          </>
+        {state === "success" &&
+          (() => {
+            const outputPart = last?.parts
+              .filter((part) => part.type.startsWith("tool-"))
+              .findLast((part) => {
+                const toolPart = part as unknown as ToolUIPart;
+                return toolPart.state === "output-available" && toolPart.approval?.approved === true;
+              }) as ToolUIPart | undefined;
+            return outputPart ? <SuccessCard part={outputPart} /> : null;
+          })()}
+        {status === "error" && (
+          <div className="flex flex-col gap-2 rounded-(--radius) border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div className="font-semibold">Error</div>
+            <div>{error?.message ?? "An error occurred"}</div>
+            {refetchError && <div className="text-xs">Refetch failed: {refetchError}</div>}
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={handleRefetch}
+              disabled={isRefetching}
+              className="mt-1"
+            >
+              {isRefetching ? "Refetching…" : "Retry"}
+            </Button>
+          </div>
         )}
       </div>
 
       <form
-        className="mt-auto pt-stack"
+        className="mt-auto flex shrink-0 gap-2 pt-stack"
         onSubmit={(event) => {
           event.preventDefault();
           submit(input);
         }}
       >
-        <input
+        <Input
           value={input}
           onChange={(event) => setInput(event.target.value)}
           placeholder="Ask the assistant…"
-          className="h-control w-full rounded-(--radius) border border-input bg-card px-3 text-sm text-foreground"
+          aria-label="Message to assistant"
+          className="min-w-0 flex-1"
         />
+        <Button type="submit" disabled={input.trim().length === 0}>
+          Send
+        </Button>
       </form>
     </aside>
   );
