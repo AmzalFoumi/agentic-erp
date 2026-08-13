@@ -1,358 +1,219 @@
-# Authentication — decision, provider landscape, and the deferral
+# Authentication — the decision, the mechanism, and the four gates
 
 > **Subordinate to `docs/PLAN.md`.** This file holds the authentication and agent-identity
-> workstream in full: why a provider has not been chosen, the verified comparison of the
-> candidates, and the conditions under which the deferral expires. Where this file and `PLAN.md`
-> disagree, **`PLAN.md` wins** and this file is the thing that is out of date.
+> workstream in full: the provider position, the delegation mechanism the design rests on, how the
+> permission vocabulary maps onto it, and what each of Gates 22–26 has to do. Where this file and
+> `PLAN.md` disagree, **`PLAN.md` wins** and this file is the thing that is out of date.
 >
-> It is split out because it is read at exactly one future gate — the auth gate — while the
-> decision it records constrains work in `backend/` and `frontend/` alike, so filing it under
-> either one would hide it from the other. `PLAN.md` keeps only the two expiry conditions, because
-> those gate further feature work and must sit in the file that is always read.
+> It is split out because it is read at exactly one stretch of the project — the auth gates — while
+> the decisions it records constrain `backend/`, `agent/` and `frontend/` alike, so filing it under
+> any one of them would hide it from the other two. `PLAN.md` keeps only the gate rows and the
+> expiry trigger, because those gate further feature work and must sit in the file that is always
+> read.
 >
-> **The open item is closed** (first 2026-08-13 amendment, below): the design rests on RFC 8693 token
-> exchange, and ThunderID ships it free when self-hosted, so the Asgardeo free-tier question no
-> longer gates the decision.
->
-> **The deferral itself has since expired** (second 2026-08-13 amendment): the stated goal of hosting
-> all four services fires expiry condition 1, which makes the auth gate a **hard prerequisite for
-> deployment**. No provider is committed yet — a timeboxed spike comes first.
->
-> **Read the two 2026-08-13 amendments before the older ones**, and the second before the first;
-> where any of them disagree, the later one wins.
+> **Rewritten in place on 2026-08-14 (Gate 22).** This document previously carried a 2026-07-29
+> decision plus three dated amendments that had to be read in reverse order, and its provider
+> comparison had gone stale in ways that changed the work. Everything below is current and reads
+> forwards. Nothing was silently dropped: the superseded comparison is preserved, compressed, under
+> "What we considered and rejected". The reasoning behind every decision is kept; only the
+> read-the-amendments-backwards structure is gone.
 
 ---
 
-## Decision: authentication (2026-07-29)
+## Status in one paragraph
 
-**Supabase is used for Postgres only** — not Auth, Storage, or Realtime. The backend connects with
-SQLAlchemy over a plain connection string, so the database stays portable (swap the string for Neon
-or RDS and nothing else changes).
+The deferral has expired and the work is scheduled. **ThunderID is the chosen provider, subject to
+a spike that must pass first** (Gate 23). The delegation mechanism is **OAuth 2.0 Token Exchange
+(RFC 8693)**. **ID-JAG is deliberately left open** as a later switch, and — this is the finding that
+most changes the shape of the work — leaving it open costs one function parameter, because ID-JAG is
+a value of `requested_token_type` on the same endpoint, not a rival architecture. No application
+code has been written yet.
 
-**The auth provider choice is deferred; the design for it is not.**
+---
 
-Human auth and agent auth are different problems. Human auth is commoditized (Supabase Auth, Clerk,
-Auth0). Agent auth — an AI acting _on behalf of_ a person, with a subset of their permissions and a
-clear accountability trail — is unsettled and actively churning. **WSO2 ThunderID**
-(<https://github.com/asgardeo/thunder>, announced May 2026) targets exactly that, with RBAC spanning
-humans, agents and workloads, and is being contributed to the OpenWallet Foundation. It is also two
-months old with no GA declaration, which makes it a poor first dependency for this project today.
+## Why this is happening now
 
-Also note: while the MCP server runs over **stdio locally**, the agent runs as the developer and
-there is no auth question to answer. It only appears when the MCP server goes remote.
-
-**What we do now, from Gate 3/4 onward:**
-
-- Every service function takes an `actor` as its second argument, after `session`.
-- `core/exceptions.py` includes `PermissionDeniedError`.
-- Permission checks live in `services/` (`actor.can("inventory:adjust")`), never in the adapters.
-- Models carry `created_by` / `updated_by` audit columns.
-- A `SystemActor` with full permissions is used until a real provider is wired in.
-
-Services never learn _how_ someone authenticated — only who they are and what they may do. FastAPI
-will derive the `Actor` from a JWT; MCP will derive it from its session context. Both hand the
-service the same object, so adopting a provider later is a change to two adapter files rather than
-a rewrite. The audit columns are wanted regardless — an ERP needs "who adjusted this stock?".
-
-**Re-evaluate ThunderID in ~6 months** (around Q1 2027), once it has a GA release, if agent-identity
-governance becomes central. Otherwise Supabase Auth is the pragmatic default, since the project is
-already provisioned and it integrates with Postgres row-level security.
-
-### Amended 2026-07-31 (Gate 7): the provider landscape, verified
-
-Raised by the developer while planning the frontend: _can an agent be restricted to only the
-logged-in user's allowed actions, is an identity server actually required, and is there a free option?_
-
-**An identity server is required.** The standards-based mechanism for "the agent may only do what the
-user may do" is **OAuth 2.0 Token Exchange (RFC 8693)**: the agent presents the user's token as
-`subject_token` and receives a _derived, narrower_ token carrying both the user's identity and the
-agent's. Issuing that token is by definition an authorization server's job. The alternatives —
-forwarding the user's raw token, or running the agent as a service account — are precisely the
-confused-deputy and privilege-escalation failures documented under "three deployment shapes" in
-`docs/BACKEND-PLAN.md` (Gate 6).
-MCP assumes this too: an HTTP MCP server is an OAuth resource server that must never forward the
-caller's token upstream.
-
-| Option                                                            | Status                                                               | Who runs the server                                 | Cost                                                                                                    |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **ThunderID** (Apache 2.0, Go)                                    | ~~**Alpha** — `v1.0.0-alpha2`~~ **beta2 as of 2026-08-07** — see the 2026-08-13 amendment | **You** — binary/container, datastore, TLS, backups | Free licence, paid for in ops                                                                           |
-| **WSO2 Asgardeo** — renaming to **WSO2 Identity Platform** (SaaS) | GA                                                                   | **WSO2** — nothing to run                           | Free tier; see below                                                                                    |
-| **WSO2 Identity Server** (Java, on-prem)                          | GA, established                                                      | **You** — JVM, heavier                              | Free to self-host; no agent-specific tooling                                                            |
-| **Auth0 "Auth for MCP"**                                          | **GA since May 2026**                                                | Auth0                                               | Commercial. Most complete packaged story: OBO token exchange, DCR, resource indicators                  |
-| **Keycloak 26.2+**                                                | GA                                                                   | **You** — container + database                      | Free. RFC 8693 token exchange officially supported since 26.2; 26.5 adds cross-domain identity chaining |
-
-**Correction to the note above:** ThunderID has moved from `asgardeo/thunder` to
-<https://github.com/thunder-id/thunderid>, with its own site at <https://thunderid.dev>. It is
-**standalone — it does not require WSO2 Identity Server.** It is still alpha, which confirms rather
-than undermines the Q1 2027 re-evaluation.
-
-**Asgardeo free tier, verified 2026-07-31.** "Free forever", no credit card, three tiers by use case:
-B2C up to 7,500 MAUs · B2B up to 250 · **B2E up to 50 employee MAUs**. This ERP is **B2E** — the users
-are stock clerks and managers, not consumers — so 50 monthly active users is the relevant allowance,
-which comfortably covers a single supermarket's back office. Beyond it, B2E is Enterprise-quoted at
-~$2.50/MAU. Free-tier limits: 3 administrators, 5 applications, 2 MFA methods, **2 days audit-log
-retention**, 3 days session retention; accounts inactive 2+ months are terminated. The audit retention
-is survivable here only because "who adjusted this stock" is answered by our own
-`created_by`/`updated_by` columns, not by the provider's logs.
-
-**Open question, to be settled at the auth gate before committing to a provider: is RFC 8693 token
-exchange available on the Asgardeo free tier?** That single feature is what the entire delegation
-design rests on, and free tiers commonly gate it. If it is paid-only, the free answer is Keycloak,
-where RFC 8693 is confirmed shipping.
-
-**Revised shortlist:** Asgardeo free tier (zero ops, _if_ token exchange is included) or Keycloak
-(self-hosted, free, confirmed). **Not Supabase Auth** — it solves human auth, which is the easy half,
-and has no delegation story for the agent half. That supersedes the "Supabase Auth is the pragmatic
-default" line above.
-
-### The deferral, stated plainly (2026-07-31)
-
-**Nothing in gates 7–13 implements authentication, and nothing in them should.** No provider is
-chosen, no login screen is built, no token is issued or validated. `SystemActor` remains the only
-`Actor` implementation; `frontend/src/lib/auth/current-user.ts` will hardcode `"system"` to match it.
-
-Why, restated so it is not mistaken for an oversight: the hard half is _agent_ identity, not human
-identity. Human auth is commoditized and can be added in a week. Agent delegation is unsettled — the
-best-fitting product is at alpha, and the feature the design rests on is unconfirmed on the free tier
-of the shipping alternative. Choosing now would mean choosing on the easy half and discovering the
-hard half afterward.
-
-Cost of deferring: three functions — `api/deps.py`'s `get_actor()`, `mcp_server/server.py`'s
-`_actor()`, and `frontend/src/lib/auth/current-user.ts`. Cost of _forgetting_: the privilege-escalation
-bypass described under "three deployment shapes" in `docs/BACKEND-PLAN.md`, with no log entry
-distinguishing it from
-legitimate use.
-
-**Two conditions make this deferral expire.** Either one triggers the auth gate before further
-feature work:
+Two conditions were written down long ago as expiring the deferral. Either one triggers the auth
+gates before further feature work:
 
 1. The MCP server becomes reachable over HTTP by anything that is not the developer's own machine.
 2. A second human user exists.
 
-Until both are false, `SystemActor` is acceptable _only_ because no unauthenticated caller exists.
+**Condition 1 has fired.** The stated goal is to host the frontend, the API backend, the MCP server
+and the agent. A hosted MCP server is by definition reachable by something other than the
+developer's own machine.
+
+So the ordering is fixed, and it is not a preference:
+
+> **The auth gates are a hard prerequisite for deployment.** Not a nice-to-have that follows it.
+
+Deploying first is not a "ship it and add auth after" trade-off, which is how it usually gets
+rationalised. `mcp_server/server.py`'s `_actor()` returns `SystemActor`, and `services/` grants
+`SystemActor` everything — so a publicly reachable MCP server on today's code gives **anonymous
+callers full write access to inventory**, with every row stamped `created_by="mcp"` and nothing
+distinguishing those writes from legitimate ones. There is no partial version of this to ship.
+
+Gate 20 anticipated this: `agent/app.py` binds to `127.0.0.1` with a test that fails if that
+changes, and `AGENT-PLAN.md` records the intended order as **local → auth → deploy**. That test is
+the thing currently standing between this code and anonymous write access, and it is deleted in
+**Gate 26 and not before**.
 
 ---
 
-## Amended 2026-08-13: ThunderID researched against its live docs
+## The design, and why an identity server is required
 
-Raised by the developer while the agent gates were closing: _implement ThunderID for auth — humans
-reach the FastAPI backend through the frontend, and the agent runs at the same level of access or
-lower (an inventory agent reaching only inventory tools), which means securing the MCP server too._
-The specific worry was framework support: ThunderID's site advertises LangChain, with ADK and CrewAI
-"coming soon", and **Pydantic AI is not mentioned anywhere**.
+Human auth and agent auth are different problems. Human auth is commoditized. Agent auth — an AI
+acting *on behalf of* a person, with a subset of their permissions and a clear accountability trail
+— is the hard half, and it is the half this project is actually organised around.
 
-Verified against <https://thunderid.dev/docs/next/> and the GitHub releases API on 2026-08-13. Four
-findings, in descending order of how much they change the plan.
+**An identity server is required.** The standards-based mechanism for "the agent may only do what
+the user may do" is **RFC 8693 token exchange**: the agent presents the user's token as
+`subject_token` and receives a *derived, narrower* token carrying both the user's identity and the
+agent's. Issuing that token is by definition an authorization server's job. The alternatives —
+forwarding the user's raw token, or running the agent as a service account — are precisely the
+confused-deputy and privilege-escalation failures documented under "three deployment shapes" in
+`docs/BACKEND-PLAN.md` (Gate 6). MCP assumes this too: an HTTP MCP server is an OAuth resource
+server that must never forward the caller's token upstream.
 
-### 1. The Pydantic AI concern is moot — there is nothing to port
+### What was already built for this, years ahead of needing it
 
-ThunderID's "LangChain integration" is a tutorial, not a package. It contains **zero ThunderID
-libraries**: a `requests.post` to the token endpoint for `client_credentials`, and a `contextvar`
-holding the resulting token so a tool can read it. Nothing in it is LangChain-specific, and there is
-therefore no adapter Pydantic AI is missing. The "coming soon" list is a docs backlog, not a
-capability gate.
+From Gates 3–4 onward, and unchanged by anything below:
 
-This matters more here than for most projects because `agent/mcp_client.py` is already a
-hand-written `AbstractToolset` rather than Pydantic AI's `MCPToolset` — the token would be attached
-where that file builds its client, which is code we own either way.
+- Every service function takes an `actor` as its second argument, after `session`.
+- Permission checks live in `services/` (`actor.can("stock.adjust")`), never in the adapters.
+- `core/exceptions.py` includes `PermissionDeniedError`.
+- Models carry `created_by` / `updated_by` audit columns.
+- A `SystemActor` granting everything stands in until a real provider is wired in.
 
-### 2. RFC 8693 is present, free, and behaves the way the design assumed
+Services never learn *how* someone authenticated — only who they are and what they may do. That is
+why adopting a provider is a change to a handful of seam functions rather than a rewrite. The audit
+columns are wanted regardless; an ERP needs "who adjusted this stock?".
 
-This closes the open item that headed this file. Self-hosting ThunderID (Apache 2.0) carries no
-licence cost, so the Asgardeo free-tier question is no longer load-bearing.
+---
 
-From `guides/protocols/oauth-oidc/token-exchange/`, the parts the design depends on:
+## The mechanism, verified against ThunderID's live docs (2026-08-13/14)
+
+### Token exchange
 
 | Aspect | Behavior |
 | --- | --- |
 | Endpoint / grant | `POST /oauth2/token`, `grant_type=urn:ietf:params:oauth:grant-type:token-exchange` |
-| `scope` | **Downscoping allowed, widening rejected with `invalid_scope`.** Final scopes must also be permissions on the target resource server _and_ authorized for the issuing app or agent |
+| `subject_token` / `subject_token_type` | Required. Input types accepted: `access_token`, `refresh_token`, `id_token`, `jwt` |
+| `scope` | **Downscoping allowed, widening rejected with `invalid_scope`.** Final scopes must also be permissions on the target resource server *and* authorized for the issuing app or agent |
 | `resource` | RFC 8707 resource indicator. The issued token is bound to exactly this resource server |
 | `audience` | Accepted for RFC 8693 compatibility but **does not determine the `aud` claim** — use `resource` |
-| `actor_token` | Optional; supplies the acting party in a delegation chain |
-| `requested_token_type` | `:access_token`, `:jwt`, `:id-jag`. Not `id_token`, not `refresh_token` |
+| `actor_token` / `actor_token_type` | Optional; supplies the acting party in a delegation chain. `actor_token_type` is required when `actor_token` is given |
+| `requested_token_type` | `access_token`, `jwt`, **`id-jag`**. `id_token` and `refresh_token` outputs are not supported |
 
-The scope row is the whole design in one line: "the agent may only do what the user may do" is
-enforced by the issuer, not by us. An inventory-only agent is an agent authorized for a narrower
+The scope row is the whole design in one line: **"the agent may only do what the user may do" is
+enforced by the issuer, not by us.** An inventory-only agent is an agent authorized for a narrower
 permission set, exchanged against a token that cannot widen it.
 
-Two traps recorded because they cost a debugging session each if unknown: **`audience` is a decoy**
-— setting it and expecting the token's `aud` to follow will silently fail, and `resource` is the
-parameter that works; and the `act` claim only appears when an explicit `actor_token` is supplied,
-so a delegation chain that omits it produces a token that is downscoped but does not say _who_
-narrowed it.
+Two traps recorded because each costs a debugging session if unknown:
 
-### 3. Set the resource-server `delimiter` to `"."` — it is immutable after creation
+- **`audience` is a decoy.** Setting it and expecting the token's `aud` to follow will silently
+  fail. `resource` is the parameter that works.
+- **The `act` claim is not documented on the token-exchange page.** Whether it appears without an
+  explicit `actor_token` is unverified — Gate 23 must check. If it does not, a delegation chain that
+  omits `actor_token` produces a token that is downscoped but does not say *who* narrowed it.
 
-From `guides/resource-servers/`: permissions are `{resource-handle}{delimiter}{action-handle}`, with
-`delimiter` defaulting to `:` and **"cannot be changed after creation"**. Allowed characters include
-`.`.
+### ID-JAG is a parameter, not a second architecture
 
-Our permission vocabulary is already `product.create`, `product.update`, `stock.adjust` — the strings
-`services/` passes to `actor.can()` today. Registering the backend with `delimiter: "."` makes
-ThunderID's permission strings identical to the ones already in the code, so `TokenActor.can()` is a
-set membership test and nothing needs translating. Accepting the `:` default would mean either
-rewriting every `can()` call site or maintaining a mapping table forever, and the field cannot be
-corrected afterward.
+This supersedes an earlier framing in which RFC 8693 and ID-JAG were rival mechanisms to choose
+between. They are not. ID-JAG is a value of `requested_token_type` on the **same endpoint, same
+grant type, same request** — see the table above.
 
-Permission strings are **not** prefixed by the resource server; the server is identified by its
+It gets better: **both halves of the ID-JAG flow already ship in the `mcp==2.0.0` this project
+already pins.** Verified against the installed source in both virtualenvs on 2026-08-14 — nothing to
+install, nothing to upgrade:
+
+| Side | What exists today | Where |
+| --- | --- | --- |
+| Server | `AuthSettings.identity_assertion_enabled` — "Advertise and accept the SEP-990 Identity Assertion Authorization Grant (the RFC 7523 jwt-bearer grant carrying an ID-JAG) at the token endpoint" | `mcp/server/auth/settings.py` |
+| Client | `IdentityAssertionOAuthProvider`, a complete `httpx2.Auth` for the SEP-990 flow, taking an `assertion_provider` callback | `mcp/client/auth/extensions/identity_assertion.py` |
+| Both | `AccessToken.claims` documented as carrying `act` | `mcp/server/auth/provider.py` |
+
+So the ID-JAG path is a flag on one side and a different `httpx2.Auth` on the other.
+
+**The rule that keeps it open**, stated once and enforced in one place per side:
+
+> **Never hardcode the grant type or the requested token type.** Both are parameters of a single
+> function per side. Everything above those functions sees an `Actor` or an `httpx2.Auth` and knows
+> nothing about which OAuth mechanism produced it.
+
+- **Agent side:** `agent/auth.py` (new at Gate 25) exposes
+  `get_scoped_token(user_token, *, resource, scopes, requested_token_type=...)`, defaulting to
+  `access_token`. Switching to ID-JAG later means passing `...:id-jag` and swapping in the SDK's
+  `IdentityAssertionOAuthProvider`. Agent-to-agent means supplying `actor_token`, which the same
+  function already accepts.
+- **Backend side:** `AuthSettings(...)` gains `identity_assertion_enabled=True` when needed. The
+  `TokenVerifier` validates a JWT and does not care how it was minted.
+
+**Deliberate non-goal: do not build an ID-JAG code path now.** It is a parameter and a flag over
+machinery that already ships. Building it before a real cross-domain use case exists would be
+speculative work against a draft spec, with no second party to test against. What is required now is
+only that nothing *blocks* it.
+
+When would it actually be needed? When the other side of the hop is not ours: an outside MCP server
+under someone else's identity provider, or an outside agent acting for its own user against ours.
+Agents that are all ours, calling servers that are all ours, stay in a single trust domain, which is
+exactly what RFC 8693 is for.
+
+### Agents are first-class identities, which is what makes "more agents later" cheap
+
+From ThunderID's agent guide: an agent is "a machine identity for autonomous software, such as an AI
+assistant, a background worker, or a scheduled job," each with "its own identifier, owner,
+credentials, attributes, and lifecycle," holding "scoped access through roles and groups, so an
+agent reaches only what its work needs."
+
+Three operating modes are supported natively, which is the full set this project needs:
+
+1. **Agent token** — the agent acts autonomously, as itself.
+2. **User delegation** — the agent acts on behalf of a user. *This is the one Gate 25 builds.*
+3. **Agent-to-agent** — authority delegated from one agent to another.
+
+Two constraints from the agent-authentication guide: agents are **confidential clients**, using
+either `client_secret` or `private_key_jwt`; and an agent **cannot** use
+`tokenEndpointAuthMethod: none`, which would mark it a public client, block `client_credentials`,
+and limit it to user-delegated flows.
+
+Consequence for this project: adding a second agent later is **a registration plus a role**, not a
+design change. A second agent is a new identity with its own narrower permission set, exchanging
+against the same endpoint through the same `get_scoped_token`.
+
+### Permission strings already match — if the delimiter is set at creation
+
+ThunderID builds hierarchical permissions as `{resource-handle}{delimiter}{action-handle}`. The
+delimiter **defaults to `:`**, accepts characters from `a-z A-Z 0-9 . _ : - /`, and **cannot be
+changed after creation**.
+
+Our permission vocabulary is already dotted — these are the exact strings `services/` passes to
+`actor.can()` today:
+
+| Permission | Resource handle | Action handle |
+| --- | --- | --- |
+| `product.read` | `product` | `read` |
+| `product.create` | `product` | `create` |
+| `product.update` | `product` | `update` |
+| `stock.adjust` | `stock` | `adjust` |
+
+So registering the backend as a resource server with **`delimiter: "."`** makes ThunderID's
+permission strings *identical* to the ones already in the code, and `TokenActor.can()` becomes a set
+membership test with nothing to translate. Accepting the `:` default would mean either rewriting
+every `can()` call site or maintaining a mapping table forever — and the field cannot be corrected
+afterwards, only deleted and re-registered.
+
+Permission strings are **not** prefixed by the resource server. The server is identified by its
 `identifier`, which becomes the token's `aud`.
 
-### 4. Compatibility risk is real but survivable: their guide assumes a stack we do not run
+**One correction to an easy assumption:** `product.read` is checked on reads too — four call sites
+in `services/products.py`. A read-only agent still needs a scope. "Read-only tools need no
+permission" is false here.
 
-ThunderID's Python MCP guide is written against `fastmcp>=3.4,<4`, which pins `mcp>=1.24,<2.0` — the
-**legacy** protocol era. `backend/` runs `mcp==2.0.0` deliberately (see `mcp_client.py`'s opening
-docstring for why that pin exists on both halves). Following their guide verbatim would mean
-downgrading the backend to the protocol era the project spent Gate 6 leaving.
+### What the MCP authorization spec actually requires
 
-Not necessary. Verified directly against the installed `mcp==2.0.0` source that it has native
-resource-server support, no FastMCP involved:
-
-- `mcp.server.auth.settings.AuthSettings(issuer_url, resource_server_url, required_scopes, ...)`
-- `mcp.server.auth.provider.AccessToken(token, client_id, scopes, expires_at, resource, subject, claims)`
-- `mcp.server.auth.middleware.auth_context.get_access_token() -> AccessToken | None`
-- `MCPServer(..., token_verifier=, auth=)` wires `BearerAuthBackend` + `AuthContextMiddleware`
-
-So the tutorial's FastMCP decorator is replaced by a custom `TokenVerifier` — roughly forty lines —
-and `mcp_server/server.py`'s `_actor()` becomes the seam it was always meant to be:
-
-```python
-def _actor() -> Actor:
-    token = get_access_token()
-    return TokenActor(id=token.subject, scopes=frozenset(token.scopes), act=token.claims.get("act"))
-```
-
-**One real gap.** `AuthSettings.required_scopes` is a single server-wide list; `mcp==2.0.0` has no
-per-tool equivalent to FastMCP's `require_scopes()`. That is not a blocker here, because
-per-operation authorization already lives in `services/` via `actor.can(...)` — which is where this
-project decided it belongs. The MCP layer checks "may you reach this server at all"; the service
-layer checks "may you adjust stock". Do not try to move the second one up.
-
-### Status and what changes in this file
-
-**ThunderID is at `v1.0.0-beta2` (2026-08-07)**, not the `v1.0.0-alpha2` recorded in the 2026-07-31
-table above — four releases in three weeks (alpha 07-21, alpha2 07-28, beta 08-04, beta2 08-07).
-Still no GA. The churn that motivated "re-evaluate around Q1 2027" is real and visible in that
-cadence; a pin to an exact tag is mandatory if we adopt it.
-
-**Revised position.** The shortlist's premise has changed: the deciding question is no longer
-"is token exchange available for free" (yes, self-hosted ThunderID) but "is a pre-GA server
-acceptable as the identity provider for this system". Keycloak remains the conservative answer and
-its RFC 8693 support is confirmed; ThunderID is the better _fit_ and the worse _bet_. **Nothing is
-committed here** — the two deferral expiry conditions above still stand unchanged, and no provider
-is chosen until one of them fires.
-
-**Before adopting, timebox a spike:** install ThunderID via Docker, register the backend as a
-resource server with `delimiter: "."`, and prove that one token-exchange call produces a downscoped
-token that a real `TokenVerifier` on `mcp==2.0.0` accepts. That last step is the only part of this
-that no documentation can answer for us.
-
----
-
-## Amended 2026-08-13 (second pass): the deferral has expired, and what running ThunderID costs
-
-The amendment above settled *whether the design works*. This one settles *when it has to happen* and
-*what we are signing up to operate*. Where the two disagree, this one is later and wins.
-
-### 1. Condition 1 has fired — auth now precedes deployment, not the reverse
-
-The developer stated the goal: **host the frontend, the API backend, the MCP server, and the agent.**
-A hosted MCP server is, by definition, "reachable over HTTP by anything that is not the developer's
-own machine" — expiry condition 1, further up this file. So the deferral is no longer open-ended:
-
-> **The auth gate is a hard prerequisite for deployment.** Not a nice-to-have that follows it.
-
-Deploying first is not a "ship it and add auth after" trade-off, which is how it usually gets
-rationalised. `mcp_server/server.py`'s `_actor()` returns `SystemActor`, and `services/` grants
-`SystemActor` everything — so a publicly reachable MCP server with today's code gives **anonymous
-callers full write access to inventory**, with every row stamped `created_by="mcp"` and no way to
-tell those writes from legitimate ones. There is no partial version of this to ship.
-
-Stage 20 already anticipated it: the agent binds to `127.0.0.1` with a test that fails if that
-changes, and `AGENT-PLAN.md` records the intended order as **local → auth → deploy**. This amendment
-just confirms the middle step is now scheduled rather than hypothetical.
-
-### 2. The full grant-type table, and two capabilities the design had not considered
-
-Verified against `guides/protocols/oauth-oidc/` on 2026-08-13:
-
-| Grant | Spec | Relevance here |
-| --- | --- | --- |
-| Authorization Code | RFC 6749 §4.1 | Human login. PKCE required for public clients |
-| Client Credentials | RFC 6749 §4.4 | Machine-to-machine, no user. **Not** how the agent should act for a user |
-| Refresh Token | RFC 6749 §6 | Session continuity |
-| **Token Exchange** | **RFC 8693** | The delegation mechanism this design rests on — see amendment above |
-| **Identity Assertion Grant (ID-JAG)** | `draft-ietf-oauth-identity-assertion-authz-grant` | Cross-domain identity assertions. A **second** candidate for the agent→MCP hop |
-| **CIBA** | CIBA Core 1.0 | Decoupled approval on a separate device, no browser redirect |
-
-Security extensions advertised alongside these: PKCE, PAR, DPoP, and **Resource Indicators
-(RFC 8707)** — the last is what the MCP authorization spec requires for audience-targeting, so its
-presence is load-bearing, not incidental.
-
-Two of these were not in the design and are worth considering at the gate rather than after it:
-
-- **CIBA answers a question stage 19 left open.** That stage built "pause and ask for human
-  approval," but approval only works while someone is watching the chat. CIBA pushes the request to
-  a separate device — the standards-based version of "the agent wants to adjust stock at 3am, ask
-  the manager's phone." Not needed to close the auth gate; noted so it is not reinvented later.
-- **ID-JAG may fit the agent→MCP hop better than RFC 8693.** Both are supported, so this is a design
-  choice at the gate, not a provider constraint. Do not assume token exchange is the only option
-  just because it is the one this file has discussed longest.
-
-### 3. There is no hosted ThunderID — self-hosting is the whole offering
-
-Searched 2026-08-13: **no SaaS tier, no cloud sandbox, no demo instance.** This matters because the
-2026-07-31 shortlist framed the choice as "Asgardeo free tier (zero ops) or Keycloak (self-hosted)",
-and ThunderID is unambiguously in the second category. Adopting it means:
-
-- a **fifth deployed service**, with its own container, persistent datastore, TLS, and backups;
-- **pinning an exact tag** — four releases in three weeks, still pre-GA;
-- owning the upgrade path when a pre-GA server makes a breaking change.
-
-Stated plainly so the trade is visible: five services and a pre-GA identity provider is meaningfully
-more operational surface than four services. That is the real cost of "free licence", and it is the
-same cost Keycloak carries — Keycloak simply carries it with a GA release behind it.
-
-### 4. No Python SDK — and this is not a problem
-
-ThunderID ships SDKs for React, Next.js, Express, Vue, Nuxt, Node, vanilla JS, iOS, Android and
-Flutter. **There is no Python SDK.** It does not matter, because of which OAuth role each half of
-this system plays:
-
-| Component | OAuth role | What it needs |
-| --- | --- | --- |
-| `frontend/` (Next.js) | **Client** | Runs the login redirect, holds the client secret, manages the session. This is where an SDK earns its keep — `@thunderid/nextjs` exists |
-| `backend/api/` | **Resource server** | Only validates an incoming JWT against the JWKS endpoint. ~40 lines of `pyjwt[crypto]` or `authlib` |
-| `backend/mcp_server/` | **Resource server** | Same, via `mcp==2.0.0`'s native `TokenVerifier` — see amendment above |
-
-So **no vendor library enters `backend/` at all.** That is worth protecting deliberately: it keeps
-the provider swappable the same way SQLAlchemy keeps Supabase swappable, which matters more than
-usual given the pre-GA risk in point 3. If adopting a provider ever requires a vendor import below
-`api/` or `mcp_server/`, that is a signal the integration is being done wrong.
-
-### 5. Where ThunderID lives — not in this repository
-
-Recorded because it is the question a newcomer to auth asks first, and the wrong answer creates mess
-that is annoying to undo. **Treat ThunderID exactly like Postgres.** Supabase's source is not vendored
-into `backend/`; neither is this. What belongs in the repo is only: a compose file or `deploy/`
-config, environment variables (issuer URL, client ID, client secret), and the generic OIDC validation
-code described in point 4.
-
-⚠️ **Trap with the `npx` install path.** `npx thunderid --install-dir . …` writes a datastore and
-config files into the current directory. **Do not run it inside the repository** — use a sibling
-directory such as `D:\Amzal Projects\thunderid-local\`. The Docker Compose path (pinned at a tag) is
-preferred anyway, because it is closer to how the thing will actually be deployed.
-
-Install reference, for the spike: `npx thunderid --install-dir . --admin-username admin
---admin-password secret`, or the pinned `install/quick-start/docker-compose.yml`. Server at
-`https://localhost:8090`, console at `/console`, **self-signed certificate** — it must be accepted in
-a browser once before any client will talk to it.
-
-### 6. What the MCP authorization spec actually requires
-
-Read 2026-08-13, because "MCP needs the full OAuth stack" was doing a lot of unexamined work in this
-file. The requirements on a hosted `mcp_server/` are **resource-server** requirements, and the list
-is shorter than the phrase implies:
+The requirements on a hosted `mcp_server/` are **resource-server** requirements, and the list is
+shorter than "MCP needs the full OAuth stack" implies:
 
 - It is an **OAuth 2.1 resource server**, and nothing more.
 - It **MUST** serve `/.well-known/oauth-protected-resource` (RFC 9728) naming its authorization server.
@@ -361,28 +222,243 @@ is shorter than the phrase implies:
 - Failures are `401` with `WWW-Authenticate`, or `403` with `insufficient_scope`.
 - Clients must validate the `iss` parameter (RFC 9207).
 - **RFC 7591 Dynamic Client Registration is deprecated**, in favour of Client ID Metadata Documents.
-  The 2026-07-31 table credits Auth0 with DCR as a selling point; that is now a fading advantage.
-- **stdio transports SHOULD NOT follow this spec** — which independently confirms that today's local
-  setup is correct rather than merely unaudited.
+- **stdio transports SHOULD NOT follow this spec** — which independently confirms that the local
+  stdio setup is correct rather than merely unaudited.
 
 Note what is *absent*: **RFC 8693 is not required by MCP.** Token exchange is our answer to the
-delegation problem, not the protocol's demand. That is why point 2's ID-JAG option is genuinely open.
+delegation problem, not the protocol's demand. That is precisely why the ID-JAG option stays open.
 
-### 7. Sequencing
+**One divergence recorded deliberately, not to be fixed.** ThunderID's MCP guide says the MCP server
+should check scope at the tool boundary, before a tool handler runs. This project checks in
+`services/` via `actor.can(...)`. **Keep it that way.** The MCP layer answers "may you reach this
+server at all"; `services/` answers "may you adjust stock". `mcp==2.0.0`'s `required_scopes` is a
+single server-wide list with no per-tool equivalent anyway, and per-operation authorization belongs
+where this project decided it belongs. Do not try to move the second check up.
 
-1. **Spike** — the timeboxed one at the end of the amendment above. Nothing else starts until a real
-   downscoped token is accepted by a real `TokenVerifier`.
-2. **Commit to a provider** and update this file. ThunderID is the better fit; Keycloak is the safer
-   bet; the deciding question is pre-GA tolerance, not features.
-3. **Human auth end-to-end** — login in `frontend/`, bearer token attached in `src/lib/api/`,
-   `get_actor()` validating the JWT. One gate.
-4. **Agent delegation + MCP over Streamable HTTP as a resource server** — points 2 and 6 above, plus
-   the transaction-pooler/`NullPool` switch recorded in `BACKEND-PLAN.md`. One gate, and the risky one.
-5. **Then deploy.**
+---
 
-One decision deliberately left open, because it belongs to step 2 and not to this file: whether
-permissions live in ThunderID roles (carried in the token) or in a local table keyed on the OIDC
-`sub`. The permission *strings* are already business rules owned by `services/` — see the `delimiter`
-finding above — which argues for the local table, but the token-exchange downscoping rule argues the
-issuer needs to know them too. Settle it with the spike in hand.
+## What this costs to run
 
+Stated plainly so the trade is visible rather than discovered later.
+
+**There is no hosted ThunderID.** No SaaS tier, no cloud sandbox, no demo instance — self-hosting is
+the whole offering. Adopting it means:
+
+- a **fifth deployed service**, with its own container, persistent datastore, TLS and backups;
+- **pinning an exact tag** — five releases in four weeks, still pre-GA;
+- owning the upgrade path when a pre-GA server makes a breaking change.
+
+Five services and a pre-GA identity provider is meaningfully more operational surface than four
+services. That is the real cost of "free licence", and Keycloak carries the same cost — it simply
+carries it with a GA release behind it.
+
+**Release status, checked 2026-08-13:** `v1.0.0-rc`, published 2026-08-13. The cadence is
+alpha (07-21) → alpha2 (07-28) → beta (08-04) → beta2 (08-07) → rc (08-13). Still no GA. The rc notes
+add MCP client authentication workflows, restore the delegated-mode toggle for agents, enable
+refresh-token rotation by default, and add an authorization and credential-state check on the refresh
+grant. One flagged risk: removal of "Subject Attribute from API layer" may affect integrations.
+
+### No Python SDK — and this is not a problem
+
+ThunderID ships SDKs for React, Next.js, Express, Vue, Nuxt, Node, vanilla JS, iOS, Android and
+Flutter. **There is no Python SDK.** It does not matter, because of which OAuth role each half of
+this system plays:
+
+| Component | OAuth role | What it needs |
+| --- | --- | --- |
+| `frontend/` (Next.js) | **Client** | Runs the login redirect, holds the client secret, manages the session. This is where an SDK earns its keep — `@thunderid/nextjs` exists |
+| `backend/api/` | **Resource server** | Only validates an incoming JWT against the JWKS endpoint. ~40 lines of `pyjwt[crypto]` |
+| `backend/mcp_server/` | **Resource server** | Same, via `mcp==2.0.0`'s native `TokenVerifier` |
+| `agent/` | **Client** | One `POST` to the token endpoint. `agent/auth.py`, no vendor library |
+
+So **no vendor library enters `backend/` or `agent/` at all.** That is worth protecting deliberately:
+it keeps the provider swappable the same way SQLAlchemy keeps Supabase swappable, which matters more
+than usual given the pre-GA risk above. If adopting a provider ever requires a vendor import below
+`api/` or `mcp_server/`, that is a signal the integration is being done wrong.
+
+Corollary for the import contracts: any JWT library added to `backend/requirements.txt` must also be
+added to **both** `forbidden_modules` lists in `backend/pyproject.toml`, or `services/` could import
+it and the boundary that makes this whole design work would quietly weaken.
+
+### Where ThunderID lives — not in this repository
+
+Recorded because it is the question a newcomer to auth asks first, and the wrong answer creates mess
+that is annoying to undo. **Treat ThunderID exactly like Postgres.** Supabase's source is not
+vendored into `backend/`; neither is this. What belongs in the repo is only a compose file under
+`deploy/`, environment variables (issuer URL, client ID, client secret), and the generic OIDC
+validation code described above.
+
+⚠️ **Trap with the `npx` install path.** `npx thunderid --install-dir . …` writes a datastore and
+config files into the current directory. **Do not run it inside the repository** — use a sibling
+directory such as `D:\Amzal Projects\thunderid-local\`. The Docker Compose path, pinned at a tag, is
+preferred anyway because it is closer to how the thing will actually be deployed.
+
+Install reference for the spike: `npx thunderid`, or the pinned
+`install/quick-start/docker-compose.yml`. Server at `https://localhost:8090`, console at `/console`,
+default credentials `admin` / `admin`, **self-signed certificate** — it must be accepted in a browser
+once before any client will talk to it.
+
+---
+
+## The gates
+
+Gate numbering and status live in `docs/PLAN.md`'s progress table, which is the single status board
+for the project. What follows is what each gate has to *do*; whether it is done is recorded there,
+not here.
+
+Each gate ends with the project's standard stop gate: stop, explain in plain language, list every
+file changed and why, re-check the rest of the plan, hand off for the developer to commit manually,
+wait for "continue".
+
+### Gate 22 — this document
+
+Docs only, no code. Rewrite this file against current documentation, split the old single auth gate
+into four, and record the new gates in `PLAN.md` before any work starts against them. Exists so the
+plan survives a lost session and so the numbering is not backfilled afterwards.
+
+### Gate 23 — the spike
+
+**Throwaway. Nothing merged into the application.** Proves the mechanism before any code depends on
+it.
+
+1. Run ThunderID **outside the repo**, pinned to `v1.0.0-rc`.
+2. Register the backend as a resource server: URI `identifier`, **`delimiter: "."`**, resource
+   handles `product` and `stock`, actions `read` / `create` / `update` / `adjust`.
+3. Register one agent as a confidential client.
+4. Prove with `curl` and a ~40-line throwaway `TokenVerifier` that a token-exchange call returns a
+   **downscoped** token which `mcp==2.0.0` accepts, and that a widening request is rejected with
+   `invalid_scope`.
+5. Verify the `audience`-is-a-decoy trap deliberately.
+6. Record whether `act` appears without an explicit `actor_token`.
+
+**Exit condition:** a real downscoped token accepted by a real `TokenVerifier`. That last step is the
+only part of this that no documentation can answer for us, which is the entire reason the spike
+exists. Deliverables are findings written back into this file — replacing this gate's description
+with what actually happened — plus a `deploy/` compose file. **If the spike fails, the plan stops and
+Keycloak is reconsidered.**
+
+### Gate 24 — human auth end-to-end
+
+- `frontend/`: `@thunderid/nextjs`, `ThunderIDProvider` in `src/app/layout.tsx`, `proxy.ts` with
+  `createRouteMatcher` over the product routes, sign-in UI in the existing `components/shell/`.
+  The **developer creates the Application in the Console** and reports the Client ID back; the
+  assistant never touches the Console.
+- `frontend/src/lib/auth/current-user.ts`: a real session read, replacing `{ id: "system" }`. It is
+  already `async`, so no call site changes.
+- `frontend/src/lib/api/client.ts`: attach `Authorization: Bearer` via `api.use({ onRequest })`.
+  Note this file currently builds a module-level client at import with no per-request hook, so this
+  is a structural addition rather than a one-line edit. It stays inside `lib/api/`, so the ESLint
+  restricted-import rule is unaffected.
+- `backend/`: `TokenActor` beside `SystemActor` in `core/actor.py`; JWKS validation in `api/deps.py`'s
+  `get_actor()`; `pyjwt[crypto]` added to `requirements.txt` **and** to both `forbidden_modules`
+  lists.
+- Tests for `TokenActor.can()` and for a rejected or expired token.
+
+**Exit condition:** a real user signs in, the product pages work, `created_by` records their OIDC
+`sub` instead of `"api"`, and an unauthenticated request gets a 401.
+
+### Gate 25 — agent delegation and the MCP server as a resource server
+
+The risky one. This is where "the agent can only do what you can do" stops being a design and starts
+being enforced.
+
+- `backend/mcp_server/server.py`: `MCPServer(..., token_verifier=, auth=AuthSettings(...))`; serve
+  the protected-resource metadata; validate `aud`; never forward a token upstream. `_actor()` becomes
+  the seam it was always meant to be:
+
+  ```python
+  def _actor() -> Actor:
+      token = get_access_token()
+      return TokenActor(id=token.subject, scopes=frozenset(token.scopes), act=token.claims.get("act"))
+  ```
+
+- **New `agent/auth.py`** with `get_scoped_token(...)` — the one place a grant type is named.
+- `agent/mcp_client.py`: the connection has to change shape. `Client(url)` builds its transport with
+  no HTTP client (`mcp/client/client.py`), and `streamable_http_client`'s own docs say
+  authentication is configured by passing a pre-built `httpx2.AsyncClient`. So the call becomes
+  `Client(streamable_http_client(url, http_client=httpx2.AsyncClient(auth=...)))`. **This is the one
+  line where a future ID-JAG swap happens.** The `_actor` this file has stored unused since Gate 20
+  finally gets used.
+- `agent/app.py`'s `get_actor()`: read the user's token from the request; the frontend forwards it.
+- Auth settings added to `agent/config.py` and `backend/core/config.py` **separately** — they are
+  deliberate copies, and sharing them would cross the boundary the whole design holds.
+- The transaction-pooler / `NullPool` switch recorded in `BACKEND-PLAN.md`.
+
+**Exit condition:** the agent adjusts stock for a signed-in user and the row carries *that user's*
+identity; and an agent scoped read-only is **refused** `stock.adjust` by `services/`. The negative
+test is the one that matters, and it must assert the write did not happen — not that the reply looked
+like a refusal.
+
+### Gate 26 — deploy
+
+Unblocked only now. Five services. `agent/app.py`'s `HOST = "127.0.0.1"` and its test are deleted
+**in this gate and not before** — the last thing to change, not the first.
+
+---
+
+## Two capabilities noted, not scheduled
+
+Both are supported by the provider and neither is needed to close these gates. Recorded so they are
+not reinvented later.
+
+- **CIBA (Client Initiated Backchannel Authentication)** answers a question Gate 19 left open. That
+  gate built "pause and ask for human approval," but approval only works while someone is watching
+  the chat. CIBA pushes the request to a separate device with no browser redirect — the
+  standards-based version of "the agent wants to adjust stock at 3am, ask the manager's phone."
+- **Verifiable credentials for agents.** ThunderID supports issuing them. Relevant only if agent
+  identity ever has to be proven to a party that does not trust our issuer.
+
+Other grants available and used implicitly: Authorization Code with PKCE (human login), Client
+Credentials (machine-to-machine, and explicitly **not** how the agent should act for a user), and
+Refresh Token. Security extensions advertised alongside: PKCE, PAR, DPoP, and **Resource Indicators
+(RFC 8707)** — the last is what the MCP authorization spec requires for audience-targeting, so its
+presence is load-bearing rather than incidental.
+
+---
+
+## One decision deliberately still open
+
+**Whether permissions live in ThunderID roles (carried in the token) or in a local table keyed on the
+OIDC `sub`.** It belongs to Gate 23's close-out, with the spike in hand.
+
+The permission *strings* are business rules owned by `services/` — see the delimiter section — which
+argues for the local table. The token-exchange downscoping rule argues the issuer needs to know them
+too, since final scopes "must also be permissions on the target resource server". Settle it with real
+tokens in front of you, not in advance.
+
+---
+
+## What we considered and rejected
+
+Compressed from the 2026-07-31 provider survey. Kept because the reasoning still explains why the
+shortlist ended where it did; the table's *status* column is the part that has since moved.
+
+| Option | Why not |
+| --- | --- |
+| **Supabase Auth** | Solves human auth, which is the easy half. **No delegation story for the agent half at all.** This is why Supabase is used for Postgres only. |
+| **WSO2 Asgardeo** (SaaS, GA) | Zero ops and a genuine free tier — B2E at 50 monthly active users, which comfortably covers a single supermarket's back office. Rejected once self-hosted ThunderID proved to include token exchange at no licence cost, which removed the question the Asgardeo option existed to answer. Free-tier audit-log retention was 2 days, survivable here only because `created_by`/`updated_by` answer "who adjusted this stock", not the provider's logs. |
+| **WSO2 Identity Server** (Java, on-prem, GA) | Established, free to self-host, but heavier and with no agent-specific tooling — which is the half of the problem that actually matters here. |
+| **Auth0 "Auth for MCP"** (GA since May 2026) | The most complete packaged story, and commercial. Part of its advantage was Dynamic Client Registration, which the MCP spec has since **deprecated** in favour of Client ID Metadata Documents — a fading selling point. |
+| **Keycloak 26.2+** | GA, free, RFC 8693 confirmed shipping, 26.5 adds cross-domain identity chaining. **Still the conservative answer, and the fallback if Gate 23's spike fails.** Rejected as first choice only because it models agents as ordinary OAuth clients, so every part of the agent-identity story would be ours to build by hand. |
+
+**The deciding question, stated honestly.** It is no longer "is token exchange available for free" —
+it is, self-hosted. It is **"is a pre-GA server acceptable as the identity provider for this
+system?"** ThunderID is the better *fit* and the worse *bet*; Keycloak is the reverse. This project
+chose fit, with a spike as the hedge and Keycloak as the named fallback.
+
+Two smaller items also retired:
+
+- **"Re-evaluate ThunderID in ~6 months (around Q1 2027)"**, written when it was two months old with
+  no GA declaration. Overtaken by events: it reached rc in three weeks. The underlying concern — churn
+  — is real and visible in that cadence, which is why an exact tag pin is mandatory.
+- **The worry that Pydantic AI is unsupported.** ThunderID's "LangChain integration" is a tutorial
+  containing **zero ThunderID libraries** — a `requests.post` to the token endpoint and a
+  `contextvar` holding the result. Nothing in it is LangChain-specific, so there is no adapter
+  Pydantic AI is missing and the "coming soon" list is a docs backlog, not a capability gate. This
+  matters less here than elsewhere anyway, since `agent/mcp_client.py` is already a hand-written
+  toolset rather than Pydantic AI's `MCPToolset` — the token attaches in code we own either way.
+- **The fear of a framework downgrade.** ThunderID's Python MCP guide is written against
+  `fastmcp>=3.4,<4`, which pins `mcp>=1.24,<2.0` — the legacy protocol era this project spent Gate 6
+  leaving. Following it verbatim would mean downgrading. **Not necessary**: `mcp==2.0.0` has native
+  resource-server support with no FastMCP involved, so their decorator is replaced by a custom
+  `TokenVerifier` of roughly forty lines.

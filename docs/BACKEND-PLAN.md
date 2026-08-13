@@ -659,6 +659,12 @@ choose B-at-scale or C.
 > auth gate and not before. Also still applies: under HTTP, switch to Supabase's **transaction**
 > pooler (6543) with `poolclass=NullPool`.
 >
+> **Scheduled 2026-08-14 (Gate 22): both of those land in Gate 25**, the gate that turns
+> `mcp_server/` into a real OAuth resource server. Verified along the way that `mcp==2.0.0` already
+> ships the resource-server machinery natively (`AuthSettings`, `TokenVerifier`,
+> `get_access_token()`), so this needs no framework change and no FastMCP — roughly forty lines of
+> custom `TokenVerifier`. See `docs/AUTH-PLAN.md`.
+>
 > Consequence already applied in `docs/FRONTEND-PLAN.md`: the frontend must not assume the agent is
 > in-process. Both FastAPI and the future agent are remote HTTP services, reached through one
 > identity seam, with `API_BASE_URL` and `AGENT_BASE_URL` reserved as separate server-side values.

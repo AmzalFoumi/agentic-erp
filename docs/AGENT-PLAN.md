@@ -1270,6 +1270,12 @@ real and structural, not incidental: a deployed frontend has no route to a devel
 port, so the proxy route is local-only *by construction*. Fixing that means a tunnel, a reverse
 proxy, or a public bind, and every one of those trips "The stop condition" below.
 
+> **Scheduled 2026-08-14 (Gate 22).** "auth" in that ordering is now four numbered gates —
+> **22 (docs), 23 (spike), 24 (human login), 25 (agent delegation)** — with **deploy as Gate 26**.
+> `app.py`'s `HOST = "127.0.0.1"` and its test are deleted **in Gate 26 and not before**. Gate 25 is
+> the one that touches this directory: `agent/auth.py` is added, and `mcp_client.py`'s connection
+> changes shape to carry a token. See `docs/AUTH-PLAN.md`.
+
 **Proven by tests, following Gate 19's precedent** — `agent/tests/test_app.py`, no network, no
 Gemini, no Postgres: the same `scripted_model` and `RecordingToolset` injected through a
 `get_runtime` FastAPI dependency, and a `FakeStore` that round-trips `save_pending` →
