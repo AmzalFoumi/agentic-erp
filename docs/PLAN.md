@@ -139,22 +139,10 @@ with no login and no record of who did what. Full reasoning is in **`docs/AGENT-
 The developer's stated goal is to **host all four pieces**: the website, the web API, the
 agent-server, and the AI agent. A hosted agent-server *is* condition 1 above — "reachable over the
 network by anything other than the developer's own computer" — so the hold is over. That's why
-stages 22 and 23 now exist in the table, in that order.
-
-Worth being blunt about why the order can't be flipped, since "put it online now, add logins after"
-is the normal-sounding version of this mistake. Today, every caller of the agent-server is treated as
-the built-in "system" identity, and that identity is allowed to do **everything**. Putting it online
-as-is doesn't mean "online without logins yet" — it means **anyone who finds the address can change
-your stock levels and prices**, and every one of those changes gets recorded as having been done by
-"the system," indistinguishable from real ones. There's no half-version of this worth shipping.
-
-The good news, from the research on 2026-08-13: the hard part is no longer unknown. The mechanism the
-design rests on — issuing the AI agent a *narrower* pass derived from the signed-in person's, so it
-can never do more than they can — is confirmed to work, and is free if we host the login server
-ourselves. The cost has moved from "is this even possible" to "we'd be running a fifth service, and
-the best-fitting option isn't at a stable release yet." That's a judgement call, and it's made at
-stage 22 with a short experiment in hand, not before. Details in **`docs/AUTH-PLAN.md`** — read the
-two 2026-08-13 amendments first.
+stages 22 and 23 now exist in the table, in that order, and why the order can't be flipped. Full
+reasoning — including why "system-identity" access makes a half-version unshippable, and what the
+2026-08-13 research settled about the mechanism and its cost — is in **`docs/AUTH-PLAN.md`**; read
+its two 2026-08-13 amendments before touching stage 22.
 
 ---
 
