@@ -1,0 +1,62 @@
+# Python dependencies for the agent service, own venv at agent/.venv.
+# Full reasoning for these pins lives in docs/AGENT-PLAN.md (Gate 16) — check
+# there before changing any of them, not just here.
+#
+# Verified against PyPI on 2026-08-05; mcp added and re-verified 2026-08-06.
+
+# Pydantic AI - the framework that runs the agent's think/call-tools/reply
+# loop, so we don't write that loop by hand. [google] only, deliberately not
+# [mcp] — that extra conflicts with the mcp==2.0.0 pin below (see
+# AGENT-PLAN.md, Gate 16).
+pydantic-ai-slim[google]==2.24.0
+
+# The official MCP SDK, client half — lets the agent call the tools exposed
+# by backend/mcp_server/. Must match backend/'s server-half pin, since it's
+# one package speaking both ends of the same protocol.
+mcp==2.0.0
+
+# Reads settings from a .env file into a typed object, so a missing or wrong
+# setting fails loudly at startup instead of mysteriously mid-conversation.
+# Used by config.py.
+pydantic-settings==2.14.2
+
+# Enforces the Gate 17 architecture contract in agent/pyproject.toml.
+import-linter==2.13
+
+# SQLAlchemy is the ORM: it maps Python classes to SQL tables. Pinned to the
+# same version as backend/requirements.txt - same library, verified the same
+# week, no reason for the two services to drift.
+sqlalchemy==2.0.51
+
+# The Postgres driver. SQLAlchemy speaks SQL; psycopg speaks to the actual
+# socket. Same pin as backend/requirements.txt.
+psycopg[binary]==3.3.4
+
+# Alembic generates and applies database migrations for the agent's own
+# schema, independent of backend/'s migration history. Same pin as
+# backend/requirements.txt.
+alembic==1.18.5
+
+# pytest runs the agent's own test suite (Gate 19 - the first tests in agent/).
+# Same pin as backend/requirements.txt: one library, two services, no reason
+# for them to drift. Verified against PyPI on 2026-08-12.
+pytest==9.1.1
+
+# run_turn is async, so pytest needs a plugin to await a test function at all.
+# backend/'s suite never needed this because its services are synchronous.
+# asyncio_mode="auto" in pyproject.toml means no test carries its own marker.
+# Verified against PyPI on 2026-08-12.
+pytest-asyncio==1.4.0
+
+# Gate 20: the agent's own HTTP surface (app.py). Same pins as
+# backend/requirements.txt - one library, two services, no reason to drift.
+# Note 0.141.1 is the current FastAPI on PyPI as of 2026-08-12; matching the
+# backend deliberately wins over chasing the newer patch.
+fastapi==0.141.0
+uvicorn[standard]==0.52.0
+
+# The HTTP client. Needed directly by fastapi.testclient.TestClient, which is
+# how tests/test_app.py exercises the routes without a running server. Present
+# transitively via mcp today, which is a latent break - pinning makes it
+# intentional. Same pin as backend/requirements.txt.
+httpx==0.28.1

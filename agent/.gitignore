@@ -1,0 +1,32 @@
+# Belt-and-braces secret protection for agent/.
+#
+# The root .gitignore already covers every pattern below. This file exists
+# anyway, deliberately duplicating them, because the thing it guards against
+# is not a missing rule - it is the root file being edited, truncated, or
+# rewritten by a tool, and nobody noticing until a key is already in a commit.
+#
+# The asymmetry is the whole argument: a redundant ignore rule costs nothing
+# and is never noticed, while a leaked API key cannot be un-leaked. `git rm
+# --cached` removes it from the tip, not from history - the key still has to
+# be revoked and rotated. Cheap insurance against an expensive, irreversible
+# mistake.
+#
+# Two independent files must both fail for a secret to escape. Keep it that
+# way: if a new secret-bearing file is added here, add it to the root too.
+
+# ---------- Secrets ----------
+# The real key lives in agent/.env. .env.example - the template, fake values
+# only - IS committed, hence the negation.
+.env
+.env.*
+!.env.example
+
+# ---------- Virtual environment ----------
+# agent/ has its own venv, separate from backend/.venv. Rebuilt from
+# requirements.txt, never committed.
+.venv/
+venv/
+
+# ---------- Python bytecode and caches ----------
+__pycache__/
+*.py[cod]
