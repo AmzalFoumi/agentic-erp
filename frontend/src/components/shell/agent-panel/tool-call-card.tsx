@@ -32,12 +32,19 @@ function useProductLabel(productId: unknown): string | null | undefined {
     if (typeof productId !== "number" || productId in resolved) {
       return;
     }
-    getProductSummary(productId).then((summary) => {
-      setResolved((prev) => ({
-        ...prev,
-        [productId]: summary ? `${summary.sku} — ${summary.name}` : null,
-      }));
-    });
+    getProductSummary(productId)
+      .then((summary) => {
+        setResolved((prev) => ({
+          ...prev,
+          [productId]: summary ? `${summary.sku} — ${summary.name}` : null,
+        }));
+      })
+      .catch(() => {
+        setResolved((prev) => ({
+          ...prev,
+          [productId]: null,
+        }));
+      });
   }, [productId, resolved]);
 
   if (typeof productId !== "number") {

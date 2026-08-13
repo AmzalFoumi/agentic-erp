@@ -97,7 +97,7 @@ function ConnectedAgentPanel({
 }) {
   const [input, setInput] = useState("");
 
-  const { messages, sendMessage, addToolApprovalResponse, status } = useChat({
+  const { messages, sendMessage, addToolApprovalResponse, status, error } = useChat({
     id: String(conversationId),
     messages: initialMessages,
     transport: new DefaultChatTransport({
@@ -107,6 +107,24 @@ function ConnectedAgentPanel({
   });
 
   const { state, pendingApprovalPart } = classifyPanelState(status, messages);
+
+  const [refetchError, setRefetchError] = useState<string | null>(null);
+  const [isRefetching, setIsRefetching] = useState(false);
+
+  const handleRefetch = async () => {
+    setIsRefetching(true);
+    setRefetchError(null);
+    try {
+      const existing = await getAgentConversation(conversationId);
+      if (!existing) {
+        setRefetchError("Conversation no longer exists");
+      }
+    } catch (err: unknown) {
+      setRefetchError(err instanceof Error ? err.message : "Failed to refetch conversation");
+    } finally {
+      setIsRefetching(false);
+    }
+  };
 
   const submit = (text: string) => {
     if (text.trim().length === 0) return;
@@ -174,6 +192,23 @@ function ConnectedAgentPanel({
               }) as ToolUIPart | undefined;
             return outputPart ? <SuccessCard part={outputPart} /> : null;
           })()}
+        {status === "error" && (
+          <div className="flex flex-col gap-2 rounded-(--radius) border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div className="font-semibold">Error</div>
+            <div>{error?.message ?? "An error occurred"}</div>
+            {refetchError && <div className="text-xs">Refetch failed: {refetchError}</div>}
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={handleRefetch}
+              disabled={isRefetching}
+              className="mt-1"
+            >
+              {isRefetching ? "Refetching…" : "Retry"}
+            </Button>
+          </div>
+        )}
       </div>
 
       <form
@@ -187,6 +222,7 @@ function ConnectedAgentPanel({
           value={input}
           onChange={(event) => setInput(event.target.value)}
           placeholder="Ask the assistant…"
+          aria-label="Message to assistant"
           className="min-w-0 flex-1"
         />
         <Button type="submit" disabled={input.trim().length === 0}>
