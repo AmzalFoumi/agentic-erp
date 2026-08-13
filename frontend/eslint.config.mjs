@@ -25,6 +25,27 @@ const restrictedOpenapiFetch = {
     "Only src/lib/api may construct an API client. Import { api } from '@/lib/api/client' instead.",
 };
 
+/**
+ * Gate 20's carve-out, named once and used by both rules below.
+ *
+ * The agent's HTTP service binds to 127.0.0.1 (see `agent/app.py`'s HOST
+ * comment), so the Next server can reach it and a browser tab cannot. This one
+ * file forwards, which needs an exemption from *both* architecture rules: rule 1
+ * because it calls `fetch`, and rule 2 because it exists under `src/app/api` at
+ * all. `docs/AGENT-PLAN.md` anticipated one amendment here; two are needed.
+ *
+ * A constant rather than the glob written twice, so the two exemptions cannot
+ * drift apart and quietly widen.
+ *
+ * **The backslashes are required and were not obvious.** These globs go through
+ * minimatch, where `[...path]` is a *character class* — "one character from the
+ * set `.path`" — so the unescaped form matched nothing and both exemptions were
+ * silently inert: `npm run lint` reported the file as two errors, which is at
+ * least a loud failure rather than a rule quietly widened. Next's own catch-all
+ * segment syntax collides with glob syntax; escaping the brackets is the fix.
+ */
+const agentProxyRoute = "src/app/api/agent/\\[...path\\]/route.ts";
+
 const restrictedSchema = {
   group: ["**/lib/api/schema", "**/lib/api/schema.d"],
   message:
@@ -59,10 +80,13 @@ const eslintConfig = defineConfig([
    * `fetch`, request logic spreads across the tree, the base URL gets read in
    * six places, and error handling is reinvented per screen. One module owns
    * the transport; everything else imports from it.
+   *
+   * `agentProxyRoute` is exempt as of Gate 20: it forwards to the agent service,
+   * and forwarding *is* calling `fetch`. Scoped to that one file, not its tree.
    */
   {
     files: ["src/**/*.{ts,tsx}"],
-    ignores: ["src/lib/api/**"],
+    ignores: ["src/lib/api/**", agentProxyRoute],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -132,9 +156,18 @@ const eslintConfig = defineConfig([
    * need for a route handler ever appears — a webhook receiver, an OAuth
    * callback, neither of which mirrors an endpoint — this rule is the place to
    * carve out that exception explicitly, with the reason written down.
+   *
+   * **Gate 20 is the first such case, and `ignores` below is that carve-out.**
+   * `agentProxyRoute` forwards to the agent's own service, which binds to
+   * 127.0.0.1 and is therefore unreachable from a browser tab. It mirrors
+   * nothing — that is the test, and it is why this does not weaken the rule.
+   * A handler at `src/app/api/products` would mirror FastAPI and is still an
+   * error, as is every other path in this tree. See the route file's own header
+   * comment for the full reasoning.
    */
   {
     files: ["src/app/api/**"],
+    ignores: [agentProxyRoute],
     rules: {
       "no-restricted-syntax": [
         "error",

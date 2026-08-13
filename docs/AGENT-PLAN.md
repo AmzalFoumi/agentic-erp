@@ -490,6 +490,15 @@ moment it does, it has become a third adapter, which is the mistake `CLAUDE.md` 
 under "no `app/api` handlers mirroring FastAPI." The amendment lands at Gate 20 alongside the
 route.
 
+> **Correction, Gate 20 (2026-08-12): there are two amendments, not one.** This paragraph names
+> only the `fetch` rule. `frontend/eslint.config.mjs` has a *second* architecture rule — a
+> `no-restricted-syntax` selector on `Program` that rejects the **existence** of any file under
+> `src/app/api`, not just what it does. The proxy needs an exemption from both. Both are scoped to
+> the single path `src/app/api/agent/[...path]/route.ts`, named once as a shared constant so they
+> cannot drift apart. The distinguishing test is written into the rule's comment: *does the handler
+> mirror an endpoint that already exists elsewhere?* `src/app/api/products` would, and stays
+> banned; this one reaches a service the browser cannot address.
+
 ---
 
 ## Decision: MCP over Streamable HTTP on localhost (2026-08-05)
@@ -1041,7 +1050,7 @@ exist.
 **Python concepts introduced:** dataclasses as a boundary type; why a public function's
 signature is an architectural decision.
 
-**Done looks like:** `lint-imports` run from `agent/` reports the contract kept, and
+**Done looks like:** `lint-imports` reports the contract kept, and
 `conversation.py`, `model_provider.py`, and `mcp_client.py` — the runtime cluster — are the only
 files that would break if `pydantic_ai` vanished; everything else talks only in
 `Message`/`TurnResult`.
@@ -1156,6 +1165,15 @@ and how sensitive a stored "when approved, write this" row is before a login sys
 **Gate 20 inherits this**, since that is where an HTTP boundary first sits between the pause and
 the decision.
 
+> **Closed at Gate 20 (2026-08-12).** The bytes now live in
+> `agent.conversations.pending_state`, with `pending_since` alongside. Of the three questions,
+> only one got a real answer and the other two are recorded as unchanged, which is the honest
+> outcome: **staleness is made visible, not solved** (`pending_since` is stored and returned;
+> there is deliberately no sweeper, because expiry needs a policy nobody has set); **a stale
+> approval is still not authorization** — the already-documented accepted gap, unchanged by
+> storing it; and **sensitivity is handled the same way `agent.messages` is**, by RLS deny-all,
+> with real protection still waiting on auth.
+
 **Proven by tests, not a live demo (developer's call, 2026-08-12).** `agent/tests/` is the first
 test suite in `agent/`: nine tests, no network, `FunctionModel` for the model and a recording fake
 toolset for MCP. The two that carry the gate assert on **whether the tool ran**, not on the answer
@@ -1183,11 +1201,136 @@ lands here: transport-only proxying to `AGENT_BASE_URL` permitted in exactly tha
 
 **Not in this gate:** the panel's five states.
 
+**Built 2026-08-12.** Design spec:
+`docs/superpowers/specs/2026-08-12-gate-20-agent-http-design.md`.
+
+**Decision: use `pydantic_ai.ui.VercelAIAdapter`, not hand-rolled event types.** Verified in the
+installed 2.24.0: `pydantic_ai.ui` ships two protocol adapters, `VercelAIAdapter` (the Vercel AI
+Data Stream Protocol, which `useChat` from `@ai-sdk/react` consumes) and an AG-UI one. The
+first recommendation in this session was to hand-roll, on the grounds that it preserved Gate 17's
+claim that no caller needs to know Pydantic AI exists; verification overturned it. Two reasons,
+the second decisive:
+
+  - Hand-rolling reinvents a documented standard.
+  - The adapter has **native tool-approval support** — `ToolApprovalRequested` /
+    `ToolApprovalResponded` in `ui/vercel_ai/request_types.py`, and
+    `UIAdapter.deferred_tool_results`, documented as *"Deferred tool results extracted from the
+    request, used for tool approval workflows."* So Gate 19's approve/deny **rides the protocol**:
+    an approval is a tool-result part in the message list the client posts, not a second endpoint,
+    and `resume_turn`'s decision map never becomes an HTTP concern.
+
+**What that cost, stated rather than hidden: `app.py` joins the Gate 17 runtime cluster.**
+`dispatch_request` takes a Starlette `Request` and an `Agent`, so the framework cannot be hidden
+from the file that adapts it to HTTP. Gate 17's wording predicted the opposite and that prediction
+was wrong. The set is now readable as *the files that adapt Pydantic AI to something else*:
+`conversation.py` owns the turn, `model_provider.py` adapts to Google, `mcp_client.py` to MCP,
+`app.py` to HTTP. `agent.config` and `agent.scripts` stay forbidden, which is where the contract's
+value always was — settings load and a script runs with no `pydantic_ai` on the import path.
+Reasoned in `agent/pyproject.toml` beside Gate 19's `agent.tests` exemption.
+
+**A trap found by reading the adapter source rather than assuming — `ui/_adapter.py:473-474`:**
+
+```python
+message_history = [*(message_history or []), *frontend_messages]
+```
+
+Server-side history and client-posted messages are **concatenated, not overridden.** Passing
+stored history while the client also posts its list would send the whole conversation to the model
+**twice** — which would present as the model behaving strangely, not as a wiring bug. So ownership
+is explicit: **the client owns the in-flight wire state, `store.py` owns the durable record.**
+`POST /turns` passes no `message_history`; `on_complete` persists; `GET /conversations/{id}` serves
+history back through `VercelAIAdapter.dump_messages`, so one class both reads and writes the
+protocol and there is no second encoding to drift.
+
+**One `on_complete` covers pause and completion, because a pause is a completed run** whose
+`output` is a `DeferredToolRequests`. `conversation.turn_from_result` makes that decision in one
+place, shared with `run_turn`.
+
+**The `Actor` seam landed here rather than at the auth gate** (developer's call). `agent/actor.py`
+is a deliberate copy of `backend/core/actor.py`'s Protocol and `SystemActor` — a copy for the same
+reason `config.py` and `database.py` are, and `actor` is required and keyword-only on `run_turn`,
+`resume_turn`, and `build_agent`. It reaches `ErpToolset`, which stores it and does not use it: MCP
+2026-07-28 identifies a caller with per-call `_meta`, and `call_tool` is the one line that will send
+it, at the auth gate, on both ends at once. Sending a `SystemActor` today would change nothing and
+would invite `mcp_server/server.py`'s `_actor()` to trust an unauthenticated claim.
+**Provider agnostic, per the developer's reaffirmed constraint:** nothing in `agent/` imports an
+auth library or names a provider type. Also checked and worth recording, because it was the
+premise of a real question: **adopting ThunderID would not require switching off Pydantic AI.**
+Identity providers issue tokens — that is protocol, not SDK — and LangChain has no agent-identity
+mechanism at all (open request `langchain-ai/langchain#35393`). Re-check at the auth gate only if
+ThunderID ships a Python SDK with framework middleware.
+
+**The bind is explicit and commented** (developer's call): `HOST = "127.0.0.1"`, `PORT = 8002`, in
+`app.py`, with the reason rather than the value in the comment — a default nobody chose is a default
+nobody defends. `tests/test_app.py` asserts both, so the constraint fails loudly if edited.
+
+**Deploying waits for the auth gate (developer's call, 2026-08-12).** The developer intends to
+deploy soon; the ordering chosen was Gate 20 local → auth → deploy. Recorded because the tension is
+real and structural, not incidental: a deployed frontend has no route to a developer's loopback
+port, so the proxy route is local-only *by construction*. Fixing that means a tunnel, a reverse
+proxy, or a public bind, and every one of those trips "The stop condition" below.
+
+**Proven by tests, following Gate 19's precedent** — `agent/tests/test_app.py`, no network, no
+Gemini, no Postgres: the same `scripted_model` and `RecordingToolset` injected through a
+`get_runtime` FastAPI dependency, and a `FakeStore` that round-trips `save_pending` →
+`load_pending` so the reload path is actually exercised rather than mocked away. The load-bearing
+assertion is again `RecordingToolset.executed`: a service that streamed beautifully while running a
+write tool unapproved would pass every looks-right check.
+
+**Three things verification found, none of them in the spec and none catchable by review.**
+
+1. **`sdk_version` defaults to 5, and every approval feature is gated behind `>= 6`.** Not a
+   deprecation warning, not an exception — two quiet wrong answers.
+   `VercelAIAdapter.deferred_tool_results` returns `None` outright below 6
+   (`ui/vercel_ai/_adapter.py:275-276`), so a posted approval is **dropped and the resumed run
+   pauses again forever**; and `dump_messages` emits a resultless tool call as
+   `state='input-available'` instead of `'approval-requested'`, so a reloaded browser shows a tool
+   apparently running with no approve/deny buttons. `agent/app.py` now has one `SDK_VERSION = 7`
+   constant read by all three call sites (`dispatch_request` plus both `dump_messages`), with the
+   failure modes in the comment. **7 rather than 6** because the two emit the same wire and the
+   adapter's docstring says to pass the client's real major: `ai` 7.0.64 / `@ai-sdk/react` 4.0.67
+   are current as of 2026-08-13. **This is a floor on Gate 21** — the panel cannot be built against
+   AI SDK v5.
+2. **A streaming route needs a `stream_function` on `FunctionModel`.** Gate 19's `scripted_model`
+   supplied only the non-streaming `function`, because `run_turn` calls `agent.run`;
+   `dispatch_request` streams. The symptom is not a `TypeError` at construction but a single
+   `{"type":"error","errorText":"FunctionModel must receive a `stream_function`..."}` SSE frame —
+   i.e. a well-formed stream that looks like a bug in `app.py`. `tests/fakes.py` now supplies both,
+   sharing one `remaining` list so a scripted pause and its scripted resume still consume responses
+   1 and 2 of the same script.
+
+3. **Next's catch-all segment syntax collides with glob syntax, so both ESLint carve-outs were
+   inert.** `ignores: ["src/app/api/agent/[...path]/route.ts"]` matches nothing: these globs go
+   through minimatch, where `[...path]` is a **character class** — one character from the set
+   `.path` — not a literal directory name. The brackets need escaping:
+   `"src/app/api/agent/\\[...path\\]/route.ts"`. This one at least failed loudly (`npm run lint`
+   reported the proxy route as two errors), which is the right direction for a rule to fail. Fixed
+   in `frontend/eslint.config.mjs` with the reason in the comment, and the fix was checked in both
+   directions: a throwaway `src/app/api/products/route.ts` still errors, so the exemption is scoped
+   to the one file rather than having disabled Rule 2 wholesale.
+
+(One ordinary slip alongside them: `conversation.py:338` still called `_to_model_history` after the
+Gate 20 rename to `to_model_history`, which broke all five Gate 19 tests. Fixed.)
+
+**Verified 2026-08-13:** `pytest` — 18 passed (9 in `test_app.py` new here, 5 in `test_approval.py` and 4 in
+`test_tool_gating.py` from Gate 19);
+`lint-imports --config agent/pyproject.toml` from the repo root — 1 contract kept, 0 broken;
+`npm run lint` and `npx tsc --noEmit` from `frontend/` — both clean.
+
+**Deliberately not built, and not forgotten:** no sweeper expiring abandoned approvals (see the
+Gate 19 close-out's amended note); no `useChat` wiring and no panel states — Gate 21; no change to
+the auth deferral.
+
 ### Gate 21 — the frontend panel
 
 Build the **six** unbuilt states specified in `docs/FRONTEND-PLAN.md` — idle/empty, thinking,
 streaming reply, tool call in progress, success, refusal — against the shipped
 `agent-panel.tsx`, which currently exists only in the unavailable state.
+
+**Version floor, set by Gate 20:** `ai` v7 with `@ai-sdk/react` v4 (7.0.64 / 4.0.67 as of
+2026-08-13). Not a preference — `agent/app.py`'s `SDK_VERSION = 7` means the server emits
+`approval-requested` parts, which are v6+ only. An AI SDK v5 client would render the approval card
+as a tool stuck mid-run. See the Gate 20 close-out's finding 1.
 
 *(Gate 12e's write-up says "five" in three places while its own state table lists six rows and
 its footnote says "six interactive states". Six is correct; the count is corrected in

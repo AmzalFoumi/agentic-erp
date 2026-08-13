@@ -1,0 +1,264 @@
+"""The agent's own HTTP surface. Loopback only, and that is load-bearing.
+
+Gate 20. Four routes, one of which streams: a browser can hold a conversation
+with the agent, and Gate 19's approval pause survives the round trip.
+
+**Why this file is allowed to import pydantic_ai.** Gate 17 established a
+"runtime cluster" - the only files in agent/ that may name the framework -
+and Gate 17's wording said a future HTTP route would not need to. Gate 20
+narrowed that claim rather than quietly keeping it: `pydantic_ai.ui` ships
+`VercelAIAdapter`, an implementation of the Vercel AI Data Stream Protocol
+that `useChat` from @ai-sdk/react consumes directly, *including native
+tool-approval parts* (`ToolApprovalRequested` / `ToolApprovalResponded` in
+`pydantic_ai/ui/vercel_ai/request_types.py`). Hand-rolling our own event
+types to preserve the claim would have meant reinventing a documented
+standard and re-implementing approval on top of it. The adapter takes an
+`Agent`, so this file joins the cluster - see agent/pyproject.toml.
+
+**What the protocol buys, concretely.** An approve/deny is not a second
+endpoint. In this protocol it is a tool-result part inside the message list the
+client posts, which `UIAdapter.deferred_tool_results` extracts on its own
+("Deferred tool results extracted from the request, used for tool approval
+workflows"). So POST /turns serves both "ask a question" and "resolve an
+approval", and `resume_turn`'s decision map never becomes an HTTP concern.
+
+**Who owns the conversation.** The client owns the in-flight wire state; the
+database owns the durable record. That is not a preference - `ui/_adapter.py`
+concatenates rather than overrides:
+
+    message_history = [*(message_history or []), *frontend_messages]
+
+Passing stored history *and* letting the client post its list would send the
+whole conversation to the model twice, which would present as the model going
+strange rather than as a wiring bug. So this file passes no `message_history`,
+persists through `on_complete`, and serves history back on GET so a reload can
+hydrate.
+"""
+
+from dataclasses import dataclass
+from typing import Any
+
+from fastapi import Depends, FastAPI, HTTPException, Request
+from pydantic_ai.agent import AgentRunResult
+from pydantic_ai.models import Model
+from pydantic_ai.toolsets import AbstractToolset
+from pydantic_ai.ui.vercel_ai import VercelAIAdapter
+
+import store
+from actor import Actor, SystemActor
+from config import settings
+from conversation import build_agent, decode_state, to_model_history, turn_from_result
+
+# 127.0.0.1, not 0.0.0.0, and not a default inherited from uvicorn. Written here
+# explicitly so the constraint is a line of code someone has to delete rather
+# than a flag someone forgets to pass.
+#
+# There is no authentication on this surface. POST /turns will run a
+# data-changing tool against the ERP if a human at *some* browser approves it,
+# and nothing here knows which human - Gate 19 gave us approval, and approval is
+# not authorization. Binding off this interface, or putting a tunnel, reverse
+# proxy, Docker port publish, or cloud deployment in front of it, makes that
+# reachable by anyone who can route to the port.
+#
+# Per docs/PLAN.md that is not a configuration change: it expires the auth
+# deferral, and the login gate lands before any further agent work. The list of
+# what counts is in docs/AGENT-PLAN.md under "The stop condition"; it is a list
+# rather than a principle because the dangerous version of this mistake is a
+# thirty-second convenience, not a decision.
+HOST = "127.0.0.1"
+
+# 8000 is the FastAPI backend, 8001 is its MCP server, so the agent takes 8002.
+PORT = 8002
+
+app = FastAPI(
+    title="Agentic ERP - agent service",
+    description=(
+        "The AI agent's own HTTP surface. Loopback only; see app.py's HOST "
+        "comment before changing where this binds."
+    ),
+)
+
+
+def get_actor() -> Actor:
+    """Who is asking. **The seam where real authentication lands.**
+
+    Deliberately the same shape as `backend/api/deps.py`'s `get_actor()`, and
+    deliberately hardcoded to `SystemActor` for the same reason: no auth
+    provider is wired in yet (docs/AUTH-PLAN.md), and the choice of provider is
+    still open. Nothing in this file names one, imports one, or assumes a token
+    format - a FastAPI dependency returning an `Actor` is all the rest of the
+    code sees, so adopting a provider replaces this function's body and touches
+    nothing else in agent/.
+    """
+    return SystemActor()
+
+
+@dataclass
+class Runtime:
+    """The model and toolset a request runs against.
+
+    Both default to None, meaning "build the real ones" - see
+    conversation.build_agent. They exist as an injectable dependency so
+    tests/test_app.py can substitute a FunctionModel and a recording toolset and
+    exercise these routes with no network and no Gemini, exactly as Gate 19's
+    tests do for `run_turn`. A dependency rather than monkeypatching, matching
+    the `model=`/`toolset=` parameters conversation.py already carries.
+    """
+
+    model: Model | None = None
+    toolset: AbstractToolset[Any] | None = None
+
+
+def get_runtime() -> Runtime:
+    """The real model and MCP toolset. Overridden in tests."""
+    return Runtime()
+
+
+# **Load-bearing, and the default is wrong for us.** VercelAIAdapter defaults
+# `sdk_version=5` for backwards compatibility, and every approval feature this
+# gate depends on is gated behind `>= 6`:
+#
+#   - `deferred_tool_results` returns None outright when sdk_version < 6
+#     (_adapter.py:275-276), so an approval posted by the client is silently
+#     dropped and the resumed run pauses again forever;
+#   - `dump_messages` emits a resultless tool call as `state='input-available'`
+#     instead of `'approval-requested'`, so a reloaded browser shows a tool
+#     "running" with no approve/deny buttons.
+#
+# Neither failure raises - both just quietly do the wrong thing, which is why
+# this constant exists once and three call sites read it rather than each
+# passing a literal. Caught by tests/test_app.py, not by review.
+#
+# 7 rather than 6: the two emit the same wire (v7's data-stream protocol equals
+# v6's), and the adapter's own docstring says to pass the client's real SDK
+# major. `ai` 7.0.64 / `@ai-sdk/react` 4.0.67 are current as of 2026-08-13, so 7
+# is what Gate 21 will install. **This is a floor on the frontend**: the panel
+# cannot be built against AI SDK v5.
+SDK_VERSION = 7
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    """Is the service up, and which model is it configured to call?
+
+    The model is included because "up" is rarely the question anyone actually
+    has - `gemini_model` is a setting that resolves through an alias table, so
+    seeing the resolved ID is how you confirm .env said what you meant.
+    """
+    return {"status": "ok", "model": settings.gemini_model}
+
+
+@app.post("/conversations")
+def create_conversation() -> dict[str, int]:
+    """Start a conversation and return its id.
+
+    Separate from the first turn on purpose: the id is what the browser puts in
+    its URL, so it has to exist before anything streams. A turn that created its
+    own conversation would mean the client learns the id at the end of a stream,
+    which is exactly when a reload is most likely to lose it.
+    """
+    return {"conversation_id": store.start_conversation()}
+
+
+@app.get("/conversations/{conversation_id}")
+def get_conversation(conversation_id: int) -> dict[str, Any]:
+    """Everything a reloaded browser needs to carry on.
+
+    Messages come back in the same wire format the streaming route emits -
+    `VercelAIAdapter.dump_messages` - so one class both reads and writes the
+    protocol and there is no second encoding to drift.
+
+    **If a turn is parked awaiting approval, those messages are returned instead
+    of the stored history**, because the parked bytes are the whole interrupted
+    run: they contain this turn's question *and* the tool call waiting on a
+    decision, which is what makes the approval card re-render after a reload.
+    `pending_since` comes back alongside so the UI can show how stale it is.
+    Nothing expires it automatically - see store.save_pending.
+    """
+    pending = store.load_pending(conversation_id)
+
+    if pending is not None:
+        state, since = pending
+        return {
+            "messages": VercelAIAdapter.dump_messages(
+                decode_state(state), sdk_version=SDK_VERSION
+            ),
+            "pending_since": since.isoformat(),
+        }
+
+    history = store.load_history(conversation_id)
+
+    # An unknown id and an empty conversation are indistinguishable here, since
+    # `load_history` returns [] for both. Checked explicitly so a typo'd id is a
+    # 404 rather than a conversation that silently appears to exist and then
+    # fails to accept a turn on the foreign key.
+    if not history and not store.conversation_exists(conversation_id):
+        raise HTTPException(status_code=404, detail=f"No conversation {conversation_id}")
+
+    return {
+        "messages": VercelAIAdapter.dump_messages(
+            to_model_history(history), sdk_version=SDK_VERSION
+        ),
+        "pending_since": None,
+    }
+
+
+@app.post("/conversations/{conversation_id}/turns")
+async def run_turn_endpoint(
+    conversation_id: int,
+    request: Request,
+    actor: Actor = Depends(get_actor),
+    runtime: Runtime = Depends(get_runtime),
+) -> Any:
+    """Stream one turn. Also how an approval decision arrives.
+
+    One endpoint for both because in this protocol they are the same request
+    with a different message list - see this module's docstring. The client's
+    posted messages are the history; nothing stored is passed in.
+    """
+
+    agent = build_agent(
+        settings, actor=actor, model=runtime.model, toolset=runtime.toolset
+    )
+
+    async def on_complete(result: AgentRunResult[Any]) -> None:
+        """Persist whatever the run turned out to be.
+
+        **A pause is a completed run**, whose `output` is a
+        `DeferredToolRequests` rather than a string - which is why one callback
+        covers both cases instead of needing a second hook that does not exist.
+        `turn_from_result` makes that decision, in conversation.py, so it is
+        made in one place.
+
+        A paused turn appends nothing to `messages`: Gate 19's invariant is that
+        a half-finished turn is not conversation history. A completed turn
+        appends both halves and clears the park, on approve and on deny alike -
+        both are decisions.
+
+        These are synchronous database calls inside an async callback, so they
+        block the event loop for their duration. Acceptable here and stated
+        rather than hidden: this is a single-user service on loopback, and two
+        short writes at the end of a turn that already took seconds of model
+        time is not the bottleneck. It would need revisiting before this ever
+        serves concurrent users - which cannot happen before the auth gate.
+        """
+        turn = turn_from_result(result)
+
+        if turn.pending:
+            assert turn.resume_state is not None  # guaranteed by TurnResult
+            store.save_pending(conversation_id, turn.resume_state)
+            return
+
+        for message in turn.new_messages:
+            store.append_message(conversation_id, message)
+        store.clear_pending(conversation_id)
+
+    return await VercelAIAdapter.dispatch_request(
+        request,
+        agent=agent,
+        sdk_version=SDK_VERSION,
+        # No `message_history`: the client owns the wire state. Passing stored
+        # history here would concatenate, not override - see the module
+        # docstring - and the model would see every turn twice.
+        on_complete=on_complete,
+    )

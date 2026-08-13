@@ -21,6 +21,16 @@
 # the rest still do `from config import settings` via the sys.path.insert
 # trick, unaffected by agent/ also being importable as a package from one
 # level up. It only changes how import-linter, specifically, sees the tree.
+# **How to run it, because neither obvious guess works.** From the repo root:
+#
+#     lint-imports --config agent/pyproject.toml
+#
+# Not from agent/ ("Could not find package 'agent' in your Python path" - the
+# root package below is the agent/ directory itself, so its *parent* has to be
+# the working directory), and not from the repo root without --config ("Could
+# not read any configuration" - there is no [tool.importlinter] at the root).
+# The backend's contract is the reverse and runs plainly from backend/, which is
+# what makes this easy to get wrong.
 root_packages = ["agent"]
 
 # Needed for the forbidden-modules contract below to see pydantic_ai at all -
@@ -46,6 +56,18 @@ type = "forbidden"
 # settings and run a turn without pydantic_ai on its import path, and
 # agent.config and agent.scripts, the two modules that carry that property,
 # stay forbidden below.
+# **Gate 20: agent.app is likewise NOT listed**, i.e. it is allowed to import
+# pydantic_ai. Gate 17's wording predicted the opposite - that a future HTTP
+# route would not need to name the framework - and that prediction was wrong for
+# a good reason: pydantic_ai.ui ships VercelAIAdapter, an implementation of the
+# Vercel AI Data Stream Protocol including native tool-approval parts, and it
+# takes an `Agent`. Hand-rolling event types to keep the claim would have meant
+# reinventing a documented standard. Read as a set, the unlisted cluster is
+# now "the files that adapt Pydantic AI to something else": conversation.py owns
+# the turn, model_provider.py adapts to Google, mcp_client.py to MCP, app.py to
+# HTTP. The contract's real value is untouched - the two modules below stay
+# forbidden, so settings load and a script runs with no pydantic_ai on the
+# import path.
 source_modules = ["agent.config", "agent.scripts"]
 forbidden_modules = ["pydantic_ai"]
 

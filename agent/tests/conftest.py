@@ -20,7 +20,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import Settings  # noqa: E402  (must follow the sys.path line above)
+from actor import SystemActor  # noqa: E402  (must follow the sys.path line above)
+from config import Settings  # noqa: E402
 
 
 @pytest.fixture
@@ -42,3 +43,15 @@ def settings() -> Settings:
         gemini_api_key="test-key-not-used",
         database_url="postgresql+psycopg://unused/unused",
     )
+
+
+@pytest.fixture
+def actor() -> SystemActor:
+    """The actor every turn runs as. Gate 20 made this a required parameter.
+
+    SystemActor is still the only implementation (docs/AUTH-PLAN.md), so this
+    fixture asserts nothing interesting today. It exists so that the day a
+    second implementation appears, every test names which one it meant - rather
+    than inheriting whatever a default happened to be.
+    """
+    return SystemActor()

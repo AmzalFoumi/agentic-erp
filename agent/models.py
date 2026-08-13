@@ -10,7 +10,7 @@ outside store.py should hold onto.
 
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, LargeBinary, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -32,6 +32,30 @@ class ConversationRow(Base):
     started_by: Mapped[str] = mapped_column(String(128), default="system")
 
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    # Gate 20: a turn that stopped for human approval, parked here until the
+    # human decides. These are conversation.py's `TurnResult.resume_state` bytes
+    # - the interrupted run's whole serialized message list - and store.py never
+    # parses them, exactly like provider_data below.
+    #
+    # **Why on the conversation rather than as messages rows.** Gate 19's
+    # invariant is that a half-finished turn is not conversation history: nothing
+    # is appended to `messages` until the resume completes. Two nullable columns
+    # keep that true, where a "pending" message row would not.
+    #
+    # Nullable is the resting state: set when a turn pauses, cleared when it
+    # completes. A conversation with a non-null pending_state is one waiting on a
+    # person, and that is the only thing either column means.
+    pending_state: Mapped[bytes | None] = mapped_column(LargeBinary, default=None)
+
+    # When the pause began, so staleness is *visible*. There is deliberately no
+    # sweeper expiring abandoned approvals in this gate - expiry needs a policy
+    # nobody has set, and inventing one silently is worse than showing the age
+    # and letting a person decide. See the Gate 20 spec's answers to Gate 19's
+    # three deferred questions.
+    pending_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
 
 class MessageRow(Base):
