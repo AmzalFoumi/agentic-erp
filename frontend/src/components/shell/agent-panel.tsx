@@ -23,12 +23,19 @@ import { startAgentConversation } from "@/lib/api/agent";
  */
 export function AgentPanel() {
   const [conversationId, setConversationId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    startAgentConversation().then((id) => {
-      if (!cancelled) setConversationId(id);
-    });
+    startAgentConversation()
+      .then((id) => {
+        if (!cancelled) setConversationId(id);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to start agent conversation");
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -38,7 +45,11 @@ export function AgentPanel() {
     return (
       <aside className="flex w-64 shrink-0 flex-col gap-stack border-l border-border bg-card p-section">
         <div className="text-sm font-semibold">Assistant</div>
-        <div className="text-sm text-muted-foreground">Connecting…</div>
+        {error ? (
+          <div className="text-sm text-destructive">{error}</div>
+        ) : (
+          <div className="text-sm text-muted-foreground">Connecting…</div>
+        )}
       </aside>
     );
   }
@@ -80,9 +91,11 @@ function ConnectedAgentPanel({ conversationId }: { conversationId: number }) {
             <MessageList messages={messages} isStreaming={false} />
             <ToolCallCard
               part={pendingApprovalPart}
-              onRespond={(approved) =>
-                addToolApprovalResponse({ id: pendingApprovalPart.approval!.id, approved })
-              }
+              onRespond={(approved) => {
+                if (pendingApprovalPart.approval?.id) {
+                  addToolApprovalResponse({ id: pendingApprovalPart.approval.id, approved });
+                }
+              }}
             />
           </>
         )}
@@ -91,11 +104,11 @@ function ConnectedAgentPanel({ conversationId }: { conversationId: number }) {
             <MessageList messages={messages} isStreaming={false} />
             {(() => {
               const last = messages[messages.length - 1];
-              const outputPart = last?.parts.find(
-                (part): part is ToolUIPart =>
-                  part.type.startsWith("tool-") &&
-                  (part as ToolUIPart).state === "output-available",
-              );
+              const outputPart = last?.parts
+                .filter((part) => part.type.startsWith("tool-"))
+                .findLast((part) => (part as unknown as ToolUIPart).state === "output-available") as
+                | ToolUIPart
+                | undefined;
               return outputPart ? <SuccessCard part={outputPart} /> : null;
             })()}
           </>

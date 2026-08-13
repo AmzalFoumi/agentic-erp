@@ -41,7 +41,9 @@ export function classifyPanelState(
 
   const last = messages[messages.length - 1];
   const parts = toolParts(last);
-  const pending = parts.find((part) => part.state === "approval-requested" && !part.approval?.isAutomatic);
+  const pending = parts.find(
+    (part) => part.state === "approval-requested" && !part.approval?.isAutomatic && part.approval?.id,
+  );
 
   if (pending) {
     return { state: "approval", pendingApprovalPart: pending };
