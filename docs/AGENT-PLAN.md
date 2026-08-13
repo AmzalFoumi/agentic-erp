@@ -1349,6 +1349,72 @@ the Claude Design project if the markup has moved.
 **Also at this gate:** revisit the resumability deferral, per its condition above — this is the
 first point at which real turn duration is observable.
 
+**Closed 2026-08-13 — code complete and reviewed, manual browser verification still pending.**
+The re-fetch condition above didn't trigger: the six-state table in `FRONTEND-PLAN.md` matched
+what was needed and nothing suggested the Claude Design project's markup had moved since Gate 12e,
+so no DesignSync re-fetch happened this gate.
+
+**Three things confirmed by re-checking rather than assumed:**
+
+1. **Approval wiring is native in `@ai-sdk/react` v4 — no hand-rolled protocol parsing needed.**
+   `useChat` returns `addToolApprovalResponse({id, approved})` directly, and tool parts carry
+   `state: 'approval-requested' | 'approval-responded' | 'output-available' | 'output-denied'`
+   with `part.approval.id`/`part.approval.approved` already shaped for this. Verified against
+   ai-sdk.dev/docs/agents/tool-approvals, 2026-08-13 — this is a documented, stable client API, not
+   something this gate had to invent on top of the wire protocol Gate 20 chose.
+2. **Version floor re-checked against live npm, unchanged.** `ai@7.0.64` / `@ai-sdk/react@4.0.67`
+   are still current as of 2026-08-13, matching Gate 20's `SDK_VERSION = 7` floor. Neither package
+   is installed yet — that's the one developer-run step still outstanding before a real `npx tsc
+   --noEmit` can confirm the frontend types line up with what was written against the docs.
+3. **The resumability revisit is closed as a no-op**, per the developer's explicit call: Gate 20's
+   `store.save_pending`/`load_pending` already covers the only turn-duration-observable scenario
+   in scope (a paused approval surviving a reload). No new persistence work landed at this gate.
+
+**Two deliberate deviations from the original design, recorded rather than silently dropped:**
+
+- The `12 → 20 (+8)` delta format needs the product's quantity *before* the change, which is not
+  present in a tool call's arguments (`adjust_stock` only carries the target `sku`/`quantity`).
+  Computing the real delta would need a lookup through `src/lib/api` before rendering the approval
+  card. Shipped instead: the raw tool arguments rendered as plain key/value pairs. Revisit if this
+  ever feels too vague to approve against confidently.
+- "Refusal" has no distinct signal on the wire — no `state: 'refused'` or equivalent exists in the
+  protocol, so a plain-text decline is indistinguishable at the wire level from any other finished
+  plain-text reply. Shipped instead: every settled plain-text reply renders identically. A muted
+  refusal-specific treatment was not built because there is no non-fragile way to detect it
+  client-side without string-matching the model's own words.
+
+**One route mismatch caught during planning, not left for the developer to hit at runtime.** The
+original plan draft assumed the success card's "View product →" link could point at
+`/products/${sku}` — wrong: `frontend/src/app/products/[id]/page.tsx` takes the numeric database
+id, never a SKU, and a tool call's arguments only ever carry `sku`. Fixed before implementation to
+`/products?search=${sku}`, which is a real, working query parameter on the product list.
+
+**One review round on the wiring task (Task 7) caught three issues that would have shipped
+otherwise**, none of them in the design and none catchable by re-reading the design against the
+code:
+
+1. The approval Confirm/Cancel handler used a non-null assertion (`part.approval!.id`) that the
+   filter selecting that part did not actually guarantee — a part with `state:
+   'approval-requested'` but no `approval` object at all would pass the filter (`!undefined?.x` is
+   `true`), then crash the click handler. Fixed to fail safe: the filter now also requires
+   `approval?.id`, and the handler no-ops rather than asserting if it's ever missing.
+2. The success card's "which tool result do I show" lookup used the *first* matching tool part in
+   a message, not the *last*. A turn that calls a read tool and then a mutating tool in the same
+   message would have shown the read's result labeled as the completed action. Changed to select
+   the last match.
+3. Starting a conversation (`POST /conversations`) had no error handling — the proxy's documented
+   503 (misconfigured `AGENT_BASE_URL`) or a network failure would leave the panel silently stuck
+   on "Connecting…" forever, or send turns against `conversation_id: undefined`. Fixed to surface a
+   visible error instead.
+
+**Deliberately not yet verified, and not forgotten:** a real `npx tsc --noEmit` and `npm run lint`
+pass once the developer installs `ai@7.0.64`/`@ai-sdk/react@4.0.67`, and a hand-driven browser
+walkthrough of all six states plus approve/deny/reload against the live backend and agent
+service — both require the developer's own machine and are not something this gate could do
+itself. Also not built: an aria-label on the panel's input, and any visible indication when a
+turn's `status` is `'error'` (currently renders identically to a normal settled reply) — recorded
+as follow-ups, not silently dropped.
+
 ---
 
 ## Re-evaluation, per step 4 of the stop-gate ritual
