@@ -91,7 +91,7 @@ class RecordingToolset(AbstractToolset[Any]):
         return f"{name} ran with {tool_args}"
 
 
-async def test_a_read_tool_runs_without_approval(settings) -> None:
+async def test_a_read_tool_runs_without_approval(settings, actor) -> None:
     """The control case: nothing about this gate changes a read question.
 
     Without this test, a bug that gated everything would look identical to a
@@ -104,7 +104,7 @@ async def test_a_read_tool_runs_without_approval(settings) -> None:
     toolset = RecordingToolset()
 
     result = await run_turn(
-        [], "What's low on stock?", settings=settings, model=model, toolset=toolset
+        [], "What's low on stock?", settings=settings, actor=actor, model=model, toolset=toolset
     )
 
     assert result.answer == "Nine products are low on stock."
@@ -116,7 +116,7 @@ async def test_a_read_tool_runs_without_approval(settings) -> None:
     assert [m.role for m in result.new_messages] == ["user", "assistant"]
 
 
-async def test_a_mutating_tool_pauses_the_turn(settings) -> None:
+async def test_a_mutating_tool_pauses_the_turn(settings, actor) -> None:
     """The gate itself: adjust_stock stops before running."""
     model = scripted_model(
         ModelResponse(
@@ -132,7 +132,7 @@ async def test_a_mutating_tool_pauses_the_turn(settings) -> None:
     toolset = RecordingToolset()
 
     result = await run_turn(
-        [], "Set rice stock to 20.", settings=settings, model=model, toolset=toolset
+        [], "Set rice stock to 20.", settings=settings, actor=actor, model=model, toolset=toolset
     )
 
     # The whole point: the tool did NOT run.
@@ -156,7 +156,7 @@ async def test_a_mutating_tool_pauses_the_turn(settings) -> None:
     assert result.resume_state is not None
 
 
-async def _pause_on_adjust_stock(settings) -> tuple[Any, RecordingToolset, Any]:
+async def _pause_on_adjust_stock(settings, actor) -> tuple[Any, RecordingToolset, Any]:
     """Drive a turn to the paused state, and hand back the pieces to resume it.
 
     The same FunctionModel instance is returned alongside the paused result
@@ -178,26 +178,27 @@ async def _pause_on_adjust_stock(settings) -> tuple[Any, RecordingToolset, Any]:
     )
     toolset = RecordingToolset()
     paused = await run_turn(
-        [], "Set rice stock to 20.", settings=settings, model=model, toolset=toolset
+        [], "Set rice stock to 20.", settings=settings, actor=actor, model=model, toolset=toolset
     )
     assert paused.resume_state is not None
     return paused, toolset, model
 
 
-async def test_approving_runs_the_tool(settings) -> None:
+async def test_approving_runs_the_tool(settings, actor) -> None:
     """**Approve: the tool actually executes, with the original arguments.**
 
     Asserting on `toolset.executed` rather than on the answer string is the
     whole point. A resume that returned nice text without running the tool
     would pass an answer-only assertion and be completely broken.
     """
-    paused, toolset, model = await _pause_on_adjust_stock(settings)
+    paused, toolset, model = await _pause_on_adjust_stock(settings, actor)
 
     result = await resume_turn(
         [],
         paused.resume_state,
         {"call-1": True},
         settings=settings,
+        actor=actor,
         model=model,
         toolset=toolset,
     )
@@ -213,20 +214,21 @@ async def test_approving_runs_the_tool(settings) -> None:
     assert result.new_messages[0].content == "Set rice stock to 20."
 
 
-async def test_denying_does_not_run_the_tool(settings) -> None:
+async def test_denying_does_not_run_the_tool(settings, actor) -> None:
     """**Deny: the tool never executes, and the turn still completes.**
 
     Both halves matter. A denial that left the turn stuck would be as broken as
     one that ran the tool anyway - the model needs to be told it was refused so
     it can reply to the person.
     """
-    paused, toolset, model = await _pause_on_adjust_stock(settings)
+    paused, toolset, model = await _pause_on_adjust_stock(settings, actor)
 
     result = await resume_turn(
         [],
         paused.resume_state,
         {"call-1": False},
         settings=settings,
+        actor=actor,
         model=model,
         toolset=toolset,
     )
@@ -236,7 +238,7 @@ async def test_denying_does_not_run_the_tool(settings) -> None:
     assert result.pending == []
 
 
-async def test_an_unknown_or_missing_decision_is_rejected(settings) -> None:
+async def test_an_unknown_or_missing_decision_is_rejected(settings, actor) -> None:
     """Both halves of the decision map are checked before the model is called.
 
     An unknown id means the caller is answering a call that was never pending -
@@ -245,7 +247,7 @@ async def test_an_unknown_or_missing_decision_is_rejected(settings) -> None:
     finding 5 warned about: a batch that half-resolves would leave the run
     stuck with no indication why.
     """
-    paused, toolset, model = await _pause_on_adjust_stock(settings)
+    paused, toolset, model = await _pause_on_adjust_stock(settings, actor)
 
     with pytest.raises(ValueError, match="not pending"):
         await resume_turn(
@@ -253,13 +255,14 @@ async def test_an_unknown_or_missing_decision_is_rejected(settings) -> None:
             paused.resume_state,
             {"call-1": True, "call-does-not-exist": True},
             settings=settings,
+            actor=actor,
             model=model,
             toolset=toolset,
         )
 
     with pytest.raises(ValueError, match="no decision"):
         await resume_turn(
-            [], paused.resume_state, {}, settings=settings, model=model, toolset=toolset
+            [], paused.resume_state, {}, settings=settings, actor=actor, model=model, toolset=toolset
         )
 
     # Neither rejection reached the tool or the model.

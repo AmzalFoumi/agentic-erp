@@ -45,33 +45,16 @@ Services raise plain exceptions from `core/exceptions.py` (`NotFoundError`, `Dup
 Per the project's working agreement (see below), **the developer runs these, not the agent** — but
 they're listed here for reference and for verifying instructions you give the developer are correct.
 
-**From `backend/`:**
+**From `backend/`** — the standard `pytest` / `uvicorn` / `alembic` invocations apply; the two that
+are *not* guessable:
 
 ```bash
-pytest                    # run the full suite
-pytest tests/test_products.py -k duplicate   # a single test
 lint-imports               # verify the architecture boundary (3 contracts)
-uvicorn api.main:app --reload    # FastAPI dev server -> http://127.0.0.1:8000/docs
 python -m mcp_server.server      # run the MCP server over stdio
-alembic revision --autogenerate -m "..."   # new migration
-alembic upgrade head                        # apply migrations
 ```
 
-**From `frontend/` — note the different working directory.** Every command above assumes `backend/`;
-these do not. Available from Gate 9 onward:
-
-```bash
-npm run dev                # Next.js dev server -> http://localhost:3000
-npm run build              # production build
-npx tsc --noEmit           # type check (the frontend's "pytest" half)
-npm run lint               # ESLint, incl. the restricted-import architecture rules
-npm run api:types          # regenerate src/lib/api/schema.d.ts from FastAPI's /openapi.json
-```
-
-Scaffolded at Gate 9 on **Next 16** with the `src/` layout, so source is `frontend/src/...`. Two v16
-consequences: Turbopack is the default (no `--turbopack` flag), and `next lint` is removed, so
-`npm run lint` calls `eslint` directly. `api:types` and the restricted-import rules land at Gate 10 —
-check `docs/PLAN.md`'s progress table before assuming any of the above runs.
+**Frontend commands live in `frontend/CLAUDE.md`** — different working directory, and they only
+matter when you're working there.
 
 ## Architecture
 
@@ -97,11 +80,8 @@ AI agent ──▶ mcp_server/ ──┘
   supersedes an earlier "stdio is permanent" conclusion — see the 2026-07-31 amendment in
   `BACKEND-PLAN.md`.)
 - **`frontend/`** — Next.js UI, from Gate 9. **A client of the API and nothing more**; no business
-  logic, and any server-side Next code is transport only. Two rules enforced by ESLint
-  `no-restricted-imports`, the frontend's answer to `lint-imports`: only the `src/lib/api` tree may
-  import the generated client or call `fetch`; and no `app/api` handlers mirroring FastAPI — that
-  would be a *third adapter*, the same mistake as `services/` importing `api/`. React Server
-  Components call FastAPI directly. Detail in `docs/FRONTEND-PLAN.md`.
+  logic, and never a third adapter. The rules that enforce that, and the frontend commands, are in
+  `frontend/CLAUDE.md`, which loads when you work there. Detail in `docs/FRONTEND-PLAN.md`.
 
 ### Identity: `Actor`, not ambient request state
 

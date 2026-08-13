@@ -1,11 +1,20 @@
 """The conversation loop: our own boundary types, one Pydantic AI Agent per turn.
 
-**The isolation rule.** This file, `model_provider.py`, and `mcp_client.py` are the
-only three files in agent/ allowed to import `pydantic_ai` or `mcp` — a "runtime
-cluster" enforced by agent/pyproject.toml's import-linter contract (Gate 17).
-Everything outside this cluster (config.py, scripts/) talks only in `Message` and
-`TurnResult`, so a future caller (an HTTP route, a test) never needs to know
-Pydantic AI exists.
+**The isolation rule.** This file, `model_provider.py`, `mcp_client.py`, and (as
+of Gate 20) `app.py` are the files in agent/ allowed to import `pydantic_ai` or
+`mcp` — a "runtime cluster" enforced by agent/pyproject.toml's import-linter
+contract (Gate 17). Read as a set they are *the files that adapt Pydantic AI to
+something else*: this one owns the turn, `model_provider.py` adapts to Google,
+`mcp_client.py` to MCP, `app.py` to HTTP. `config.py` and `scripts/` stay
+forbidden, and that is where the contract's value lives: settings load and a
+script runs without pydantic_ai on the import path.
+
+Gate 17's original wording said a future HTTP route would never need to know
+Pydantic AI exists. Gate 20 chose `pydantic_ai.ui.VercelAIAdapter` — the
+framework's own implementation of a documented streaming protocol, including
+native tool-approval parts — over hand-rolling event types, and that adapter
+takes an `Agent`. So the claim was narrowed rather than quietly kept: `app.py`
+is inside the cluster, with the reason written down.
 
 **Why the caller owns the history instead of this module.** Pydantic AI's own
 `agent.run()` is stateless — it takes `message_history` in and gives you
@@ -38,6 +47,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.models import Model
 from pydantic_ai.toolsets import AbstractToolset
 
+from actor import Actor
 from config import Settings
 from mcp_client import ErpToolset
 from model_provider import build_model
@@ -121,10 +131,11 @@ class TurnResult:
     work until the first parallel batch and then silently drop the rest.
 
     `resume_state` is the interrupted run's whole message list, serialized.
-    Opaque to callers and NOT persisted anywhere: a pending approval currently
-    dies with the process, which is acceptable only because nothing but a test
-    asks for one yet. Gate 20 puts an HTTP boundary between the pause and the
-    decision, and inherits the question of where this lives.
+    Opaque to callers. **Gate 20 answered where it lives:** `store.py` writes
+    these same bytes to `agent.conversations.pending_state`, so a pending
+    approval survives a restart and a browser reload instead of dying with the
+    process. Gate 19 held it in memory only, which was acceptable while the only
+    caller was a test.
     """
 
     answer: str | None
@@ -134,8 +145,11 @@ class TurnResult:
     resume_state: bytes | None
 
 
-def _to_model_history(history: list[Message]) -> list[ModelMessage]:
+def to_model_history(history: list[Message]) -> list[ModelMessage]:
     """Our Message list -> Pydantic AI's message_history kwarg shape.
+
+    Public as of Gate 20: `app.py` converts a stored conversation into wire
+    messages for a browser to hydrate from, and needs this same conversion.
 
     An assistant Message with provider_data set is rebuilt from those exact
     bytes via ModelMessagesTypeAdapter, rather than a fresh plain-text
@@ -155,12 +169,19 @@ def _to_model_history(history: list[Message]) -> list[ModelMessage]:
     return converted
 
 
-def _build_agent(
+def build_agent(
     settings: Settings,
-    model: Model | None,
-    toolset: AbstractToolset[Any] | None,
+    *,
+    actor: Actor,
+    model: Model | None = None,
+    toolset: AbstractToolset[Any] | None = None,
 ) -> Agent[None, Any]:
-    """The Agent both public functions run on.
+    """The Agent every entry point in this file runs on.
+
+    **Public as of Gate 20**, because `app.py` needs it: `VercelAIAdapter`
+    takes an `Agent` and drives the run itself, so the HTTP adapter cannot go
+    through `run_turn`. That is also why `app.py` had to join Gate 17's runtime
+    cluster - see agent/pyproject.toml's contract comment for the full reason.
 
     **`output_type=[str, DeferredToolRequests]` is not optional.** Without
     DeferredToolRequests in the output type, a call to a tool marked
@@ -176,12 +197,19 @@ def _build_agent(
     factory, matching how `settings` is already a parameter here "so nothing
     here reaches for global state", and how backend/ passes `Actor` rather than
     reading ambient request state.
+
+    `actor` is required and keyword-only, and goes no further than `ErpToolset`,
+    which stores it and does not use it yet - see actor.py for why the seam
+    lands at Gate 20 rather than at the auth gate. Required rather than
+    defaulting to SystemActor deliberately: a default would let a future caller
+    acquire full privileges by omission, which is the failure this parameter
+    exists to prevent.
     """
 
     return Agent(
         model or build_model(settings),
         instructions=INSTRUCTIONS,
-        toolsets=[toolset or ErpToolset(settings.mcp_base_url)],
+        toolsets=[toolset or ErpToolset(settings.mcp_base_url, actor=actor)],
         output_type=[str, DeferredToolRequests],
     )
 
@@ -252,11 +280,44 @@ def _completed(result: Any, question: str) -> TurnResult:
     )
 
 
+def decode_state(resume_state: bytes) -> list[ModelMessage]:
+    """A parked turn's stored bytes -> Pydantic AI messages.
+
+    The read half of what `_paused` writes, so the two sides of that byte format
+    stay in one file. `app.py` needs it to render an approval card for a browser
+    that reloaded, and `store.py` never parses these bytes at all.
+    """
+
+    return ModelMessagesTypeAdapter.validate_json(resume_state)
+
+
+def turn_from_result(result: Any) -> TurnResult:
+    """Translate a finished Pydantic AI run into our own boundary type.
+
+    Split out at Gate 20 because `app.py` does not call `run_turn`: the
+    `VercelAIAdapter` drives the run itself, and then hands back the same
+    `AgentRunResult`. This is the shared tail both paths need, so "did it pause"
+    is decided in one place rather than answered twice with two chances to
+    disagree.
+
+    The user half of a completed turn is recovered from the run's own messages
+    rather than passed in, which is what makes this correct for a resume too -
+    on a resume the question arrived one request earlier, and nothing but the
+    message list still knows what it was.
+    """
+
+    if isinstance(result.output, DeferredToolRequests):
+        return _paused(result, result.output)
+
+    return _completed(result, _original_question(result.all_messages()))
+
+
 async def run_turn(
     history: list[Message],
     question: str,
     *,
     settings: Settings,
+    actor: Actor,
     model: Model | None = None,
     toolset: AbstractToolset[Any] | None = None,
 ) -> TurnResult:
@@ -264,16 +325,17 @@ async def run_turn(
 
     `history` is never mutated - the caller decides how and whether to grow
     their own list from `new_messages`. `settings` is explicit rather than a
-    module-level import so nothing here reaches for global state.
+    module-level import so nothing here reaches for global state, and `actor`
+    for the same reason plus one more: see build_agent above.
 
     Returns either a finished turn or a paused one; see TurnResult. A paused
     turn is continued with `resume_turn`, and there is no timeout on that -
     a pending approval waits until the caller decides or the process ends.
     """
 
-    agent = _build_agent(settings, model, toolset)
+    agent = build_agent(settings, actor=actor, model=model, toolset=toolset)
 
-    result = await agent.run(question, message_history=_to_model_history(history))
+    result = await agent.run(question, message_history=to_model_history(history))
 
     if isinstance(result.output, DeferredToolRequests):
         return _paused(result, result.output)
@@ -341,6 +403,7 @@ async def resume_turn(
     decisions: dict[str, bool],
     *,
     settings: Settings,
+    actor: Actor,
     model: Model | None = None,
     toolset: AbstractToolset[Any] | None = None,
 ) -> TurnResult:
@@ -383,7 +446,7 @@ async def resume_turn(
         }
     )
 
-    agent = _build_agent(settings, model, toolset)
+    agent = build_agent(settings, actor=actor, model=model, toolset=toolset)
 
     # `None` as the prompt, not a filler string: the interrupted turn's user
     # question is already inside `messages`, and Agent.run's signature accepts

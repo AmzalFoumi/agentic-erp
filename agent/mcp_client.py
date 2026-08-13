@@ -49,6 +49,8 @@ from mcp.client import Client
 from pydantic_ai import ModelRetry, RunContext, ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 
+from actor import Actor
+
 # Validates tool arguments as "a dict with string keys and any values", i.e. it
 # checks the shape and nothing else. The real schema is enforced by the server -
 # `@mcp.tool()`'s own pydantic validation - so validating twice here would only
@@ -163,8 +165,19 @@ class ErpToolset(AbstractToolset[Any]):
     the protocol boundary stay in one module each.
     """
 
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, *, actor: Actor) -> None:
         self._base_url = base_url
+        # **Stored and deliberately not yet used (Gate 20).** This is the seam
+        # where identity reaches the ERP: MCP 2026-07-28 removed the initialize
+        # handshake, so a caller identifies itself with per-call `_meta` on every
+        # request, and `call_tool` below is the one line that will send it. The
+        # parameter exists now because Gate 19 created a privileged action - a
+        # human approving a write - and Gate 20 puts HTTP in front of it; adding
+        # identity afterwards is CLAUDE.md's "known trap". Today it is always a
+        # SystemActor, so sending it would change nothing and would invite
+        # backend/mcp_server/server.py's `_actor()` to trust an unauthenticated
+        # claim. It gets wired through at the auth gate, on both ends at once.
+        self._actor = actor
         self._stack = AsyncExitStack()
         self._client: Client | None = None
 

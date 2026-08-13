@@ -24,14 +24,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import settings  # noqa: E402  (must follow the sys.path line above)
+from actor import SystemActor  # noqa: E402  (must follow the sys.path line above)
+from config import settings  # noqa: E402
 from conversation import Message, run_turn  # noqa: E402
+
+# Gate 20 made `actor` a required argument to run_turn. SystemActor is still the
+# only implementation (docs/AUTH-PLAN.md), so this changes nothing about what
+# this script can do - it just makes the script say whose authority it is using
+# rather than leaving it implicit.
+ACTOR = SystemActor()
 
 
 async def _ask(history: list[Message], question: str, *, echo: bool = True) -> list[Message]:
     if echo:
         print(f"  you: {question}")
-    result = await run_turn(history, question, settings=settings)
+    result = await run_turn(history, question, settings=settings, actor=ACTOR)
 
     if result.tool_calls:
         print(f"  === {len(result.tool_calls)} tool call(s): {', '.join(result.tool_calls)} ===")

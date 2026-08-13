@@ -47,3 +47,16 @@ pytest==9.1.1
 # asyncio_mode="auto" in pyproject.toml means no test carries its own marker.
 # Verified against PyPI on 2026-08-12.
 pytest-asyncio==1.4.0
+
+# Gate 20: the agent's own HTTP surface (app.py). Same pins as
+# backend/requirements.txt - one library, two services, no reason to drift.
+# Note 0.141.1 is the current FastAPI on PyPI as of 2026-08-12; matching the
+# backend deliberately wins over chasing the newer patch.
+fastapi==0.141.0
+uvicorn[standard]==0.52.0
+
+# The HTTP client. Needed directly by fastapi.testclient.TestClient, which is
+# how tests/test_app.py exercises the routes without a running server. Present
+# transitively via mcp today, which is a latent break - pinning makes it
+# intentional. Same pin as backend/requirements.txt.
+httpx==0.28.1

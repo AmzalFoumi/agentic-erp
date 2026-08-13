@@ -274,3 +274,37 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+@layer utilities {
+  /*
+   * Agent panel animations (Gate 21). Two states share these: the thinking
+   * indicator's dots (shimmer) and the streaming reply's trailing cursor
+   * (blink). Defined once here rather than per-component so both stay in sync
+   * if the timing ever changes.
+   */
+  @keyframes shimmer {
+    0%, 80%, 100% {
+      opacity: 0.3;
+    }
+    40% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes blink {
+    0%, 50% {
+      opacity: 1;
+    }
+    50.01%, 100% {
+      opacity: 0;
+    }
+  }
+
+  .animate-shimmer {
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+
+  .animate-blink {
+    animation: blink 1s step-end infinite;
+  }
+}
