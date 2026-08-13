@@ -53,6 +53,8 @@
 | 19   | Requiring human approval before the AI agent can run any of its three actions that change data, enforced at the API level before any UI exists for it                          | ✅ done 2026-08-12 — the agent now stops and asks before it changes anything, and correctly carries on whether the answer is yes or no. Built to **fail safe**: rather than listing the three actions that need permission, we listed the three that are safe to run freely, so any *new* action someone adds later needs permission automatically instead of slipping through unnoticed. This is also the first stage with an automated test suite for the AI agent itself — nine tests that run without the internet or the real AI model, using stand-ins for both, so the yes-and-no behaviour can be checked in seconds and a refusal can be tested at all (you can't ask a real AI model to be refused). The tests check whether the action *actually ran*, not whether the reply looked right — a version that said "done" without doing anything would pass a sloppier test. Two honest limits recorded: a pending question is held in memory only, so it's lost if the program restarts — deliberately left until stage 20, when there's a real server for that to matter on — and there's still no screen for any of this; that's stage 21. Also corrected a wrong detail in this stage's own plan: it named a feature of the AI library that isn't reachable the way we've built ours, though the same mechanism is available one level down |
 | 20   | Giving the AI agent its own web address, with live streaming responses, plus wiring it into the website           | ✅ done 2026-08-12 — the agent now has its own address a browser can talk to, and answers arrive word by word as they're generated rather than all at once at the end. Stage 19's "ask before changing anything" survives the trip: the approval question now gets **written down**, so if you close the tab or the program restarts, the thing waiting for your yes-or-no is still there when you come back — that was the one honest gap left open at stage 19, and it's the reason that stage deliberately stopped where it did. Built on the AI library's own implementation of a published streaming standard rather than inventing our own message format; that turned out to matter more than expected, because approval is built into the standard, so the yes-or-no travels the same channel as everything else instead of needing a second one. Two other things worth knowing. First, we now record **who** is asking on every request — always "the system" for now, since there are no logins yet — because stage 19 created something privileged (permission to change data) with no notion of who granted it, and adding that in afterwards is exactly the kind of retrofit that goes wrong. It's written to work with any future login provider; none is chosen. Second, and this is a real constraint rather than a detail: the agent is deliberately reachable **only from this machine**, spelled out in the code with the reason, and there's now a test that fails if someone changes it. That means the agent cannot be deployed to the internet until the login stage is done — a deployed website has no way to reach a program running only on your laptop. That ordering was chosen on purpose: this stage locally, then logins, then deploy. Also corrected a wrong detail in the earlier plan: it said the website's architecture rules needed one exception for this; they needed two |
 | 21   | The website's AI-agent panel — building the five remaining screens/states described in `FRONTEND-PLAN.md`                    | ⬜ not started — this is also when we revisit whether conversations need to survive a page reload, once we can actually see how long a "turn" takes |
+| 22   | **Logins and security** — real people signing in, and the AI agent acting on their behalf with no more power than they have. Detailed in `docs/AUTH-PLAN.md` | ⬜ not started — **no longer optional, and it has to happen before stage 23.** Researched on 2026-08-13: the mechanism the whole design depends on (a way to swap one access pass for a narrower one) is confirmed working and free in the login server we're considering. Nothing is committed yet — the first step is a short, timeboxed experiment to prove it end-to-end, and only then do we pick a provider. Roughly two stages of work in one: people signing in, then the agent acting for them |
+| 23   | **Putting it online** — the website, the web API, the agent-server, and the AI agent, all hosted                          | ⬜ not started — blocked by stage 22, and this is a hard block, not a preference. See the note below |
 
 Stages 0–8 are explained in detail in **`docs/BACKEND-PLAN.md`**, stages 9–13 in
 **`docs/FRONTEND-PLAN.md`**, stages 14–21 in **`docs/AGENT-PLAN.md`**.
@@ -98,10 +100,11 @@ review after each one.
 > (as explained in `docs/AUTH-PLAN.md`) figuring out how the AI agent identifies itself is the harder
 > problem and needs to be solved first.
 
-## Login and security: on hold, on purpose
+## Login and security: ~~on hold, on purpose~~ — **the hold ended on 2026-08-13**
 
 **No login provider has been chosen yet, and every user in the system is currently treated as one
-built-in "system" identity with full access.** The full explanation — why Supabase is only used for
+built-in "system" identity with full access.** That is still true of the code — what changed is that
+it now has a deadline. See "the trigger has fired" below. The full explanation — why Supabase is only used for
 the database and not for login, why the AI agent's identity is the harder problem, the comparison of
 login providers we checked (ThunderID / Asgardeo / Keycloak / Auth0), and what it costs to keep
 putting this off — is in **`docs/AUTH-PLAN.md`**. Don't re-research this; just read that file.
@@ -130,6 +133,28 @@ written as a specific list, rather than just a general rule, because the risky v
 mistake is never a considered decision — it's something like "I'll just tunnel it so I can demo it
 from my phone," a thirty-second convenience that would expose data-changing actions to the internet
 with no login and no record of who did what. Full reasoning is in **`docs/AGENT-PLAN.md`**.
+
+### The trigger has fired (2026-08-13) — logins now come before going online
+
+The developer's stated goal is to **host all four pieces**: the website, the web API, the
+agent-server, and the AI agent. A hosted agent-server *is* condition 1 above — "reachable over the
+network by anything other than the developer's own computer" — so the hold is over. That's why
+stages 22 and 23 now exist in the table, in that order.
+
+Worth being blunt about why the order can't be flipped, since "put it online now, add logins after"
+is the normal-sounding version of this mistake. Today, every caller of the agent-server is treated as
+the built-in "system" identity, and that identity is allowed to do **everything**. Putting it online
+as-is doesn't mean "online without logins yet" — it means **anyone who finds the address can change
+your stock levels and prices**, and every one of those changes gets recorded as having been done by
+"the system," indistinguishable from real ones. There's no half-version of this worth shipping.
+
+The good news, from the research on 2026-08-13: the hard part is no longer unknown. The mechanism the
+design rests on — issuing the AI agent a *narrower* pass derived from the signed-in person's, so it
+can never do more than they can — is confirmed to work, and is free if we host the login server
+ourselves. The cost has moved from "is this even possible" to "we'd be running a fifth service, and
+the best-fitting option isn't at a stable release yet." That's a judgement call, and it's made at
+stage 22 with a short experiment in hand, not before. Details in **`docs/AUTH-PLAN.md`** — read the
+two 2026-08-13 amendments first.
 
 ---
 
