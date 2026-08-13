@@ -1366,9 +1366,18 @@ so no DesignSync re-fetch happened this gate.
    are still current as of 2026-08-13, matching Gate 20's `SDK_VERSION = 7` floor. Neither package
    is installed yet — that's the one developer-run step still outstanding before a real `npx tsc
    --noEmit` can confirm the frontend types line up with what was written against the docs.
-3. **The resumability revisit is closed as a no-op**, per the developer's explicit call: Gate 20's
-   `store.save_pending`/`load_pending` already covers the only turn-duration-observable scenario
-   in scope (a paused approval surviving a reload). No new persistence work landed at this gate.
+3. **The resumability revisit was reopened by the final review, and is no longer a no-op.**
+   The developer's original call was that Gate 20's `store.save_pending`/`load_pending` already
+   covered a paused approval surviving a reload, so no new work was needed at this gate. That
+   was true of the *backend* but not of what the shipped UI actually did: `AgentPanel` created a
+   brand-new conversation on every mount and never called the existing `GET
+   /conversations/{id}` route, so a reload silently abandoned any parked approval instead of
+   resuming it — caught by the final whole-branch review, not by any task review, because no
+   single task's diff made the gap visible. Fixed at that point: the conversation id is now kept
+   in `localStorage`, and a mount with a stored id calls `GET /conversations/{id}` (via a new
+   `getAgentConversation` in `src/lib/api/agent.ts`) to seed `useChat`'s initial messages before
+   falling back to starting a fresh conversation on a 404 or a first visit. No sweeper, no TTL —
+   a stale id just 404s and the code recovers.
 
 **Two deliberate deviations from the original design, recorded rather than silently dropped:**
 
@@ -1389,9 +1398,11 @@ original plan draft assumed the success card's "View product →" link could poi
 id, never a SKU, and a tool call's arguments only ever carry `sku`. Fixed before implementation to
 `/products?search=${sku}`, which is a real, working query parameter on the product list.
 
-**One review round on the wiring task (Task 7) caught three issues that would have shipped
-otherwise**, none of them in the design and none catchable by re-reading the design against the
-code:
+**Two review rounds caught six issues that would have shipped otherwise** — three at the
+per-task level (Task 7), three more at the final whole-branch level that only showed up once
+everything was wired together:
+
+Task 7's review round:
 
 1. The approval Confirm/Cancel handler used a non-null assertion (`part.approval!.id`) that the
    filter selecting that part did not actually guarantee — a part with `state:
@@ -1406,6 +1417,27 @@ code:
    503 (misconfigured `AGENT_BASE_URL`) or a network failure would leave the panel silently stuck
    on "Connecting…" forever, or send turns against `conversation_id: undefined`. Fixed to surface a
    visible error instead.
+
+The final whole-branch review's round (see the resumability item above for the third):
+
+4. The **"thinking" state was unreachable.** `useChat` optimistically appends the user's own
+   message and sets `status` to `'submitted'` before any assistant message exists, so the
+   classifier's old text-content check always saw the user's own non-empty message and returned
+   `'streaming'`, never `'thinking'`. Fixed by checking `last.role !== 'assistant'` first and
+   returning `'thinking'` immediately in that case, before any tool-part inspection runs.
+5. **Read-only lookups rendered the mutation success card.** The "does this turn count as
+   success" check matched any tool part with `state: 'output-available'`, and read-only tools
+   (`list_products`, `get_product`, `get_product_by_sku`) reach that state too since they run
+   without approval — so "what's low on stock?" was rendering "Done — ..." with
+   `updated_by: system`, exactly the reassurance the design reserves for an approved mutation.
+   Fixed by requiring `approval?.approved === true` alongside the output state; a read-only tool's
+   part never carries an `approval` object at all, so it now correctly falls through to a normal
+   reply instead.
+6. Conversation resumability — see above.
+
+Both rounds are why a task passing its own review is necessary but not sufficient: findings 4-6
+existed in code that had already been individually reviewed and approved per-task, and only
+surfaced once the whole wiring was exercised end to end.
 
 **Deliberately not yet verified, and not forgotten:** a real `npx tsc --noEmit` and `npm run lint`
 pass once the developer installs `ai@7.0.64`/`@ai-sdk/react@4.0.67`, and a hand-driven browser
