@@ -35,6 +35,7 @@ persists through `on_complete`, and serves history back on GET so a reload can
 hydrate.
 """
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,11 +44,36 @@ from pydantic_ai.agent import AgentRunResult
 from pydantic_ai.models import Model
 from pydantic_ai.toolsets import AbstractToolset
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
+from pydantic_ai.ui.vercel_ai.request_types import RequestData
 
 import store
 from actor import Actor, SystemActor
 from config import settings
 from conversation import build_agent, decode_state, to_model_history, turn_from_result
+
+
+class _SanitizingVercelAIAdapter(VercelAIAdapter):
+    """Works around a real wire-format gap, not a version we are behind on.
+
+    `ai`/`@ai-sdk/react` v7's `useChat` always stamps an `id` on a resubmitted
+    `reasoning` part (so a streamed reasoning part can be updated in place -
+    the `reasoning-{id}` case in the AI SDK docs). `pydantic_ai.ui.vercel_ai`'s
+    `ReasoningUIPart` request model has no `id` field and forbids extras, so
+    that same part 422s the moment a client resubmits history containing one -
+    which happens on every approval round-trip, since Gemini reasons before
+    every tool call. Confirmed still true on pydantic-ai's `main` as of
+    2026-08-13, so this is not a version to bump past; it is a permanent
+    tolerance shim until upstream adds the field.
+    """
+
+    @classmethod
+    def build_run_input(cls, body: bytes) -> RequestData:
+        data = json.loads(body)
+        for message in data.get("messages", []):
+            for part in message.get("parts", []):
+                if part.get("type") == "reasoning":
+                    part.pop("id", None)
+        return super().build_run_input(json.dumps(data).encode())
 
 # 127.0.0.1, not 0.0.0.0, and not a default inherited from uvicorn. Written here
 # explicitly so the constraint is a line of code someone has to delete rather
@@ -253,7 +279,7 @@ async def run_turn_endpoint(
             store.append_message(conversation_id, message)
         store.clear_pending(conversation_id)
 
-    return await VercelAIAdapter.dispatch_request(
+    return await _SanitizingVercelAIAdapter.dispatch_request(
         request,
         agent=agent,
         sdk_version=SDK_VERSION,
