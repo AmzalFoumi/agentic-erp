@@ -22,9 +22,9 @@ const CELL = "px-cell-x py-0";
 
 export function ProductsTable({ products }: { products: Product[] }) {
   return (
-    <div className="rounded-(--radius) border border-border bg-card">
+    <div className="table-scroll-fix min-h-0 flex-1 overflow-y-auto rounded-(--radius) border border-border bg-card">
       <Table>
-        <TableHeader>
+        <TableHeader className="sticky top-0 z-10">
           <TableRow className="bg-secondary">
             <TableHead className={HEAD}>SKU</TableHead>
             <TableHead className={HEAD}>Name</TableHead>

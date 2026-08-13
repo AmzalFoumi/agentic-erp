@@ -1,6 +1,7 @@
 "use client";
 
 import type { ToolUIPart } from "./use-panel-state";
+import { Button } from "@/components/ui/button";
 
 // "tool-adjust_stock" -> "adjust stock". Generic across every mutating tool —
 // see Global Constraints: the allowlist is inverted, so a new tool must render
@@ -33,20 +34,12 @@ export function ToolCallCard({
         ))}
       </dl>
       <div className="flex gap-2 pt-1">
-        <button
-          type="button"
-          onClick={() => onRespond(true)}
-          className="h-control rounded-(--radius) bg-primary px-3 text-sm text-primary-foreground"
-        >
+        <Button type="button" onClick={() => onRespond(true)}>
           Confirm
-        </button>
-        <button
-          type="button"
-          onClick={() => onRespond(false)}
-          className="h-control rounded-(--radius) border border-input bg-card px-3 text-sm text-foreground"
-        >
+        </Button>
+        <Button type="button" variant="outline" onClick={() => onRespond(false)}>
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );

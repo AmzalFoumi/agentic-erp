@@ -17,7 +17,7 @@ export function MessageList({
   isStreaming: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-stack overflow-y-auto">
+    <div className="flex flex-col gap-stack">
       {messages.map((message, index) => {
         const text = textOf(message);
         if (!text) return null;

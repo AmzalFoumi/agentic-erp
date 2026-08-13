@@ -40,8 +40,8 @@ export default async function ProductsPage({
   const isNoResults = total === 0 && hasSearch;
 
   return (
-    <div>
-      <div className="mb-section flex items-center justify-between">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="mb-section flex shrink-0 items-center justify-between">
         <h1 className="text-lg font-semibold">Products</h1>
         {!isEmptyCatalogue && (
           <form action="/products" className="flex">
@@ -61,7 +61,9 @@ export default async function ProductsPage({
       {!isEmptyCatalogue && !isNoResults && (
         <>
           <ProductsTable products={items} />
-          <PaginationBar page={page} limit={LIMIT} total={total} search={search} />
+          <div className="shrink-0">
+            <PaginationBar page={page} limit={LIMIT} total={total} search={search} />
+          </div>
         </>
       )}
     </div>
