@@ -41,3 +41,18 @@ dist/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# ---------- Agent skills (installed via `npx skills`) ----------
+# The CLI keeps a canonical copy in .agents/ for the agents it supports; this project only
+# uses Claude Code, which reads .claude/skills/. That copy is the one we track.
+.agents/
+
+# Workspace files the `teach` skill writes into whatever directory it runs in. Root-anchored
+# so they can't shadow real directories elsewhere in the tree (e.g. a frontend assets/).
+/MISSION.md
+/RESOURCES.md
+/NOTES.md
+/reference/
+/lessons/
+/learning-records/
+/assets/
