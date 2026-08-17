@@ -1355,7 +1355,8 @@ the Claude Design project if the markup has moved.
 **Also at this gate:** revisit the resumability deferral, per its condition above — this is the
 first point at which real turn duration is observable.
 
-**Closed 2026-08-13 — code complete and reviewed, manual browser verification still pending.**
+**Closed 2026-08-13 — code complete and reviewed. Manual browser verification completed and the
+gate's commits merged to `main`; confirmed 2026-08-18.**
 The re-fetch condition above didn't trigger: the six-state table in `FRONTEND-PLAN.md` matched
 what was needed and nothing suggested the Claude Design project's markup had moved since Gate 12e,
 so no DesignSync re-fetch happened this gate.
