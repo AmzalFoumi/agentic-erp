@@ -207,7 +207,7 @@ time, alongside the auth-provider decision.
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `core/models.py`          | ORM tables. Slice 1: `Product` (id, sku unique, name, category, unit, cost_price, sell_price, quantity_on_hand, reorder_level, timestamps, `created_by`/`updated_by` audit columns) |
 | `core/exceptions.py`      | `NotFoundError`, `DuplicateError`, `ValidationError`, `PermissionDeniedError` — framework-free, the shared error vocabulary both adapters translate from                            |
-| `core/actor.py`           | The `Actor` protocol (`id`, `can(permission)`) and a `SystemActor` with full permissions, used until a real auth provider is chosen. See `docs/AUTH-PLAN.md`.                   |
+| `core/actor.py`           | The `Actor` protocol (`id`, `can(permission)`) and a `SystemActor` with full permissions, used until a real auth provider is **wired in** — ThunderID was chosen at Gate 23, but this code is unchanged until Gate 24. See `docs/AUTH-PLAN.md`.                   |
 | `alembic.ini`, `alembic/` | Migrations, initialised in `backend/`                                                                                                                                               |
 
 - Verify: `alembic upgrade head` creates the `products` table; confirmed with the Supabase MCP

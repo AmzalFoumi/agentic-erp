@@ -1,5 +1,24 @@
 # ThunderID — the identity provider for this project.
 #
+# ⚠️ TEMPORARY — LOCAL DEVELOPMENT ONLY. NOT A DEPLOYMENT RECIPE. ⚠️
+#
+# This file exists to pin the version Gate 23's spike validated against, and to give the
+# developer one command that starts a login server on their own machine. It is the vendor's
+# quick-start file with the image tag pinned; nothing else about it has been reviewed for
+# production use, and four things are actively wrong for it — see the "Open decision" note
+# under Gate 26 in docs/AUTH-PLAN.md, which is where this is owned:
+#
+#   1. port 8090 is published on ALL interfaces, not loopback;
+#   2. the TLS certificate is self-signed (see note 1 below);
+#   3. setup.sh destroys and regenerates all key material on recreation (see note 2 below);
+#   4. the volumes hold the whole identity store with no backup and no tested restore.
+#
+# **The permanent deployment path has not been chosen yet.** The vendor's own production
+# path is Kubernetes via their Helm chart (oci://ghcr.io/thunder-id/helm-charts/thunderid),
+# not Compose. Hardening this file versus adopting the chart is a Gate 26 decision and is
+# deliberately still open. Do not deploy this file to anything internet-reachable, and do
+# not treat its presence in the repo as a decision that it will be.
+#
 # Adapted from ThunderID's official quick-start compose file
 # (asgardeo/thunder → install/quick-start/docker-compose.yml), with one deliberate
 # change: **the image is pinned to an exact version instead of `latest`.**

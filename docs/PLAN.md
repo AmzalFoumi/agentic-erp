@@ -57,7 +57,7 @@
 | 23   | **Proving it works before building on it** — a short, throwaway experiment run outside this repository | ✅ done 2026-08-18 — **the experiment passed.** No application code was written or merged — the test script was written to a scratch folder and deleted. **The login server is now chosen rather than provisional**, and the backup option we'd named in case this failed is no longer needed. What was proved: we registered this system and a test AI agent with the login server, and confirmed that a narrowed-down access pass really is accepted by the code that will be checking it — and, more importantly, that **an agent cannot give itself more power than it was handed**. That last test is the one gate 25 depends on: the test agent was *allowed* to change stock, but when handed a pass that only permitted reading, it asked to also change stock and was given back read-only anyway. Passes meant for a different service, and passes with a tampered signature, were both correctly refused. Three things the login server's own documentation had wrong, all now corrected in `AUTH-PLAN.md` — the significant one is that **asking for too much permission doesn't produce an error, it quietly gives you less**, so our code must always check what it actually received rather than assuming it got what it asked for. Also settled a question deliberately left open: permissions will live in the login server rather than in our own database table. One correction that creates real work: the library we use does **not** include ready-made code for checking these passes, only the outline of one — so gate 25 writes roughly 55 lines itself (the working version from this experiment is the reference; no new dependency needed, it's already installed). Also committed a **startup recipe** for the login server at `deploy/docker-compose.thunderid.yml`, adapted from the official one with a deliberate change: it **pins an exact version** rather than always grabbing the newest. That wasn't housekeeping — the official recipe says "use the latest", which is how our login server quietly upgraded itself between two sessions with nobody asking it to. Harmless that time; not a property worth keeping for the piece that holds every login. The version it turned out to be running is a **full 1.0 release**, not the release candidate we'd recorded, which also removes the biggest objection we had to this provider — though a 1.0 reached four weeks after the first preview still has very little real-world use behind it, so the caution stays |
 | 24   | **People signing in** — real accounts on the website and the web API, replacing the built-in "system" identity that currently has full access | ⬜ not started — blocked by gate 23 |
 | 25   | **The AI agent acting for a signed-in person**, with no more power than that person has, and the agent-server locked down to match | ⬜ not started — blocked by gate 24. The risky one: it's where "the agent can only do what you can do" stops being a design and starts being something actually enforced |
-| 26   | **Putting it online** — the website, the web API, the agent-server, and the AI agent, all hosted                          | ⬜ not started — blocked by gate 25, and this is a hard block, not a preference. See the note below |
+| 26   | **Putting it online** — the website, the web API, the agent-server, the AI agent, **and the login server**, all hosted | ⬜ not started — blocked by gate 25, and this is a hard block, not a preference. **Note the count: five things to host, not four.** The login provider we chose has no hosted option, so we run it ourselves — that's a real cost of the choice, recorded in `AUTH-PLAN.md`. How it gets deployed is still an open decision; the container recipe in `deploy/` is for local use only. See the note below |
 
 Gates 0–8 are explained in detail in **`docs/BACKEND-PLAN.md`**, gates 9–13 in
 **`docs/FRONTEND-PLAN.md`**, gates 14–21 in **`docs/AGENT-PLAN.md`**, and gates 22–26 in
@@ -109,8 +109,8 @@ review after each one.
 **Every user in the system is still treated as one built-in "system" identity with full access.**
 That remains true of the code and stays true until gate 24. What changed is that it now has a
 deadline (see "the trigger has fired" below) and, as of gate 22 (2026-08-14), a chosen provider:
-**ThunderID, subject to gate 23's experiment passing.** Keycloak is the named fallback if it
-doesn't. The full explanation — why Supabase is used for the database and not for login, why the AI
+**ThunderID — no longer provisional, since gate 23's experiment passed on 2026-08-18.** Keycloak was
+the named fallback if it hadn't; it is no longer needed. The full explanation — why Supabase is used for the database and not for login, why the AI
 agent's identity is the harder problem, how one access pass gets swapped for a narrower one, what
 running a login server actually costs, and the providers we compared and rejected — is in
 **`docs/AUTH-PLAN.md`**. Don't re-research this; just read that file.
@@ -119,13 +119,14 @@ Only one part of it needs to live here, because it's a trigger for *stopping* ot
 a description of future work:
 
 **Two things will force us to deal with login/security immediately, before any further feature
-work:**
+work.** *(The first of them has since fired — see "the trigger has fired" below. Both are kept here
+because they explain why the auth gates exist and when a future change would re-trigger them.)*
 
 1. The AI agent server becomes reachable over the network by anything other than the developer's
    own computer.
 2. A second real person starts using the system.
 
-Until both of those are still false, treating everyone as one "system" user is acceptable — but only
+While both of those remain false, treating everyone as one "system" user is acceptable — but only
 because there's currently no way for an unauthorized caller to reach it.
 
 **From gate 16 onward, the first condition stops being hypothetical.** The AI agent server gains
@@ -283,15 +284,17 @@ the real package registry.
 
 ---
 
-## Project file structure — as it actually exists (last refreshed 2026-08-12 at the end of gate 19; the `agent/` folder added 2026-08-06, its database and test files added at gates 18–19)
+## Project file structure — as it actually exists (last refreshed 2026-08-18 at the end of gate 23, when `deploy/` was added; the `agent/` folder added 2026-08-06, its database and test files added at gates 18–19)
 
-```
+```text
 agentic-erp/
 ├── .gitignore, README.md
 ├── .editorconfig, .gitattributes, .prettierrc, .prettierignore
 ├── CLAUDE.md                      # a short summary for AI assistants, not a rival to the docs below
-├── deploy/                        # gate 23 onward (NOT YET WRITTEN): the login server's own
-│                                  # container setup, pinned to an exact version. The login
+├── deploy/                        # added at gate 23: docker-compose.thunderid.yml, the login
+│                                  # server's own container setup, pinned to an exact version.
+│                                  # Adapted from the vendor's quick-start — good enough to run
+│                                  # locally, NOT production-ready (gate 26 hardens it). The login
 │                                  # server itself is NOT copied into this repo — it's treated
 │                                  # like the database: something we run, not something we own
 ├── docs/PLAN.md                   # the main source of truth: gates, shared rules, file structure
