@@ -1199,7 +1199,7 @@ fake toolset would not surface it. The note now points past Gate 19.
 `frontend/src/app/api/agent/[...path]/route.ts`. The ESLint `no-restricted-imports` amendment
 lands here: transport-only proxying to `AGENT_BASE_URL` permitted in exactly that one file.
 
-**Not in this gate:** the panel's five states.
+**Not in this gate:** the panel's six unbuilt states (see the Gate 21 note on the count).
 
 **Built 2026-08-12.** Design spec:
 `docs/superpowers/specs/2026-08-12-gate-20-agent-http-design.md`.
