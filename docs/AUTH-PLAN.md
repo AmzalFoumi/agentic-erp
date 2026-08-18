@@ -448,7 +448,7 @@ import it too and the boundary quietly weakens.
 - **The ThunderID stack's setup step is not idempotent.** Stopping and starting the containers
   re-runs it, which regenerates the admin console password and the JWT signing keys. Registrations
   in the database survive; **every previously issued token stops verifying.** See
-  `.claude/problems/thunderid-mcp-access.md` for the full note.
+  `.claude/problems/thunderid-mcp-access.md` for the full note. (its gitignored)
 
 #### The compose file, and the pin that was missing
 
