@@ -59,12 +59,13 @@ specifically a JavaScript one, and `backend/` is already a server. See "Identity
 
 ---
 
-## Identity seam: reserved, not implemented (2026-07-31)
+## Identity seam: reserved, not implemented (2026-07-31 — still accurate for gates 7–13)
 
-Nothing in gates 7–13 implements authentication. No provider is chosen, no login screen is built, no
-token is issued or validated. The full reasoning, the verified provider landscape, and the two
-conditions that make the deferral expire are recorded in **`docs/AUTH-PLAN.md`** — read it there, it
-is not duplicated here.
+Nothing in gates 7–13 implements authentication. No login screen is built, no token is issued or
+validated. (A provider *has* since been chosen — ThunderID, at Gate 23 — but no gate below 24
+changes any of the code described here.) The full reasoning, the verified provider landscape, and
+the two conditions that make the deferral expire are recorded in **`docs/AUTH-PLAN.md`** — read it
+there, it is not duplicated here.
 
 What lands in this codebase, at Gate 10:
 

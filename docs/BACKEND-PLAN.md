@@ -207,7 +207,7 @@ time, alongside the auth-provider decision.
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `core/models.py`          | ORM tables. Slice 1: `Product` (id, sku unique, name, category, unit, cost_price, sell_price, quantity_on_hand, reorder_level, timestamps, `created_by`/`updated_by` audit columns) |
 | `core/exceptions.py`      | `NotFoundError`, `DuplicateError`, `ValidationError`, `PermissionDeniedError` — framework-free, the shared error vocabulary both adapters translate from                            |
-| `core/actor.py`           | The `Actor` protocol (`id`, `can(permission)`) and a `SystemActor` with full permissions, used until a real auth provider is chosen. See `docs/AUTH-PLAN.md`.                   |
+| `core/actor.py`           | The `Actor` protocol (`id`, `can(permission)`) and a `SystemActor` with full permissions, used until a real auth provider is **wired in** — ThunderID was chosen at Gate 23, but this code is unchanged until Gate 24. See `docs/AUTH-PLAN.md`.                   |
 | `alembic.ini`, `alembic/` | Migrations, initialised in `backend/`                                                                                                                                               |
 
 - Verify: `alembic upgrade head` creates the `products` table; confirmed with the Supabase MCP
@@ -658,6 +658,12 @@ choose B-at-scale or C.
 > resource-server stack enumerated in the transport decision above, which is why it lands with the
 > auth gate and not before. Also still applies: under HTTP, switch to Supabase's **transaction**
 > pooler (6543) with `poolclass=NullPool`.
+>
+> **Scheduled 2026-08-14 (Gate 22): both of those land in Gate 25**, the gate that turns
+> `mcp_server/` into a real OAuth resource server. Verified along the way that `mcp==2.0.0` already
+> ships the resource-server machinery natively (`AuthSettings`, `TokenVerifier`,
+> `get_access_token()`), so this needs no framework change and no FastMCP — roughly forty lines of
+> custom `TokenVerifier`. See `docs/AUTH-PLAN.md`.
 >
 > Consequence already applied in `docs/FRONTEND-PLAN.md`: the frontend must not assume the agent is
 > in-process. Both FastAPI and the future agent are remote HTTP services, reached through one
