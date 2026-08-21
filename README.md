@@ -1,4 +1,4 @@
-# Supermarket Inventory
+# **AIsle** - the agentic ERP
 
 An inventory / purchasing system for a supermarket, built so that the **business logic is written
 exactly once** and reused by two different front doors:
