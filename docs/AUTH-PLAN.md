@@ -662,7 +662,8 @@ skill was rewritten to do exactly that, which is a strong hint the details move.
   | `NEXT_PUBLIC_THUNDERID_SIGN_IN_URL` | ⚠️ **must be removed.** This is the one that silently breaks redirect mode. `SignInButton` does `if (signInUrl) router.push(signInUrl); else if (signIn) await signIn(...)` — so while it is set, the button navigates to our local `/signin` and **never** reaches `client.getAuthorizeRequestUrl()`, which is what produces the ThunderID authorize URL. Unset it and the same button redirects to the gate. |
   | `THUNDERID_FLOW_SECRET` | Dead in this mode — the flow runs on ThunderID's side, so nothing sends the `Flow-Secret` header. Remove it once the Gate app signs someone in. |
   | `NEXT_PUBLIC_THUNDERID_SIGN_UP_URL` | Already removed; stays removed. |
-  | `NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL` | Optional, worth adding as `/` — read by `decorateConfigWithNextEnv`. Without it the post-callback destination falls back to the SDK default. |
+  | `NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL` | ⚠️ **Must stay unset — corrected 2026-08-23, see below.** Despite the name it is not a landing page: it becomes the OAuth `redirect_uri`. |
+  | `NEXT_PUBLIC_THUNDERID_SCOPES` | ✅ **Added 2026-08-23.** `openid product.read product.create product.update stock.adjust` — the permissions on the `Agentic ERP API` resource server, verbatim. Without it the token carries no scope and every `actor.can()` fails. |
   | `THUNDERID_SECRET`, `NEXT_PUBLIC_THUNDERID_BASE_URL`, `NODE_TLS_REJECT_UNAUTHORIZED` | Unchanged. |
 
   **Frontend changes made 2026-08-23**, after the Console's regenerated Copy prompt confirmed the
@@ -685,6 +686,99 @@ skill was rewritten to do exactly that, which is a strong hint the details move.
     so the shell must not render for a signed-out visitor.
   - `components/shell/user-menu.tsx`, `src/lib/api/client.ts` and `src/lib/auth/current-user.ts` are
     unchanged apart from comments that named `/signin`.
+
+  #### ⚠️ Corrected 2026-08-23 — `AFTER_SIGN_IN_URL` is the `redirect_uri`, not a landing page
+
+  The row above originally said to set this variable, and the first Gate-mode commit set it to
+  `/products`. That is wrong, and it fails *before* the login screen renders rather than after, which
+  makes it look like a Console misconfiguration. The chain, read out of the installed package:
+
+  ```
+  ThunderIDNextClient.js:22    afterSignInUrl: afterSignInUrl ?? origin
+  javascript/dist/index.js:3002  redirectUri: configData.afterSignInUrl ?? ""
+  javascript/dist/index.js:2745  authorizeRequestParams.set("redirect_uri", redirectUri)
+  ```
+
+  So the value is passed verbatim as the OAuth `redirect_uri`. `/products` is not
+  `http://localhost:3000`, the Authorized Redirect URI check fails, and no amount of Console editing
+  helps unless you register the path — which would then also have to be the callback route, and
+  `getClientOrigin.js` only ever produces an origin. **Leave it unset**: the `?? origin` fallback
+  yields exactly the registered value.
+
+  The post-sign-in hop to `/products` moved into the app instead:
+  `components/shell/after-sign-in-redirect.tsx`, rendered from `app/page.tsx` inside `<SignedIn>`.
+  It has to be client-side and effect-driven, because `/` is *also* the OAuth callback URL — a
+  server-side session check would run before `ThunderIDProvider` has completed the code exchange and
+  would bounce a valid callback.
+
+  **Also settled here: `resource` (RFC 8707) cannot be sent on the authorize request.**
+  `server/actions/signInAction.js:41` calls `getAuthorizeRequestUrl({}, sessionId)` with customParams
+  hardcoded to `{}`. Audience targeting for human sign-in therefore has to come from the
+  application's **Resource Servers** list, via the default flag described below — *not* the
+  application's Default Audience field, which stays blank.
+  Scopes *can* be sent, via `NEXT_PUBLIC_THUNDERID_SCOPES` → `getSignInUrl` (`index.js:3004`).
+
+  **Still unverified as of 2026-08-23:** Gate 23 only exercised `client_credentials` and token
+  exchange. Whether an *authorization_code* token honours Default Audience and carries resource-server
+  permissions has not been observed. Confirm by decoding a real token before writing the verifier —
+  per Gate 23 finding 4, a silently scopeless token is indistinguishable from a working one.
+
+  #### ⛔ Observed 2026-08-23 — `invalid_target`: Default Audience does not target a resource server
+
+  First run of the redirect flow. `/oauth2/authorize` refused the request outright and bounced back
+  to `http://localhost:3000/?error=invalid_target&error_description=No+resource+parameter+supplied+and+no+default+resource+server+is+configured`.
+
+  This answers the "still unverified" question above in the negative, and it is a **configuration
+  gap, not a bug in our code** — the sign-in card rendered, the button fired, and the authorize URL
+  was well-formed. Three facts settle the shape of it:
+
+  1. **Default Audience is not the same setting as "default resource server".** The Console's own
+     help text under the field says *"The default aud for access tokens that **don't target a
+     resource server** (OIDC only or scopeless)."* It is the fallback for scopeless tokens, not a
+     way to bind scoped ones. **It should be left blank.** Once the token does target a resource
+     server, `aud` comes from that server's identifier and this field is never consulted. An earlier
+     revision of this document told the developer to fill it in; that instruction was wrong and did
+     nothing either way.
+  2. **Requesting `product.read` et al. makes the token scoped**, so ThunderID must resolve those
+     permission strings to a resource server, and it will not guess.
+  3. **The SDK cannot send `resource`.** `server/actions/signInAction.js:41` calls
+     `getAuthorizeRequestUrl({}, sessionId)` with customParams hardcoded to `{}`; `getClient` is not
+     exported and the package's `exports` map blocks deep imports, so there is no supported seam.
+     Building the authorize URL ourselves would mean owning PKCE and the `state` format the SDK's
+     callback handler expects — i.e. forking it. Rejected.
+
+  So the target has to be configured **server-side**, in the Console. Silver lining for Gate 25: the
+  error proves `/oauth2/authorize` *does* implement RFC 8707 resource indicators, which is what the
+  MCP authorization spec requires.
+
+  **Resolved: `Resource Servers` → row menu → "Set as default".** ThunderID v1.0.0 ships **two**
+  resource servers, and the built-in one holds the default flag out of the box:
+
+  | Name | Type | Identifier | Default |
+  |---|---|---|---|
+  | `Agentic ERP API` | API | `https://api.agentic-erp.local` | — |
+  | `System` | Custom | `https://localhost:8090/mcp` | ✅ shipped as default |
+
+  `System` is **ThunderID administering itself** — the admin MCP endpoint this project deliberately
+  does not use (see the note further down on why: it needs the `system` scope). Its permission
+  vocabulary is ThunderID's own, so `product.read` could never resolve against it. Moving the flag to
+  `Agentic ERP API` is therefore correct, and the dialog confirms the semantics exactly: *"When an
+  application requests a token without naming a resource server, its permissions come from this one.
+  Only one resource server can be the default at a time."*
+
+  ⚠️ **Not fully explained:** the flag was already on `System` when the request failed, yet the error
+  said *no* default was configured. Either the built-in is not eligible as a general default, or it
+  is scoped elsewhere. Worth remembering if the symptom recurs; not worth blocking on.
+
+  ⚠️ **Gate 25 trap:** `System`'s identifier ends in `/mcp`, which looks like it might be *our* MCP
+  server. It is not. `backend/mcp_server/` will need its own resource server registered under its own
+  URL.
+
+  **Fallback if the default flag turns out not to help:** set `NEXT_PUBLIC_THUNDERID_SCOPES=openid`. The
+  token then falls under Default Audience, arrives with the right `aud` and **no permissions**, and
+  Gate 24 delivers authentication without authorization — `TokenActor.can()` would have nothing to
+  test. That is a real reduction in scope for the gate, not a workaround, and it should be recorded
+  as such rather than absorbed quietly.
 
   No OAuth callback route was added, and none is needed: the vendor prompt states it outright
   (*"The ThunderIDProvider handles the OAuth callback automatically"*), and
@@ -752,6 +846,72 @@ skill was rewritten to do exactly that, which is a strong hint the details move.
 
 **Exit condition:** a real user signs in, the product pages work, `created_by` records their OIDC
 `sub` instead of `"api"`, and an unauthenticated request gets a 401.
+
+#### ✅ Gate 24 backend — built and verified 2026-08-23
+
+**The token, captured from a real sign-in** (the whole point of the gate; every
+assumption below is now observed rather than predicted):
+
+```json
+{
+  "aud": "https://api.agentic-erp.local",
+  "iss": "https://localhost:8090",
+  "scope": "openid product.read product.create product.update stock.adjust",
+  "sub": "01a02d8f-0355-74cd-b102-3b1ab2372d64",
+  "client_id": "vAf_zSFT1qj4733Xy3jgQw",
+  "grant_type": "authorization_code",
+  "exp": 1787498781, "iat": 1787495181, "nbf": 1787495181,
+  "jti": "...", "tfid": "..."
+}
+```
+
+Note `aud` is the **resource server's identifier**, not the client id — because
+`Agentic ERP API` is now the default resource server. The permission strings
+arrive exactly as `services/` already spells them, which is what the `.`
+delimiter was chosen for at Gate 23.
+
+**What was built:**
+
+| File | Role |
+|---|---|
+| `backend/authn/` **(new package)** | `verify_access_token()` — JWKS lookup, RS256, `aud`/`iss`/`exp` checks. See below for why it is not in `core/` |
+| `core/actor.py` → `TokenActor` | `can()` is set membership over the `scope` claim. Stores claims; validates nothing |
+| `core/exceptions.py` → `AuthenticationError` | 401, distinct from `PermissionDeniedError`'s 403 |
+| `api/deps.py` → `get_actor()` | Reads the bearer header, verifies, returns the actor. `HTTPBearer(auto_error=False)` so the 401 keeps this API's error envelope |
+| `api/errors.py` | Adds the 401 mapping **and `WWW-Authenticate: Bearer`** — RFC 6750, and required of a resource server by the MCP spec |
+| `core/config.py` | `thunderid_issuer` / `_jwks_url` / `_audience` / `_verify_tls` / `auth_enabled` |
+| `tests/test_auth.py` | 13 tests, no network — see below |
+
+**Why `authn/` is a fourth top-level package.** `core/` and `services/` are
+forbidden from importing `jwt` (added to **both** `forbidden_modules` lists this
+gate), and `api/` cannot host it because `mcp_server/` needs the identical
+verification at Gate 25 and the two adapters may never import each other. So it
+gets its own import-linter layer, between the adapters and `services/`.
+
+**Tests run with no ThunderID and no network.** A throwaway RSA key pair is
+generated in-process and `_jwk_client` is stubbed, so key *use* is exercised for
+real — algorithm pinning, audience, issuer, expiry, required claims — while key
+*distribution* is skipped. This also allows minting the tokens that must fail,
+which a real issuer would never hand out: wrong audience, wrong issuer, expired,
+tampered signature, wrong key, missing `sub`.
+
+**Two deliberate non-goals, recorded so they are not mistaken for oversights:**
+
+- **No introspection.** Tokens are verified locally against the JWKS. A token
+  revoked early stays usable until `exp` (3600 s). The alternative is a network
+  round trip per request and a hard dependency on ThunderID being up.
+- **Failure reasons are not disclosed.** Expired, wrong-audience and
+  bad-signature all return the same 401 text. A caller who can distinguish them
+  can use the endpoint as an oracle for our configuration.
+
+**`auth_enabled=False`** restores the pre-gate behaviour of handing out
+`SystemActor`. It exists for the test suite and offline work, defaults to
+**True** so a missing setting fails closed, and must never be set in a deployed
+environment.
+
+⚠️ **`mcp_server/server.py`'s `_actor()` still hardcodes `SystemActor`.** That is
+Gate 25 and it is the reason `agent/app.py` keeps its loopback binding. The API
+is now authenticated; the MCP server is not.
 
 ### Gate 25 — agent delegation and the MCP server as a resource server
 
