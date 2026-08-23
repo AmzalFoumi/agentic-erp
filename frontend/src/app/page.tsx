@@ -1,4 +1,6 @@
-import { SignInButton } from "@thunderid/nextjs";
+import { SignInButton, SignedIn, SignedOut } from "@thunderid/nextjs";
+
+import { AfterSignInRedirect } from "@/components/shell/after-sign-in-redirect";
 
 /**
  * The signed-out landing page, and the only route the app serves that is not
@@ -19,21 +21,29 @@ import { SignInButton } from "@thunderid/nextjs";
  * exchange — which is why the Authorized Redirect URI registered in the Console
  * is the bare origin, with no callback path.
  *
- * The layout renders this inside `<SignedOut>`; a signed-in visitor who lands
- * on `/` sees the app shell around it instead, so the redirect to the product
- * list that used to live in this file is now
- * `NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL`.
+ * Because `/` is also that callback URL, this route serves two audiences.
+ * Signed out it is the sign-in card below; signed in it forwards to the product
+ * list via `AfterSignInRedirect`, which is where the old `redirect("/products")`
+ * went.
+ * That forwarding cannot be `NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL`: see the
+ * note on that variable in .env.example.
  */
 export default function Home() {
   return (
-    <div className="flex flex-col items-center gap-stack text-center">
-      <h1 className="text-lg font-semibold">Inventory</h1>
-      <p className="text-sm text-muted-foreground">
-        Sign in to continue.
-      </p>
-      <SignInButton className="h-control rounded-(--radius) bg-primary px-4 text-sm font-medium text-primary-foreground">
-        Sign in
-      </SignInButton>
-    </div>
+    <>
+      <SignedIn>
+        <AfterSignInRedirect />
+      </SignedIn>
+
+      <SignedOut>
+        <div className="flex flex-col items-center gap-stack text-center">
+          <h1 className="text-lg font-semibold">Inventory</h1>
+          <p className="text-sm text-muted-foreground">Sign in to continue.</p>
+          <SignInButton className="h-control rounded-(--radius) bg-primary px-4 text-sm font-medium text-primary-foreground">
+            Sign in
+          </SignInButton>
+        </div>
+      </SignedOut>
+    </>
   );
 }
