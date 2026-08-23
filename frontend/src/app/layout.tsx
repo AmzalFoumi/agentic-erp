@@ -2,11 +2,15 @@ import type { Metadata } from "next";
 import { Figtree, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
+import { ThunderIDProvider } from "@thunderid/nextjs/server";
+
 import { AgentPanel } from "@/components/shell/agent-panel";
 import { DensityToggle } from "@/components/shell/density-toggle";
 import { Nav } from "@/components/shell/nav";
 import { ThemeProvider } from "@/components/shell/theme-provider";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
+import { UserMenu } from "@/components/shell/user-menu";
+import { SignedIn, SignedOut } from "@thunderid/nextjs";
 
 /*
  * The design system specifies Figtree for UI and IBM Plex Mono for data. It
@@ -55,24 +59,63 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="flex h-screen flex-col overflow-hidden">
-        <ThemeProvider>
-          {/* App header */}
-          <div className="flex items-center justify-between border-b border-border bg-card px-5 py-3">
-            <div className="text-sm font-semibold">Inventory</div>
-            <div className="flex items-center gap-4">
-              <DensityToggle />
-              <ThemeToggle />
-            </div>
-          </div>
+        {/*
+          ThunderIDProvider is imported from the `/server` subpath, not the
+          package root — it is an async Server Component that resolves the
+          session, the user profile and the flow metadata on the server and
+          seeds the client context with them. That is why `SignedIn` /
+          `SignedOut` below do not flash the wrong branch on first paint:
+          `isSignedIn` arrives already decided, not discovered after hydration.
 
-          <div className="flex flex-1 min-h-0">
-            <Nav />
-            <main className="flex-1 min-w-0 overflow-auto p-section">
-              {children}
-            </main>
-            <AgentPanel />
-          </div>
-        </ThemeProvider>
+          It is configured entirely from environment variables rather than
+          props (see frontend/.env.example). One sharp edge worth knowing: if
+          the client fails to initialise, the provider renders *nothing* — a
+          blank page rather than an error — so a completely empty app is a
+          configuration problem, not a routing one.
+
+          Outside ThemeProvider so the whole tree, sign-in page included, is
+          inside both.
+        */}
+        <ThunderIDProvider>
+          <ThemeProvider>
+            {/*
+              The shell is for people who are signed in. `/` renders bare when
+              they are not, and not only for looks: AgentPanel starts a
+              conversation against /api/agent on mount, and that route is
+              protected by src/proxy.ts, so mounting it on the signed-out
+              landing would fire a request that gets redirected straight back.
+
+              Every other route is protected, so in practice the SignedOut
+              branch only ever renders `/` (see app/page.tsx, and the note in
+              src/proxy.ts on why `/` cannot itself be protected).
+            */}
+            <SignedIn>
+              {/* App header */}
+              <div className="flex items-center justify-between border-b border-border bg-card px-5 py-3">
+                <div className="text-sm font-semibold">Inventory</div>
+                <div className="flex items-center gap-4">
+                  <DensityToggle />
+                  <ThemeToggle />
+                  <UserMenu />
+                </div>
+              </div>
+
+              <div className="flex flex-1 min-h-0">
+                <Nav />
+                <main className="flex-1 min-w-0 overflow-auto p-section">
+                  {children}
+                </main>
+                <AgentPanel />
+              </div>
+            </SignedIn>
+
+            <SignedOut>
+              <main className="flex flex-1 items-center justify-center overflow-auto p-section">
+                {children}
+              </main>
+            </SignedOut>
+          </ThemeProvider>
+        </ThunderIDProvider>
       </body>
     </html>
   );

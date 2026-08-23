@@ -528,10 +528,31 @@ markdown) at the start of the gate rather than trusting this table — the vendo
 skill was rewritten to do exactly that, which is a strong hint the details move.
 
 - `frontend/`: `@thunderid/nextjs`, `ThunderIDProvider` — imported from the **`/server` subpath** —
-  in `src/app/layout.tsx`, `proxy.ts` **at the project root** (not in `src/`) with `thunderIDProxy` +
-  `createRouteMatcher` over the product routes, sign-in UI in the existing `components/shell/` built
-  from `SignedIn`, `SignedOut`, `SignInButton`, `UserDropdown` (and `SignIn` / `SignUp` only if the
-  embedded approach is chosen).
+  in `src/app/layout.tsx`, the proxy with `thunderIDProxy` + `createRouteMatcher` over the product
+  routes, sign-in UI in the existing `components/shell/` built from `SignedIn`, `SignedOut`,
+  `SignInButton`, `UserDropdown`, plus `SignIn` for the embedded approach.
+
+  ⚠️ **Corrected while building: the proxy file is `frontend/src/proxy.ts`, not `proxy.ts` at the
+  project root.** Two things moved at once and both are easy to get wrong. Next 16 deprecated the
+  `middleware` file convention and renamed it to `proxy`; and the file must sit *at the same level
+  as `app`*, which in this project's `src/` layout is `src/`. "Project root" is right only for an
+  app without `src/`. Source: `node_modules/next/dist/docs/.../file-conventions/proxy.md`. A proxy
+  in the wrong place is not an error — it is simply never invoked, so every route silently stays
+  public.
+
+  **Decided while building: there is no `/signup` route and no `NEXT_PUBLIC_THUNDERID_SIGN_UP_URL`**,
+  though the vendor's quickstart creates both and lists the variable as required. Aisle is a
+  supermarket's internal system: accounts are created by an administrator in the Console, and a
+  self-service registration form on a login page anyone can reach would let a stranger create an
+  account against live inventory. The **Sign-Up and Recovery flows are switched off on the
+  application's Flows tab** to match — the toggle and the missing route have to agree, or one of
+  them is a lie. (Recovery is off for a second, duller reason as well: there is no mail server.)
+
+  **Also decided while building: the app shell renders inside `<SignedIn>`, and `/signin` renders
+  bare.** Not a cosmetic choice. `AgentPanel` starts a conversation against `/api/agent` on mount,
+  and that route is protected, so mounting the shell on the sign-in page would fire a request that
+  gets redirected straight back to the sign-in page. `ThemeProvider` stays above the split so the
+  sign-in screen still themes correctly.
 - **Environment variables**, confirmed spellings:
 
   ```
@@ -568,12 +589,116 @@ skill was rewritten to do exactly that, which is a strong hint the details move.
   running server, so it cannot drift from the deployed version the way a cached skill can. **Prefer
   it over the skill for anything ThunderID.**
 
+  ⚠️ **Found while building, then resolved as a limitation: sessions do not refresh.** `NEXT_PUBLIC_THUNDERID_CLIENT_ID` and `THUNDERID_CLIENT_SECRET` are absent
+  from both the docs block and the Console's Copy prompt, because neither is used to *sign in* —
+  the Flow Secret does that. They are what keeps a user signed in. `thunderIDProxy` refreshes the
+  access token before expiry, and its own doc comment says: *"Token refresh requires baseUrl,
+  clientId, and clientSecret... If none are available the refresh step is skipped silently."*
+  Skipped silently, and then the session cookie is cleared — so without them everything works for
+  about an hour and then signs the user out mid-task with nothing logged. This also explains the
+  oddity noted on 2026-08-23 that the SDK types `clientSecret` as required while `flowSecret` is
+  optional: they are **four independent config fields with no fallback between them**
+  (`utils/decorateConfigWithNextEnv.js`), so the Application ID is not reused as `clientId` and the
+  Flow Secret is not reused as `clientSecret`.
+
+  **And a Next.js application in the v1.0.0 Console never issues that pair.** Checked all five tabs
+  on 2026-08-23: Credentials shows the Application ID and the Flow Secret only; Overview shows the
+  Application ID, Organization Unit ID and handle; there is no General tab, which is where the docs
+  say a Client ID would appear for an OAuth 2.0 application. The Console's **"Regenerate Client
+  Secret"** button sits over the *Flow Secret* field — the fourth instance of this vendor using two
+  names for one thing, and it is why the client-secret question keeps reopening. It is not a second
+  credential.
+
+  **So the refresh path cannot run, by construction.** A session works until the access token
+  expires, at which point `thunderIDProxy` clears the session cookie and the user lands back on
+  `/signin`. That is the expected behaviour of this configuration, not a bug to hunt. Acceptable
+  locally; **Gate 26 must resolve it** — most likely by registering a proper OAuth application
+  alongside this one, or by raising the access-token lifetime. Do not "fix" it by pasting the Flow
+  Secret into `THUNDERID_CLIENT_SECRET`: the client id would still be missing, and
+  `hasRefreshConfig` needs all three.
+
+  ---
+
+  #### ⚡ Superseded 2026-08-23 — the `AIsle Gate` application (redirect mode)
+
+  The limitation above was resolved the way the Gate 26 note predicted, but earlier: **a second
+  application, `AIsle Gate`, was created with Sign-In Approach = redirect ("Gate") instead of
+  "Bring Your Own UI".** That application *is* a real OAuth confidential client, so `clientId` and
+  `clientSecret` exist and `hasRefreshConfig` is satisfied. Everything above stays on the page as
+  the record of why embedded mode was abandoned; **the configuration below is the live one.**
+
+  The sign-in approach is chosen at creation and cannot be changed afterwards — that is why a new
+  application was needed rather than an edit. The old `AIsle Web` application stays registered until
+  the new one has signed a real user in; then it is deleted.
+
+  **What each Console tab holds for `AIsle Gate`** (v1.0.0, recorded 2026-08-23 from the Console):
+
+  | Tab | Contents |
+  |---|---|
+  | **Overview** | Application details: **Application ID** `01a02dcc-300a-7bc5-…` (full value in the Console), **Client ID** `vAf_zSFT1qj4733Xy3jgQw` — the field the old app showed as `-`, Organization Unit ID `01900000-0000-7000-8000-000000000001`, handle `default`. Also a live **Preview** of the hosted sign-in screen, a flow summary, and the **"Integrate with a coding agent → Copy prompt"** button. "Useful Endpoints" still lists the *flow execution / flow metadata / passkey registration* endpoints — those are for custom UI and are **not used in this mode**; their presence is not an instruction. |
+  | **Access** | Allowed User Types = `Person`. Application URL (homepage) — blank, optional. |
+  | **Credentials** | **Client ID** (public identifier) and **Client Secret** (masked, with "Regenerate Client Secret" — here the button really does mean the client secret, unlike the old app where it sat over the Flow Secret). Certificate Type = `None`. **There is no Flow Secret on this tab** — that credential belongs to embedded mode only. |
+  | **Flows** | Sign-in = `AIsle Gate Sign-in Flow`. **Sign-up: off. Recovery: off** — matching the no-`/signup` decision above. Sign-out = `Default Sign Out Flow`. So a Gate app still runs the flow engine; the difference is *where* the flow renders (ThunderID's page, not ours). |
+  | **Customization** | Theme **Acrylic Purple**, Layout **Centered** — these now matter, because the sign-in screen the user sees is ThunderID's, not ours. Terms-of-Service / Privacy-Policy URIs and admin contacts: blank. |
+  | **Token** | Attributes selectable into the access token and the ID token / userinfo (`email`, `groups`, `roles`, `userType`, `ouid`, `username`, …) — **none added yet**. The sample access-token payload is `aud, client_id, exp, grant_type, iat, iss, jti, nbf, scope, sub`. Access-token validity **3600 s**; separate validity tabs for ID token and refresh token. |
+  | **Advanced** | Grant types `authorization_code` + **`refresh_token`** — the thing embedded mode could not have. Response type `code`. **Authorized redirect URIs: `http://localhost:3000`** (bare origin, no path — matches `getClientOrigin.js`, which returns proto + host only). Post-logout redirect URIs: `http://localhost:3000`. Client auth method `client_secret_basic`; **Public Client off** (confidential), **PKCE required on**, PAR off. Identity Assertions (**ID-JAG**) toggle present and **off** — this is the Gate 25 lever. Default audience blank, with the note *"Leave empty to use the application client ID"*. |
+
+  **Two consequences worth carrying forward:**
+
+  1. **Backend token validation (this gate) should expect `aud` = the client ID**
+     (`vAf_zSFT1qj4733Xy3jgQw`), because Default Audience is blank. If a Resource Server is
+     registered later and scopes start targeting it, that changes — check the Advanced tab before
+     hard-coding an audience.
+  2. **ID-JAG is a toggle on this application**, not a separate feature to build. Gate 25 turns it
+     on; leave it off until then, consistent with the ID-JAG-later rule.
+
+  **`.env.local` changes for Gate mode** — four are wrong or dead right now:
+
+  | Variable | Action |
+  |---|---|
+  | `NEXT_PUBLIC_THUNDERID_CLIENT_ID` | ✅ set to the Gate app's Client ID. |
+  | `THUNDERID_CLIENT_SECRET` | ✅ set (shown once at creation). |
+  | `NEXT_PUBLIC_THUNDERID_APPLICATION_ID` | ⚠️ **still the old `AIsle Web` id (`01a02d7e-…`)** — replace with the Gate app's `01a02dcc-…`, or delete it. It is optional: `server/ThunderIDProvider.js` only spreads it into the flow-metadata lookup when present. Leaving a *stale* id is worse than having none, because metadata is then fetched for the wrong application. |
+  | `NEXT_PUBLIC_THUNDERID_SIGN_IN_URL` | ⚠️ **must be removed.** This is the one that silently breaks redirect mode. `SignInButton` does `if (signInUrl) router.push(signInUrl); else if (signIn) await signIn(...)` — so while it is set, the button navigates to our local `/signin` and **never** reaches `client.getAuthorizeRequestUrl()`, which is what produces the ThunderID authorize URL. Unset it and the same button redirects to the gate. |
+  | `THUNDERID_FLOW_SECRET` | Dead in this mode — the flow runs on ThunderID's side, so nothing sends the `Flow-Secret` header. Remove it once the Gate app signs someone in. |
+  | `NEXT_PUBLIC_THUNDERID_SIGN_UP_URL` | Already removed; stays removed. |
+  | `NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL` | Optional, worth adding as `/` — read by `decorateConfigWithNextEnv`. Without it the post-callback destination falls back to the SDK default. |
+  | `THUNDERID_SECRET`, `NEXT_PUBLIC_THUNDERID_BASE_URL`, `NODE_TLS_REJECT_UNAUTHORIZED` | Unchanged. |
+
+  **Frontend changes made 2026-08-23**, after the Console's regenerated Copy prompt confirmed the
+  variable list above (it asks for `BASE_URL`, `CLIENT_ID`, `CLIENT_SECRET`, `THUNDERID_SECRET` and
+  nothing else, and drops `<SignIn>` entirely):
+
+  - `src/app/signin/page.tsx` **deleted**. The sign-in screen is ThunderID's now.
+  - `src/app/page.tsx` **is the signed-out landing** and no longer redirects to `/products`; that
+    redirect is `NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL=/products` instead.
+  - `src/proxy.ts` — **`"/"` removed from the matcher.**
+
+    ⚠️ **This one corrects an earlier instruction in this document, and it is the sharpest edge in
+    the mode switch.** The first draft of this block said to delete the `<SignedIn>`/`<SignedOut>`
+    split from the layout because "nothing renders bare any more". That is wrong. Reading
+    `server/proxy/thunderIDProxy.js` (lines 160–168): `protectRoute()` redirects to
+    `routeOptions?.redirect ?? resolvedConfig.signInUrl ?? fallbackRedirect`, and `fallbackRedirect`
+    is `"/"`. With `signInUrl` unset — which Gate mode requires — a protected `/` redirects to
+    itself. So `/` must stay public and carry the `<SignInButton>`, and the split in `layout.tsx`
+    **stays**, for its original reason: `AgentPanel` POSTs to the protected `/api/agent` on mount,
+    so the shell must not render for a signed-out visitor.
+  - `components/shell/user-menu.tsx`, `src/lib/api/client.ts` and `src/lib/auth/current-user.ts` are
+    unchanged apart from comments that named `/signin`.
+
+  No OAuth callback route was added, and none is needed: the vendor prompt states it outright
+  (*"The ThunderIDProvider handles the OAuth callback automatically"*), and
+  `client/contexts/ThunderID/ThunderIDProvider.js` reads `code`/`state` off the URL on mount. That
+  is why the Authorized Redirect URI is the bare origin.
+
   Also note `THUNDERID_SECRET` is **not** a ThunderID value despite the name, and is not
   `THUNDERID_FLOW_SECRET` with a word missing: it signs our own session cookie and is never sent to
   ThunderID.
 - The **developer creates the Application in the Console** — Applications → Add Application →
-  Technology **Next.js**, keep Sign-In Approach at its **Bring Your Own UI** default, and add
-  `http://localhost:3000` to Authorized Redirect URIs — and reports the two values back. The
+  Technology **Next.js**, Sign-In Approach **"Redirect to ThunderID" (Gate)** ⚠️ *not* the "Bring
+  Your Own UI" default, which this gate tried first and abandoned (see the superseded block above)
+  — and `http://localhost:3000` as both Authorized Redirect URI and Post-Logout Redirect URI, then
+  reports the Client ID and Client Secret back. The
   assistant never touches the Console. (ThunderID does expose an admin MCP server that could create
   the application programmatically — see "Two capabilities noted" — and it is deliberately not used:
   it requires administrator credentials and the `system` scope, which is more authority than this
@@ -609,7 +734,13 @@ skill was rewritten to do exactly that, which is a strong hint the details move.
   rule: acceptable locally, **must not survive to Gate 26**. The vendor's own guides mark it
   "Remove in production".
 - `frontend/src/lib/auth/current-user.ts`: a real session read, replacing `{ id: "system" }`. It is
-  already `async`, so no call site changes.
+  already `async`, so no call site changes — and in fact it has **no call sites at all** today; it is
+  a seam kept ready, not a load-bearing module. Its return type widened to `CurrentUser | null`.
+  It decodes the `sub` claim **without verifying the signature**, which is correct only because the
+  value labels a screen and decides nothing: every authorization question is answered in
+  `services/`, against a token the backend verifies against JWKS. The SDK draws the same line —
+  *"Never use the returned payload for authorization."* If this value ever starts gating something,
+  that is the bug.
 - `frontend/src/lib/api/client.ts`: attach `Authorization: Bearer` via `api.use({ onRequest })`.
   Note this file currently builds a module-level client at import with no per-request hook, so this
   is a structural addition rather than a one-line edit. It stays inside `lib/api/`, so the ESLint

@@ -453,6 +453,17 @@ Figma-grade product for an API with six endpoints.
 **1. App shell.** Persistent navigation, the density toggle, the agent region. Navigation has exactly
 two destinations — Products and New product. No dashboard, no reports, no account settings.
 
+> **Amended 2026-08-23: a dashboard is wanted, later.** The "no dashboard" above was a *scoping*
+> decision for gates 9–13, not a permanent one — an API with six endpoints had nothing to put on
+> one. The developer has since asked for a dashboard screen at some point after the auth gates. It
+> is **not scheduled and not designed**; treat this as a recorded intent, not a licence to build one
+> opportunistically. Two things it will need first: something worth summarising (the API exposes no
+> aggregates today) and a decision on where it lives. `/` is now the signed-out landing (see Gate 24
+> in `docs/AUTH-PLAN.md`), so the dashboard would be its own route — `/inventory` was the name
+> floated — and would become `NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL`, which currently points at
+> `/products`. Until then the product list stays the signed-in landing and the nav keeps its two
+> destinations.
+
 **2. Product list — the primary screen**, the one someone has open all day. The table, one search
 input (name and SKU together, not an advanced filter panel), page-number pagination with a total, a
 row that navigates to detail, a link to create. Columns: SKU, name, category, cost, sell, stock,
