@@ -201,7 +201,7 @@ export interface components {
              * @description Machine-readable class, e.g. 'NotFoundError'.
              * @enum {string}
              */
-            error: "NotFoundError" | "DuplicateError" | "ValidationError" | "PermissionDeniedError" | "DomainError" | "RequestValidationError" | "RouteNotFound" | "MethodNotAllowed" | "NotAuthenticated" | "HTTPError";
+            error: "NotFoundError" | "DuplicateError" | "ValidationError" | "PermissionDeniedError" | "AuthenticationError" | "DomainError" | "RequestValidationError" | "RouteNotFound" | "MethodNotAllowed" | "NotAuthenticated" | "HTTPError";
             /**
              * Detail
              * @description Human-readable message, safe to show a user.

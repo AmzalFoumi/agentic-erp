@@ -62,6 +62,51 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
 
+    # ---------- Authentication (gate 24) ----------
+    #
+    # Everything below describes the ThunderID instance that issues access
+    # tokens. The backend is a *resource server*: it never talks to ThunderID
+    # to log anyone in, it only fetches the public signing keys and checks the
+    # tokens that arrive. That is why there is no client id or secret here -
+    # those belong to the frontend, which is the OAuth client.
+
+    # The `iss` claim every token must carry. Checked, not trusted: a token
+    # from a different issuer is refused even if its signature is valid,
+    # because "valid signature" only means *someone* signed it.
+    thunderid_issuer: str = "https://localhost:8090"
+
+    # Where the public signing keys live. Derived from the issuer by
+    # convention, but overridable, because the two come apart the moment
+    # ThunderID sits behind a different hostname than the one it advertises.
+    thunderid_jwks_url: str = "https://localhost:8090/oauth2/jwks"
+
+    # The `aud` claim every token must carry: the identifier of the
+    # `Agentic ERP API` resource server registered in the ThunderID console.
+    #
+    # This is a NAME, not an address - nothing ever fetches it. It deliberately
+    # does not mention localhost:8000, so that the value survives deployment
+    # and tokens minted today keep verifying tomorrow. Verified against a real
+    # token on 2026-08-23.
+    thunderid_audience: str = "https://api.agentic-erp.local"
+
+    # ⚠️ LOCAL ONLY. ThunderID's development certificate is self-signed, so
+    # fetching the JWKS over HTTPS fails certificate validation. Setting this
+    # False disables that check for the JWKS fetch *only* - never for anything
+    # else, and never in a deployed environment. The counterpart to
+    # NODE_TLS_REJECT_UNAUTHORIZED=0 on the frontend; gate 26 removes both by
+    # giving ThunderID a real certificate.
+    thunderid_verify_tls: bool = True
+
+    # Escape hatch for running the API with no identity provider at all: every
+    # request becomes the all-powerful SystemActor again, exactly as it was
+    # before gate 24.
+    #
+    # It exists for one honest reason - the test suite and any local work that
+    # has nothing to do with auth should not require a running ThunderID
+    # container. It defaults to True so that *forgetting* to configure auth
+    # fails closed rather than silently opening the API. See api/deps.py.
+    auth_enabled: bool = True
+
 
 # One shared instance, created when this module is first imported. Everything
 # else in the codebase does `from core.config import settings`.

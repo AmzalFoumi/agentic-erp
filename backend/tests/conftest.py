@@ -133,6 +133,32 @@ def client(session: Session) -> Iterator["TestClient"]:
 
 
 @pytest.fixture
+def unauthenticated_client(session: Session) -> Iterator["TestClient"]:
+    """A test client that does NOT override `get_actor`.
+
+    The mirror image of `client` above, and the only fixture that exercises the
+    real `api.deps.get_actor`. Because no Authorization header is sent, the
+    dependency raises before any token verification is attempted - so this
+    needs no running ThunderID and no network.
+
+    It exists to prove the negative that gate 24 is really about: an
+    unauthenticated request is refused. Every other API test overrides the
+    actor away, which is right for testing translation but means none of them
+    would notice if authentication stopped happening entirely.
+    """
+    from fastapi.testclient import TestClient
+
+    from api.deps import get_db
+    from api.main import app
+
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.fixture
 def unique_sku() -> str:
     """An SKU no other test - or previous run - will have used.
 
