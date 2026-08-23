@@ -3,61 +3,101 @@
 # ⚠️ TEMPORARY — LOCAL DEVELOPMENT ONLY. NOT A DEPLOYMENT RECIPE. ⚠️
 #
 # This file exists to pin the version Gate 23's spike validated against, and to give the
-# developer one command that starts a login server on their own machine. It is the vendor's
-# quick-start file with the image tag pinned; nothing else about it has been reviewed for
-# production use, and four things are actively wrong for it — see the "Open decision" note
-# under Gate 26 in docs/AUTH-PLAN.md, which is where this is owned:
+# developer one command that starts a login server on their own machine. It is *adapted
+# from* the vendor's quick-start, not copied from it; nothing here has been reviewed for
+# production use, and three things are actively wrong for it — see the "Open decision"
+# note under Gate 26 in docs/AUTH-PLAN.md, which is where this is owned:
 #
 #   1. port 8090 is published on ALL interfaces, not loopback;
 #   2. the TLS certificate is self-signed (see note 1 below);
-#   3. setup.sh destroys and regenerates all key material on recreation (see note 2 below);
-#   4. the volumes hold the whole identity store with no backup and no tested restore.
+#   3. the volumes hold the whole identity store with no backup and no tested restore.
 #
-# **The permanent deployment path has not been chosen yet.** The vendor's own production
-# path is Kubernetes via their Helm chart (oci://ghcr.io/thunder-id/helm-charts/thunderid),
-# not Compose. Hardening this file versus adopting the chart is a Gate 26 decision and is
-# deliberately still open. Do not deploy this file to anything internet-reachable, and do
-# not treat its presence in the repo as a decision that it will be.
+# (A fourth item — "setup.sh regenerates all key material on every restart" — was true of
+# the previous revision of this file and is **fixed below**; see note 2.)
 #
-# Adapted from ThunderID's official quick-start compose file
-# (asgardeo/thunder → install/quick-start/docker-compose.yml), with one deliberate
-# change: **the image is pinned to an exact version instead of `latest`.**
-#
-# Why the pin matters. The upstream quick-start uses `:latest`, and that is how this
-# project's ThunderID silently moved from v1.0.0-rc to 1.0.0 between two sessions
-# during Gate 23. For the component holding the entire login system, an unannounced
-# upgrade is not acceptable — the version changes when we change it.
+# **The permanent deployment path has not been chosen yet.** The vendor documents three:
+# Docker, Kubernetes via Helm, and OpenChoreo. Their production recommendation is
+# Kubernetes. Choosing between hardening this file and adopting the chart is a Gate 26
+# decision and is deliberately still open. Do not deploy this file to anything
+# internet-reachable, and do not treat its presence in the repo as a decision that it will be.
 #
 #   Image tag:  1.0.0   ← note: NO leading "v".
 #               The *git* tag is `v1.0.0`, but the *image* tag drops it.
 #               `ghcr.io/thunder-id/thunderid:v1.0.0` is a 404.
 #   Released:   2026-08-15
 #   Digest:     sha256:12b7348b6727b756b8155c5157804bc05ef5d0ffa5f42bc6307747bd18425a36
+#   Verified latest release as of 2026-08-18 — nothing newer than v1.0.0 exists.
 #
-# To upgrade: bump the tag here, verify against ThunderID's release notes, and record
-# the change in docs/AUTH-PLAN.md. Do not revert to `latest`.
+# Why the pin matters. The vendor's current quick-start is
+# `docker compose -f oci://ghcr.io/thunder-id/thunderid-quick-start:latest up` — floating
+# on `latest`, which is exactly how this project's ThunderID silently moved from v1.0.0-rc
+# to 1.0.0 between two sessions during Gate 23. For the component holding the entire login
+# system, an unannounced upgrade is not acceptable — the version changes when we change it.
 #
-# Run with:  docker compose -f deploy/docker-compose.thunderid.yml up -d
-# Server:    https://localhost:8090        Console: https://localhost:8090/console
+# To upgrade: bump the tag here, verify against ThunderID's release notes, and record the
+# change in docs/AUTH-PLAN.md. Do not revert to `latest`.
+#
+# ─────────────────────────────────────────────────────────────────────────────────────
+# HOW TO RUN — two commands, and the order matters.
+#
+#   1. ONCE, on a fresh machine (or after `down -v` destroys the volumes):
+#
+#        docker compose -f deploy/docker-compose.thunderid.yml --profile init up \
+#          --abort-on-container-exit
+#
+#      This seeds the database and generates the key material. It prints the admin console
+#      password — **capture it now**, it is not recoverable afterwards.
+#
+#   2. EVERY TIME after that, to start or restart the server:
+#
+#        docker compose -f deploy/docker-compose.thunderid.yml up -d
+#
+#      Safe to repeat. Does not touch key material. Stop with `stop`, not `down -v`.
+#
+#   Server:  https://localhost:8090        Console: https://localhost:8090/console
+# ─────────────────────────────────────────────────────────────────────────────────────
 #
 # Two things that surprise people, both documented in docs/AUTH-PLAN.md (Gate 23):
 #
-#  1. **The certificate is self-signed.** Browsers warn once and must be told to
-#     proceed; HTTP clients need their CA trust configured. Fine locally, NOT fine
-#     for a real deployment — Gate 26 needs a real certificate.
+#  1. **The certificate is self-signed.** Browsers warn once and must be told to proceed;
+#     HTTP clients need their CA trust configured. Fine locally, NOT fine for a real
+#     deployment — Gate 26 needs a real certificate. Note the two local shortcuts this
+#     forces (`NODE_TLS_REJECT_UNAUTHORIZED=0` in the frontend, `verify=` on Python HTTP
+#     clients) must not survive to deployment either.
 #
-#  2. **`setup.sh` is not idempotent.** `thunderid-setup` has `restart: "no"`, but
-#     `compose up` *recreates* one-shot containers rather than reusing exited ones, so
-#     stopping and starting the stack re-runs setup. That regenerates the admin console
-#     password, the TLS certificate, the JWT signing keys and the Direct Auth Secret.
-#     Consequences: registrations in the database survive (they live in the volume),
-#     but **every previously issued token stops verifying**, and the console password
-#     from last session no longer works — read the new one from `thunderid-setup`'s logs.
-#     Prefer leaving the stack running while working an auth gate.
+#  2. **`setup.sh` is not idempotent — which is why it no longer runs on `up`.**
+#     Re-running it regenerates the admin console password, the TLS certificate, the JWT
+#     signing keys and the Direct Auth Secret; registrations survive in the volume, but
+#     **every previously issued token stops verifying**. The vendor documents this
+#     ("Setup is not idempotent—rerunning it regenerates all keys").
+#
+#     The previous revision of this file listed setup as an ordinary service, and
+#     `compose up` *recreates* one-shot containers rather than reusing exited ones — so
+#     every restart silently invalidated every token. Both init steps now sit behind the
+#     `init` profile, which Compose does not start unless `--profile init` is passed. This
+#     matches the vendor's own Docker path, where setup is a one-time `docker run --rm`
+#     and the server is started separately afterwards.
+
+# ⚠️ **Pinned project name — do not remove.** Compose derives the project name from the
+# directory containing the compose file unless told otherwise, and it prefixes every volume
+# with it. That makes the volumes depend on *where the file lives*, which bit this project
+# on 2026-08-23: Gate 23's stack was started from a sibling `thunderid-local/` directory, so
+# its data lives in `thunderid-local_thunderid-*`. Running the identical file from the repo
+# as `-f deploy/…` silently switched the project name to `deploy`, created three **empty**
+# volumes, and left the server crash-looping on a missing `crypto.key` — with the real
+# identity store sitting untouched under the other name.
+#
+# Pinning the name makes the volumes follow the *stack*, not the working directory. The
+# value matches the volumes Gate 23 created, so that data keeps being used.
+name: thunderid-local
 
 services:
+  # ── init profile ────────────────────────────────────────────────────────────────────
+  # Neither of these runs during a normal `docker compose up`. See note 2 above.
+
   # Seed the database files out of the image into the shared volume.
   thunderid-db-init:
+    profiles: ["init"]
     image: ghcr.io/thunder-id/thunderid:1.0.0
     command: sh -c "cp -r /opt/thunderid/database/* /data/"
     volumes:
@@ -65,8 +105,9 @@ services:
     restart: "no"
 
   # One-shot setup: generates key material and the initial admin credentials.
-  # See the non-idempotency note in the header before restarting this stack.
+  # Prints the console password to its own logs — capture it when this runs.
   thunderid-setup:
+    profiles: ["init"]
     image: ghcr.io/thunder-id/thunderid:1.0.0
     command: ./setup.sh
     volumes:
@@ -80,12 +121,17 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
-  # The server itself. Reads the key material the setup step produced.
+  # ── default ─────────────────────────────────────────────────────────────────────────
+
+  # The server itself. Reads the key material the init profile produced.
+  #
+  # Deliberately has NO `depends_on` for the setup step: that dependency is what dragged
+  # the one-shot containers into every `up` and regenerated the keys. The ordering is now
+  # the developer's two documented commands instead. If the certs volume is empty the
+  # server fails to start — that means step 1 has not been run.
   thunderid:
     image: ghcr.io/thunder-id/thunderid:1.0.0
-    depends_on:
-      thunderid-setup:
-        condition: service_completed_successfully
+    restart: unless-stopped
     ports:
       - "8090:8090"
     volumes:
@@ -97,7 +143,8 @@ services:
 
 # Named volumes, not bind mounts. This is where the data actually lives: deleting or
 # recreating the containers does not touch it, but `docker compose down -v` destroys
-# every registration, agent and role. Nothing here is backed up.
+# every registration, agent and role — and forces the init profile to be re-run, which
+# invalidates every token issued so far. Nothing here is backed up. Prefer `stop`.
 volumes:
   thunderid-db:
     driver: local
