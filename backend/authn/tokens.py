@@ -104,6 +104,26 @@ def verify_access_token(token: str) -> TokenActor:
             # row would silently lose its provenance.
             options={"require": ["exp", "iat", "sub", "aud", "iss"]},
         )
+    except jwt.PyJWKClientError as exc:
+        # MUST stay above the PyJWTError clause below. PyJWKClientError is a
+        # *subclass* of PyJWTError, and PyJWKClient.fetch_data() wraps URLError
+        # and TimeoutError into PyJWKClientConnectionError - so with the two
+        # clauses the other way round (as they were until 2026-08-24) an
+        # unreachable ThunderID was logged at INFO as an ordinary rejected
+        # token, and the warning branch below was dead code for the exact case
+        # it was written to catch. Verified against PyJWT 2.13.0.
+        #
+        # Still a 401, not a 503: from the caller's side the outcome is the
+        # same - we cannot establish who they are - and telling an anonymous
+        # caller that our identity provider is down hands them a fact about our
+        # infrastructure they did not have. The log line is the only place that
+        # distinction is drawn, which is why it has to be drawn correctly.
+        _log.warning(
+            "Could not verify access token - key set unreachable: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
+        raise AuthenticationError("Could not verify the access token.") from exc
     except jwt.PyJWTError as exc:
         # INFO, not WARNING: an expired token is the single most common event
         # in a healthy system - every session reaches this once an hour. Logging
@@ -111,16 +131,13 @@ def verify_access_token(token: str) -> TokenActor:
         _log.info("Rejected access token: %s: %s", type(exc).__name__, exc)
         raise AuthenticationError("The access token is not valid.") from exc
     except Exception as exc:
-        # Reaching the key set can fail for reasons that are not the token's
-        # fault - ThunderID down, TLS refused, DNS. Still a 401 rather than a
-        # 500, because from the caller's side the outcome is identical: we
-        # cannot establish who they are. The cause is preserved for the log.
-        # WARNING here, because this branch is NOT the token's fault and is not
-        # routine: it means the key set could not be reached. The caller sees
-        # the same 401 either way, so this line is the only signal that the
-        # identity provider - not the user - is the thing that is broken.
+        # Backstop for anything the two clauses above do not name: a malformed
+        # JWKS document, a key type cryptography cannot load, an SSL error
+        # raised outside fetch_data(). Still a 401 rather than a 500 for the
+        # same reason as above - the caller cannot be identified either way -
+        # and still WARNING, because reaching here is never the token's fault.
         _log.warning(
-            "Could not verify access token - key set unreachable or malformed: %s: %s",
+            "Could not verify access token - key set malformed or unusable: %s: %s",
             type(exc).__name__,
             exc,
         )

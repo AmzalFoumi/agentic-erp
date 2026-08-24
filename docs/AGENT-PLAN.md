@@ -1469,7 +1469,22 @@ dropped.
 Observed while verifying Gate 24's sign-in: the agent panel came back with a **previous
 conversation's history** rather than a new one, and happily acted on it (it created a product
 mid-verification). Reported by the developer and **deliberately deferred** — auth was the work in
-flight, and this is a feature bug, not a security one.
+flight.
+
+> **⚠️ Reclassified 2026-08-24 — this is a write-safety defect, not a feature bug.** The original
+> note called it "a feature bug, not a security one". That undersells it, and the evidence is in the
+> sentence above: the agent **created a row in the database** that nobody asked for, off history
+> that was not the current conversation. Showing the wrong thread would be cosmetic; *executing* it
+> is not. Whether the actor is wrong or merely the conversation is, the outcome is an unattended
+> write.
+>
+> It stays deferred to Gate 25 for the reason in point 2 below — the fix would otherwise be written
+> twice — but it is now **an exit condition of Gate 25, not a follow-up**, and it must not reach
+> Gate 26 (deployment) open. Recorded as such in the Gate 25 row of `docs/PLAN.md`.
+>
+> If Gate 25 turns out not to close it — i.e. the mount-selection path is independent of who the
+> actor is — then the write side needs its own guard: a mutation tool must not run against a
+> conversation the user did not just choose. Decide that *after* diagnosis, not before.
 
 Not diagnosed yet. The suspects, in the order worth checking:
 

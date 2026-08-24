@@ -475,9 +475,14 @@ two destinations — Products and New product. No dashboard, no reports, no acco
 > opportunistically. Two things it will need first: something worth summarising (the API exposes no
 > aggregates today) and a decision on where it lives. `/` is now the signed-out landing (see Gate 24
 > in `docs/AUTH-PLAN.md`), so the dashboard would be its own route — `/inventory` was the name
-> floated — and would become `NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL`, which currently points at
-> `/products`. Until then the product list stays the signed-in landing and the nav keeps its two
-> destinations.
+> floated — and would become the post-login destination. **Corrected 2026-08-24: that is a change to
+> application code, not to configuration.** An earlier revision of this line said the route "would
+> become `NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL`". It would not: that variable is sent verbatim as
+> the OAuth `redirect_uri` and must stay **unset** so it resolves to the bare origin the Console has
+> registered — setting it to a path breaks sign-in before the login page even renders. Where a
+> signed-in visitor goes next is decided in `src/app/page.tsx`. See the "⚠️ Corrected — AFTER_SIGN_IN_URL
+> is the redirect_uri, not a landing page" block under Gate 24 in `docs/AUTH-PLAN.md`. Until then the
+> product list stays the signed-in landing and the nav keeps its two destinations.
 
 **2. Product list — the primary screen**, the one someone has open all day. The table, one search
 input (name and SKU together, not an advanced filter panel), page-number pagination with a total, a

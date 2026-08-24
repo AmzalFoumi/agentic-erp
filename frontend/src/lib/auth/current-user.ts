@@ -17,6 +17,12 @@
  */
 import "server-only";
 
+// ⚠️ Nothing imports this yet. It is the seam, not live code: the UI currently
+// gets the signed-in user from ThunderID's own <SignedIn>/<UserMenu> client
+// components, and no server component has needed the identity yet. It exists so
+// that when one does — Gate 25 threads the authenticated actor through the agent
+// — there is one place that answers "who is this", rather than three.
+
 import { thunderid } from "@thunderid/nextjs/server";
 
 /**

@@ -98,7 +98,8 @@ call sites already existed, which was the entire point of doing this early.
 `SystemActor` (grants everything) survives in two places, both deliberate: behind
 `AUTH_ENABLED=false` for tests and offline work, and — ⚠️ **still unfixed** — in
 `mcp_server/server.py`'s `_actor()`, which is gate 25. The frontend's third seam,
-`frontend/src/lib/auth/current-user.ts`, is likewise still hardcoded.
+`frontend/src/lib/auth/current-user.ts`, is **no longer hardcoded** — it reads the real session and
+returns `CurrentUser | null`. It has no callers yet; it exists as the seam, not as live code.
 
 **The deferral had two expiry conditions**, also in `PLAN.md`: either the MCP server becomes
 HTTP-reachable by anything that is not the developer's own machine, or a second human user exists.

@@ -11,9 +11,12 @@ That is the whole trick: fail loudly at the boundary, so the rest of the code
 can assume the settings are valid.
 """
 
+import logging
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_log = logging.getLogger(__name__)
 
 # The directory this file's parent lives in - i.e. backend/. We build an
 # absolute path to .env from it rather than a relative one, because a relative
@@ -111,3 +114,27 @@ class Settings(BaseSettings):
 # One shared instance, created when this module is first imported. Everything
 # else in the codebase does `from core.config import settings`.
 settings = Settings()  # type: ignore[call-arg]
+
+
+# Both switches above are ordinary booleans, and either one set wrongly on a
+# deployed machine opens the API silently - no error, no failed request, just an
+# API that stops checking. This is the only thing standing between that and
+# nobody noticing.
+#
+# ⚠️ A log line is NOT the real fix. The real fix is refusing to start at all,
+# which needs a notion of "this is production" that this project does not have
+# yet: there is no ENVIRONMENT setting anywhere. Introducing one is a gate 26
+# decision - see the Gate 26 hardening list in docs/AUTH-PLAN.md, where this is
+# recorded as a requirement rather than left to be rediscovered.
+if not settings.auth_enabled:
+    _log.warning(
+        "AUTH_ENABLED is false: EVERY request is the all-powerful SystemActor "
+        "and no token is checked. Correct for tests and offline work, and a "
+        "total bypass of authentication anywhere else."
+    )
+if not settings.thunderid_verify_tls:
+    _log.warning(
+        "THUNDERID_VERIFY_TLS is false: the JWKS fetch does not validate "
+        "ThunderID's certificate, so anyone able to intercept that connection "
+        "can supply their own signing keys and mint tokens this API accepts."
+    )

@@ -227,3 +227,41 @@ def test_a_non_string_scope_claim_grants_nothing_rather_than_crashing(
         assert actor.id == "01a02d8f-0355-74cd-b102-3b1ab2372d64"
         assert not actor.can("product.read")
         assert actor.scopes == frozenset()
+
+
+def test_an_unreachable_key_set_is_logged_as_a_provider_fault(
+    monkeypatch, caplog, signing_key
+):
+    """An identity-provider outage must not be logged as a rejected token.
+
+    This pins an ordering, not a behaviour. `PyJWKClientConnectionError` is a
+    *subclass* of `PyJWTError`, and `PyJWKClient.fetch_data()` wraps `URLError`
+    and `TimeoutError` into it - so a `except jwt.PyJWTError` clause placed
+    first swallows "ThunderID is down" and logs it at INFO as an ordinary
+    expired-token event. That is exactly what happened until 2026-08-24, which
+    made the WARNING branch dead code for the one case it was written to catch.
+
+    The caller still sees the same AuthenticationError either way - deliberately,
+    so nobody can probe our infrastructure through the API - which is precisely
+    why the log line is the only place the distinction survives, and why it is
+    worth a test.
+    """
+    import logging
+
+    from authn import tokens, verify_access_token
+
+    class _DownClient:
+        def get_signing_key_from_jwt(self, token: str):
+            raise jwt.PyJWKClientConnectionError("Fail to fetch data from the url")
+
+    monkeypatch.setattr(tokens, "_jwk_client", lambda: _DownClient())
+
+    with caplog.at_level(logging.INFO, logger=tokens.__name__):
+        with pytest.raises(AuthenticationError):
+            verify_access_token(_token(signing_key))
+
+    assert [r.levelno for r in caplog.records] == [logging.WARNING], (
+        "an unreachable key set must log WARNING, not INFO - check that the "
+        "PyJWKClientError clause still sits above the PyJWTError clause"
+    )
+    assert "key set unreachable" in caplog.records[0].getMessage()
