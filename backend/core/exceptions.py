@@ -93,3 +93,23 @@ class PermissionDeniedError(DomainError):
     "not authenticated at all", which is the adapter's problem: by the time a
     service runs, an Actor already exists.
     """
+
+
+class AuthenticationError(DomainError):
+    """We do not know who is asking.
+
+    The counterpart to PermissionDeniedError, and the distinction is worth
+    holding onto because the two look similar and mean opposite things:
+
+        AuthenticationError    no credential, or one we cannot trust  -> 401
+        PermissionDeniedError  a credential we trust, lacking a right -> 403
+
+    Only adapters raise this. A service never does: by the time service code
+    runs it has been handed an Actor, so the question "who is this?" is already
+    answered. That is why it lives here rather than in api/ - `mcp_server/`
+    needs the same vocabulary, and neither adapter may import the other.
+
+    Carrying it through the shared vocabulary also means the 401 response shape
+    matches every other error the API returns, instead of being a special case
+    that clients have to discriminate differently.
+    """

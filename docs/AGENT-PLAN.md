@@ -1464,6 +1464,41 @@ dropped.
 
 ---
 
+## Known defect — the panel reopens an old conversation (found 2026-08-23, deferred)
+
+Observed while verifying Gate 24's sign-in: the agent panel came back with a **previous
+conversation's history** rather than a new one, and happily acted on it (it created a product
+mid-verification). Reported by the developer and **deliberately deferred** — auth was the work in
+flight.
+
+> **⚠️ Reclassified 2026-08-24 — this is a write-safety defect, not a feature bug.** The original
+> note called it "a feature bug, not a security one". That undersells it, and the evidence is in the
+> sentence above: the agent **created a row in the database** that nobody asked for, off history
+> that was not the current conversation. Showing the wrong thread would be cosmetic; *executing* it
+> is not. Whether the actor is wrong or merely the conversation is, the outcome is an unattended
+> write.
+>
+> It stays deferred to Gate 25 for the reason in point 2 below — the fix would otherwise be written
+> twice — but it is now **an exit condition of Gate 25, not a follow-up**, and it must not reach
+> Gate 26 (deployment) open. Recorded as such in the Gate 25 row of `docs/PLAN.md`.
+>
+> If Gate 25 turns out not to close it — i.e. the mount-selection path is independent of who the
+> actor is — then the write side needs its own guard: a mutation tool must not run against a
+> conversation the user did not just choose. Decide that *after* diagnosis, not before.
+
+Not diagnosed yet. The suspects, in the order worth checking:
+
+1. **Conversation selection on mount.** `Gate 21`'s panel starts a conversation against
+   `/api/agent`; if it resumes the most recent row rather than creating one, this is exactly the
+   symptom.
+2. **Scope of "most recent".** Until Gate 24 every caller was the same `SystemActor`, so *all*
+   conversations belonged to one identity. Now that a real `sub` arrives, conversations may need to
+   be keyed on it — which would make this partly an auth-adjacent fix after all.
+
+⚠️ Point 2 means this should be re-examined **when Gate 25 threads the authenticated actor through
+the agent**, not before, or the fix gets written twice. Pick it up with the feature work that
+follows the auth gates.
+
 ## Re-evaluation, per step 4 of the stop-gate ritual
 
 Writing this file surfaced five things that were not visible when the plan was agreed.

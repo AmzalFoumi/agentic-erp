@@ -13,6 +13,7 @@
  */
 import "server-only";
 
+import { thunderid } from "@thunderid/nextjs/server";
 import createClient from "openapi-fetch";
 
 import type { paths } from "./schema";
@@ -49,3 +50,53 @@ export const api = createClient<paths>({ baseUrl });
  * modules that know its internal shape, the cheaper a regeneration is.
  */
 export type { components, paths } from "./schema";
+
+/**
+ * The current caller's access token, or `undefined` when nobody is signed in.
+ *
+ * `thunderid()` is an undocumented export of `@thunderid/nextjs/server` — found
+ * by reading the installed package, not the guides, which never explain how to
+ * get a token for calling an API of your own. It is the supported seam: the
+ * session cookie holds the refresh token and the SDK renews from it, so nothing
+ * here parses cookies or tracks expiry.
+ *
+ * Everything is behind a `try`: this runs on requests that have no session
+ * (the sign-in page fetches nothing, but a future public page might), and a
+ * missing token must produce an unauthenticated request the backend rejects
+ * with a 401 — not a crash in the transport layer. The backend is the authority
+ * on whether a token is acceptable; this side only carries it.
+ */
+async function accessToken(): Promise<string | undefined> {
+  try {
+    const { getAccessToken, getSessionId } = await thunderid();
+    const sessionId = await getSessionId();
+    if (!sessionId) return undefined;
+    return await getAccessToken(sessionId);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Attach `Authorization: Bearer` to every call to FastAPI.
+ *
+ * A middleware rather than a header baked into `createClient` above, and that
+ * distinction is the whole point: the client is built once at module load,
+ * while the token belongs to one request and is rotated by `src/proxy.ts` mid
+ * session. A header captured at import time would be one user's token serving
+ * everybody, which is the worst possible bug to have here.
+ *
+ * The backend derives its `Actor` from this token — see `api/deps.py`'s
+ * `get_actor()`, which verifies the signature against ThunderID's JWKS. The
+ * `sub` claim becomes `created_by` / `updated_by`. Sending a token is not the
+ * same as being trusted with one: nothing on this side is believed.
+ */
+api.use({
+  async onRequest({ request }) {
+    const token = await accessToken();
+    if (token) {
+      request.headers.set("Authorization", `Bearer ${token}`);
+    }
+    return request;
+  },
+});

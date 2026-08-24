@@ -198,7 +198,7 @@ class ProductList(BaseModel):
 # be checked for exhaustiveness by the compiler - the frontend then cannot
 # forget a case, and adding one here breaks the build until it is handled.
 #
-# The first five are our own, from core/exceptions.py. The rest are the
+# The first six are our own, from core/exceptions.py. The rest are the
 # framework's, renamed into this envelope by api/errors.py. `test_errors.py`
 # asserts that this list stays in step with both sources.
 ErrorCode = Literal[
@@ -207,6 +207,7 @@ ErrorCode = Literal[
     "DuplicateError",
     "ValidationError",
     "PermissionDeniedError",
+    "AuthenticationError",
     "DomainError",
     # The framework's - see _FRAMEWORK_ERROR_NAMES in api/errors.py
     "RequestValidationError",

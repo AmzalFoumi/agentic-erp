@@ -66,23 +66,29 @@ class Actor(Protocol):
 
 
 class SystemActor:
-    """An actor with unrestricted permissions. The only implementation today.
+    """An actor with unrestricted permissions. **Grants everything.**
 
-    The authentication provider decision is deliberately deferred (see
-    docs/AUTH-PLAN.md). Until it lands, adapters pass a SystemActor and every
-    `can()` returns True, so nothing is actually gated yet.
+    This was the only implementation until gate 24; `TokenActor` below is now
+    the real one, and it is what the HTTP API hands to `services/`. The bet this
+    class represents has already paid out: swapping it for `TokenActor` changed
+    this file and `api/deps.py` and touched **nothing** in `services/`, because
+    every call site already existed.
 
-    Two things are true at once, and both matter:
+    ⚠️ Three places still produce one, and they are not equivalent:
 
-      - Nothing is enforced today. This grants everything.
-      - Every service is already *written* as though it were, with the
-        permission check and the audit stamp in place.
+      - `api/deps.py` when `AUTH_ENABLED=false`. Deliberate, for the test suite
+        and for local work unrelated to auth. Never set false anywhere reachable
+        by anything but you; the setting defaults to True so that forgetting it
+        fails closed.
+      - `mcp_server/server.py`'s `_actor()`, unconditionally. **This is the one
+        that is not yet fixed** - the MCP server is unauthenticated, and that is
+        gate 25. It is survivable only because `agent/app.py` binds to
+        127.0.0.1 with a test that fails if that changes. Do not remove that
+        binding before gate 26.
+      - Background and migration work with no human behind it, which is the one
+        use that stays legitimate afterwards.
 
-    That is the whole value of doing this now. Swapping SystemActor for a real
-    implementation later changes this file and the two adapters, and touches
-    nothing in `services/` - because the call sites already exist. Retrofitting
-    an actor argument into thirty finished service functions is the expensive
-    version of this work, and this is how we avoid it.
+    See docs/AUTH-PLAN.md.
     """
 
     def __init__(self, actor_id: str = "system") -> None:
@@ -106,3 +112,67 @@ class SystemActor:
         # assertion. Without it you get the useless default
         # `<core.actor.SystemActor object at 0x000001F8...>`.
         return f"SystemActor(id={self._id!r})"
+
+
+class TokenActor:
+    """A real person or agent, described by a validated access token.
+
+    The implementation the whole Actor design was built for. Where SystemActor
+    grants everything, this grants exactly what the token's `scope` claim says
+    and nothing else.
+
+    Two claims from the token matter here, and they map onto the protocol
+    without translation:
+
+        sub    -> id       the OIDC subject, e.g. "01a02d8f-0355-74cd-..."
+        scope  -> scopes   space-delimited, e.g. "openid product.read ..."
+
+    `can()` is therefore a set-membership test with no mapping table. That is
+    not a happy accident: the ThunderID resource server was registered with
+    `.` as its permission delimiter precisely so that its strings come out
+    identical to the ones already written in services/ - `product.read`,
+    `stock.adjust`. Accepting the `:` default would have meant maintaining a
+    translation layer forever, and the delimiter cannot be changed after the
+    resource server is created. See docs/AUTH-PLAN.md.
+
+    Note this class does no validating. It is handed claims that have *already*
+    been verified - signature, issuer, audience, expiry - by `authn/tokens.py`.
+    Keeping it dumb is deliberate: `core/` must not grow a JWT dependency, and
+    a class that only stores two fields is trivially constructible in a test.
+
+    ⚠️ An empty `scopes` is a legitimate, dangerous state. ThunderID answers a
+    request for permissions it does not recognise with `200 OK` and a token
+    carrying no scope claim at all - indistinguishable from a correctly issued
+    token for a user with no permissions. Such an actor authenticates fine and
+    is refused by every `can()`. If everything 403s, suspect the token before
+    the code.
+    """
+
+    def __init__(self, actor_id: str, scopes: frozenset[str]) -> None:
+        self._id = actor_id
+        self._scopes = scopes
+
+    @property
+    def id(self) -> str:
+        """See Actor.id. The OIDC `sub` claim, stored in created_by/updated_by."""
+        return self._id
+
+    @property
+    def scopes(self) -> frozenset[str]:
+        """The permissions this token carries. Read-only view for diagnostics."""
+        return self._scopes
+
+    def can(self, permission: str) -> bool:
+        """True when the token's scope claim contains `permission` exactly.
+
+        No prefix matching and no hierarchy: `product.read` does not imply
+        `product.create`, and holding `product` alone grants nothing. The
+        issuer decides what the permission set means; we only check membership.
+        """
+        return permission in self._scopes
+
+    def __repr__(self) -> str:
+        # Scopes are sorted so the repr is stable across runs - a frozenset's
+        # iteration order is not guaranteed, and an unstable repr makes test
+        # failures harder to read than they need to be.
+        return f"TokenActor(id={self._id!r}, scopes={sorted(self._scopes)!r})"

@@ -26,10 +26,21 @@ from collections.abc import Iterator
 from typing import Annotated
 
 from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from authn import verify_access_token
 from core.actor import Actor, SystemActor
+from core.config import settings
 from core.database import SessionLocal
+from core.exceptions import AuthenticationError
+
+# `auto_error=False` matters. Left at its default, HTTPBearer raises its own
+# bare 403 when the header is missing - the wrong status, and a response body
+# that does not match the {"error": ..., "detail": ...} shape every other error
+# in this API uses. Turning it off lets the header come back as None and puts
+# the decision below, where AuthenticationError produces a proper 401.
+_bearer = HTTPBearer(auto_error=False)
 
 
 def get_db() -> Iterator[Session]:
@@ -56,24 +67,37 @@ def get_db() -> Iterator[Session]:
         session.close()
 
 
-def get_actor() -> Actor:
+def get_actor(
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_bearer)
+    ] = None,
+) -> Actor:
     """Who is making this request.
 
-    A placeholder, and deliberately an obvious one. There is no auth provider
-    yet - that decision is deferred, see docs/AUTH-PLAN.md - so every HTTP
-    caller is currently the same all-powerful `SystemActor`.
+    The seam the whole Actor design was built around, now carrying its real
+    load. Everything it does is confined to this function: read the bearer
+    token, verify it, return an Actor carrying that user's permissions. No
+    route handler and no service function changed when this landed, because
+    they already took an Actor and already called `actor.can()`.
 
-    The reason this exists *now*, before it does anything useful, is that it is
-    the seam. When a real auth provider lands, the change is confined to this
-    one function: read the bearer token, validate it, return an Actor carrying
-    that user's permissions. Not one handler and not one service function
-    changes, because they already take an Actor and already call `actor.can()`.
-    Retrofitting that later would mean touching every signature in the codebase.
+    The token's `sub` becomes the actor id, so `created_by` / `updated_by`
+    record the OIDC subject of the person who actually did the thing - which
+    was the point of the audit columns in the first place.
 
-    The id is "api" rather than "system" so that an audited row tells you which
-    front door wrote it - the MCP server will use "mcp".
+    `auth_enabled=False` restores the pre-gate-24 behaviour of handing out a
+    SystemActor. That is for the test suite and for local work unrelated to
+    auth; it must never be set in a deployed environment, and it defaults to
+    True so that a missing setting fails closed.
     """
-    return SystemActor(actor_id="api")
+    if not settings.auth_enabled:
+        # The id is "api" rather than "system" so an audited row still tells you
+        # which front door wrote it - the MCP server uses "mcp".
+        return SystemActor(actor_id="api")
+
+    if credentials is None:
+        raise AuthenticationError("Authorization header is missing.")
+
+    return verify_access_token(credentials.credentials)
 
 
 # `Annotated[X, Depends(f)]` reads as "an X, obtained by calling f". Naming the

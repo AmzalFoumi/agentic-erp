@@ -61,7 +61,7 @@ addopts = "-q --strict-markers"
 # Each package is added here in the gate that creates it - `api` in Gate 5,
 # `mcp_server` in Gate 6 - because naming a package that is not yet on disk
 # makes lint-imports fail to start rather than skip it.
-root_packages = ["core", "services", "api", "mcp_server"]
+root_packages = ["core", "services", "api", "mcp_server", "authn"]
 
 # Required for the "framework-free" contract below. By default the graph
 # contains only our own code, and a rule naming `fastapi` would silently match
@@ -80,8 +80,14 @@ type = "layers"
 # on the same layer and neither may import the other. That is not pedantry: the
 # day the MCP server imports a Pydantic schema out of api/, the two adapters
 # are coupled and the second one is no longer a genuine test of the design.
+#
+# `authn` (gate 24) sits between the adapters and services: both adapters need
+# to verify a bearer token, neither may import the other, and services/ may not
+# know what a token is. Its own layer is the only placement that satisfies all
+# three. It imports core/ and nothing else of ours.
 layers = [
     "api | mcp_server",
+    "authn",
     "services",
     "core",
 ]
@@ -92,7 +98,12 @@ type = "forbidden"
 source_modules = ["services"]
 # starlette is listed because it is FastAPI's foundation - `from starlette
 # import status` would sneak HTTP concepts past a rule that named only fastapi.
-forbidden_modules = ["fastapi", "starlette", "mcp", "uvicorn", "httpx"]
+#
+# `jwt` was added at gate 24. A JWT is a transport credential, not a business
+# concept: a service that parses one has started doing the adapter's job, and
+# the MCP server could no longer reuse it unchanged. Verification lives in
+# authn/ and reaches services/ only as an already-built Actor.
+forbidden_modules = ["fastapi", "starlette", "mcp", "uvicorn", "httpx", "jwt"]
 
 [[tool.importlinter.contracts]]
 name = "Core stays framework-free"
@@ -101,4 +112,4 @@ type = "forbidden"
 # Actor protocol; all three are imported by both adapters, so a web dependency
 # here would be worse than one in services.
 source_modules = ["core"]
-forbidden_modules = ["fastapi", "starlette", "mcp", "uvicorn", "httpx"]
+forbidden_modules = ["fastapi", "starlette", "mcp", "uvicorn", "httpx", "jwt"]
