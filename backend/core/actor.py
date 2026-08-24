@@ -66,23 +66,29 @@ class Actor(Protocol):
 
 
 class SystemActor:
-    """An actor with unrestricted permissions. The only implementation today.
+    """An actor with unrestricted permissions. **Grants everything.**
 
-    The authentication provider decision is deliberately deferred (see
-    docs/AUTH-PLAN.md). Until it lands, adapters pass a SystemActor and every
-    `can()` returns True, so nothing is actually gated yet.
+    This was the only implementation until gate 24; `TokenActor` below is now
+    the real one, and it is what the HTTP API hands to `services/`. The bet this
+    class represents has already paid out: swapping it for `TokenActor` changed
+    this file and `api/deps.py` and touched **nothing** in `services/`, because
+    every call site already existed.
 
-    Two things are true at once, and both matter:
+    ⚠️ Three places still produce one, and they are not equivalent:
 
-      - Nothing is enforced today. This grants everything.
-      - Every service is already *written* as though it were, with the
-        permission check and the audit stamp in place.
+      - `api/deps.py` when `AUTH_ENABLED=false`. Deliberate, for the test suite
+        and for local work unrelated to auth. Never set false anywhere reachable
+        by anything but you; the setting defaults to True so that forgetting it
+        fails closed.
+      - `mcp_server/server.py`'s `_actor()`, unconditionally. **This is the one
+        that is not yet fixed** - the MCP server is unauthenticated, and that is
+        gate 25. It is survivable only because `agent/app.py` binds to
+        127.0.0.1 with a test that fails if that changes. Do not remove that
+        binding before gate 26.
+      - Background and migration work with no human behind it, which is the one
+        use that stays legitimate afterwards.
 
-    That is the whole value of doing this now. Swapping SystemActor for a real
-    implementation later changes this file and the two adapters, and touches
-    nothing in `services/` - because the call sites already exist. Retrofitting
-    an actor argument into thirty finished service functions is the expensive
-    version of this work, and this is how we avoid it.
+    See docs/AUTH-PLAN.md.
     """
 
     def __init__(self, actor_id: str = "system") -> None:

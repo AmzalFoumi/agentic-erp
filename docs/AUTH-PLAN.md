@@ -881,6 +881,7 @@ delimiter was chosen for at Gate 23.
 | `api/errors.py` | Adds the 401 mapping **and `WWW-Authenticate: Bearer`** — RFC 6750, and required of a resource server by the MCP spec |
 | `core/config.py` | `thunderid_issuer` / `_jwks_url` / `_audience` / `_verify_tls` / `auth_enabled` |
 | `tests/test_auth.py` | 13 tests, no network — see below |
+| `tests/test_api_products.py` | +2 end-to-end through the adapter: no token → 401, valid token without the scope → 403 |
 
 **Why `authn/` is a fourth top-level package.** `core/` and `services/` are
 forbidden from importing `jwt` (added to **both** `forbidden_modules` lists this
@@ -912,6 +913,77 @@ environment.
 ⚠️ **`mcp_server/server.py`'s `_actor()` still hardcodes `SystemActor`.** That is
 Gate 25 and it is the reason `agent/app.py` keeps its loopback binding. The API
 is now authenticated; the MCP server is not.
+
+#### Verified end-to-end in a browser, 2026-08-24
+
+The first full run of the real thing — hosted login page, code exchange, session
+cookie, an authenticated `GET /products` — with all four services up via
+`scripts/dev-up.sh`. It passed, but **only after three defects that the unit
+tests could not have caught**, because all three live in the frontend or in the
+gap between the app and the identity provider.
+
+**1. Route protection was a complete no-op. Two independent bugs in the SDK,
+both copied faithfully from ThunderID's own examples.**
+
+`src/proxy.ts` is the bouncer: it decides whether a signed-out visitor may reach
+a page at all. It was letting everyone through, silently, and the only reason no
+data leaked is that the backend built this gate refused every tokenless call
+with a 401. The backend was carrying the whole building alone.
+
+- **`createRouteMatcher` never matched anything.** It escapes every `.` *before*
+  it expands `*`, so the `"/products(.*)"` idiom used throughout the vendor's
+  JSDoc compiles to a regex demanding a literal dot: `/products` and
+  `/products/123` fail it, `/products.anything` passes. The fix is the plain `*`
+  glob — `"/products*"` — which is the form their implementation actually
+  supports. Checked against `@thunderid/nextjs` **1.0.6, the latest published
+  release**, and against the SDK repo's `main`: both carry the bug, so there is
+  no version to upgrade to.
+- **`protectRoute()`'s answer was discarded.** It neither throws nor
+  short-circuits; it *returns* a redirect `Response`, and `thunderIDProxy` uses
+  whatever the handler returns, falling back to `NextResponse.next()` on
+  `undefined`. The vendor's example omits the `return`, so ours did too.
+
+A matcher that silently never matches is the worst failure mode a bouncer has:
+no error, no warning, every route simply open. **Do not reintroduce `(.*)`, and
+do not drop the `return`.** Before/after, verified with curl:
+
+| URL | before | after |
+|---|---|---|
+| `/` | 200 (correct — public landing) | 200 |
+| `/products` | **200, fully rendered** | 307 → `/` |
+| `/products/123` | **200** | 307 → `/` |
+| `POST /api/agent/chat` | **404, unprotected** | 307 → `/` |
+
+**2. ⚠️ Open the app at `http://localhost:3000`. Never let `127.0.0.1:3000`
+reach the server first.**
+
+`ThunderIDNextClient` is a module-level singleton with an `isInitialized` guard,
+and it resolves `afterSignInUrl ?? origin` **once**, from the first request the
+Node process ever serves. That origin is then baked into every subsequent
+`redirect_uri` — for every user, for the life of the process.
+
+A few curls to `127.0.0.1:3000` during testing were enough: every later sign-in,
+including from `localhost:3000` in a browser, sent
+`redirect_uri=http://127.0.0.1:3000` and ThunderID answered **`Invalid redirect
+URI`**. The message points squarely at the Console, and the Console is fine. The
+cure is to restart Next and make the first request the right one.
+
+This will bite again. It is invisible, it survives a page reload, and it looks
+exactly like a misregistered redirect URI.
+
+**3. The `scope` claim was read unguarded** (found by review, not by the browser
+run). `claims.get("scope", "").split()` sits *after* the try block, so a token
+carrying `scope` as a list or a number raised `AttributeError` and surfaced as a
+**500** — a malformed credential presenting as a server fault. Now type-checked,
+treated as no scopes at all, and logged.
+
+**Also fixed in the same pass:** `authn/tokens.py` promised in two comments that
+the real refusal reason "goes in the log" — and no logger existed. Since every
+refusal is deliberately indistinguishable to the caller, that log was the *only*
+way to tell an expired token from a wrong audience from ThunderID being
+unreachable. Added: `INFO` for a rejected token (routine — every session expires
+hourly), `WARNING` for a key set that could not be reached (not the caller's
+fault, and the only signal that the identity provider is the broken thing).
 
 ### Gate 25 — agent delegation and the MCP server as a resource server
 

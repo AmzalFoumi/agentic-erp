@@ -38,17 +38,42 @@ import { createRouteMatcher, thunderIDProxy } from "@thunderid/nextjs/server";
  * so the fallback is `/`. Listing `/` here would make it redirect to itself.
  * `app/page.tsx` is the signed-out landing instead, and carries the one
  * `<SignInButton>` that leaves for the hosted page.
+ *
+ * ⚠️ **The patterns end in `*`, NOT `(.*)`, and that is not a style choice.**
+ * `createRouteMatcher` escapes every `.` before it expands `*`, so the `(.*)`
+ * idiom used throughout the vendor's own JSDoc compiles to a regex that
+ * demands a literal dot after the prefix. `/products` and `/products/123` do
+ * not match it; only `/products.something` does. With `(.*)` this matcher
+ * returned false for every real request, and route protection was silently a
+ * complete no-op. The plain `*` glob is the form their implementation
+ * actually supports.
+ *
+ * Checked against @thunderid/nextjs 1.0.6 (the latest published release) and
+ * against the package source on the SDK repo's `main` on 2026-08-24 — both
+ * carry the same behaviour, so there is no fixed version to upgrade to. The
+ * one cost of `*` is that it also matches `/productsfoo`; that over-protects
+ * rather than under-protects, which is the safe direction to be wrong in.
  */
 const isProtectedRoute = createRouteMatcher([
-  "/products(.*)",
-  "/api/agent(.*)",
+  "/products*",
+  "/api/agent*",
 ]);
 
 export default thunderIDProxy(async (thunderid, request) => {
   if (isProtectedRoute(request)) {
     // Redirects to `/` when there is no valid session - see the note above on
-    // why that is the fallback. Awaited: it returns the redirect response.
-    await thunderid.protectRoute();
+    // why that is the fallback.
+    //
+    // ⚠️ The `return` is load-bearing and the vendor's own JSDoc example omits
+    // it. `protectRoute()` does not throw and does not short-circuit: it
+    // *returns* a redirect Response, and `thunderIDProxy` uses whatever this
+    // handler returns, falling back to `NextResponse.next()` on `undefined`.
+    // Dropping the `return` therefore lets every protected route render for a
+    // signed-out visitor. Verified on 2026-08-24: `/products` answered 200 with
+    // the page shell, the Server Component called the API with no token, and
+    // only the backend's own 401 kept the data in. Route protection was a
+    // no-op.
+    return await thunderid.protectRoute();
   }
 });
 

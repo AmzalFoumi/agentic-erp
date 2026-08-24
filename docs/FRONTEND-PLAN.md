@@ -143,6 +143,21 @@ lives at `frontend/src/lib/...`; the path references were updated rather than th
   the four plan docs in precedence: they say nothing about this project's architecture, only about
   the framework.
 
+  ⚠️ **`frontend/AGENTS.md` is build output, like `src/lib/api/schema.d.ts`.** It is not written by
+  us and not written once at scaffold time: `next dev` regenerates the block between the
+  `nextjs-agent-rules` markers on **every start** (`node_modules/next/dist/server/lib/generate-agent-files.js`),
+  and announces it in the log as `✓ Generated AGENTS.md for AI agents`. So it reappears as an
+  uncommitted change whenever the installed Next version's generator text differs from the committed
+  copy — which is exactly what happened on 2026-08-24, when the file caught up from the 16.2.12 text
+  to 16.3.1's. Reverting it is pointless; commit it and move on. Turning it off means
+  `agentRules: false` in `next.config.ts`, which also throws away the read-the-real-docs instruction
+  — not worth it on this project.
+
+  Related, and the actual root cause of the churn: `package.json` pins Next as **`^16.3.1`**, a
+  floating range. That is the same drift this project deliberately stamped out for the ThunderID
+  image (pinned `1.0.0`, never `latest`). Left as-is for now, noted so the next surprise minor
+  version is recognised rather than investigated.
+
 **shadcn style: `base-nova`**, which pulls **`@base-ui/react` instead of Radix**. Recorded because it
 is invisible from `components.json` alone and determines which primitive library Gate 11's component
 kit is built on. `rsc: true`, `baseColor: neutral`, `iconLibrary: lucide`, CSS at `src/app/globals.css`.

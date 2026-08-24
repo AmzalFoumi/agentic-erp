@@ -208,3 +208,22 @@ def test_garbage_is_refused_without_reaching_the_network():
 
     with pytest.raises(AuthenticationError):
         verify_access_token("not-a-jwt")
+
+
+def test_a_non_string_scope_claim_grants_nothing_rather_than_crashing(
+    verify, signing_key
+):
+    """A malformed credential must not become a 500.
+
+    The `scope` claim is read *after* the try block that turns JWT problems into
+    AuthenticationError, so a claim of the wrong shape - a list, a number - used
+    to reach `.split()` unguarded and surface as a server error. A token we
+    cannot make sense of is a refused token, not a broken server, and an actor
+    with no permissions is the fail-closed reading.
+    """
+    for bad_scope in (["product.read"], 42, {"read": True}):
+        actor = verify(_token(signing_key, scope=bad_scope))
+
+        assert actor.id == "01a02d8f-0355-74cd-b102-3b1ab2372d64"
+        assert not actor.can("product.read")
+        assert actor.scopes == frozenset()
