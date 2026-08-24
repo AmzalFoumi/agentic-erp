@@ -34,6 +34,13 @@ deploy/*.cert
 deploy/*.key
 deploy/*.pem
 
+# ---------- Personal helper scripts ----------
+# Convenience wrappers for one developer's own machine (e.g. launching Claude Code
+# with this machine's ThunderID certificate trusted). They hardcode local paths and
+# would not work on anyone else's setup, so they are deliberately untracked.
+# Root-anchored so a future package named `scripts/` deeper in the tree is unaffected.
+/scripts/
+
 # ---------- Node / Next.js (frontend/) ----------
 # Note: the .env.* rule above also covers frontend/.env.local. Any env template must be
 # named exactly .env.example to survive the negation — .env.local.example would be ignored.
