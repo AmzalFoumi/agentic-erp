@@ -73,11 +73,20 @@
 #
 #   1. ONCE, on a fresh machine (or after `down -v` destroys the volumes):
 #
-#        docker compose -f deploy/docker-compose.thunderid.yml --profile init up
+#        docker compose -f deploy/docker-compose.thunderid.yml --profile init up thunderid-setup
 #
 #      This seeds the database and generates the key material. It prints the admin console
 #      password — **capture it now**, it is not recoverable afterwards. Both containers exit
 #      on their own when done; press Ctrl-C once the setup log has finished.
+#
+#      ⚠️ Name `thunderid-setup` explicitly. Without it — as this file documented until
+#      2026-08-25 — `up` also starts every service that carries NO profile, and the main
+#      `thunderid` server below carries none. So the bare form boots the server against a
+#      database that has not been seeded yet, on the one machine where that matters: a fresh
+#      one. (See the note at `thunderid:` — an empty certs volume makes the server fail to
+#      start, which is exactly the state this command would create.) Naming one service
+#      makes Compose start it plus its declared dependencies and nothing else, so
+#      `thunderid-db-init` still runs first via `service_completed_successfully`.
 #
 #      ⚠️ Do NOT add `--abort-on-container-exit` here. It used to be documented, and it is
 #      wrong for this profile: the flag stops every container in the project the moment ANY
