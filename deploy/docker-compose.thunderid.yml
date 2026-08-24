@@ -8,12 +8,12 @@
 # production use, and three things are actively wrong for it — see the "Open decision"
 # note under Gate 26 in docs/AUTH-PLAN.md, which is where this is owned:
 #
-#   1. port 8090 is published on ALL interfaces, not loopback;
-#   2. the TLS certificate is self-signed (see note 1 below);
-#   3. the volumes hold the whole identity store with no backup and no tested restore.
+#   1. the TLS certificate is self-signed (see note 1 below);
+#   2. the volumes hold the whole identity store with no backup and no tested restore.
 #
-# (A fourth item — "setup.sh regenerates all key material on every restart" — was true of
-# the previous revision of this file and is **fixed below**; see note 2.)
+# (Two further items are now **fixed below** rather than open: "setup.sh regenerates all key
+# material on every restart" — see note 2 — and "port 8090 is published on ALL interfaces",
+# which was narrowed to loopback on 2026-08-23; see the ports block.)
 #
 # **The permanent deployment path has not been chosen yet.** The vendor documents three:
 # Docker, Kubernetes via Helm, and OpenChoreo. Their production recommendation is
@@ -42,11 +42,19 @@
 #
 #   1. ONCE, on a fresh machine (or after `down -v` destroys the volumes):
 #
-#        docker compose -f deploy/docker-compose.thunderid.yml --profile init up \
-#          --abort-on-container-exit
+#        docker compose -f deploy/docker-compose.thunderid.yml --profile init up
 #
 #      This seeds the database and generates the key material. It prints the admin console
-#      password — **capture it now**, it is not recoverable afterwards.
+#      password — **capture it now**, it is not recoverable afterwards. Both containers exit
+#      on their own when done; press Ctrl-C once the setup log has finished.
+#
+#      ⚠️ Do NOT add `--abort-on-container-exit` here. It used to be documented, and it is
+#      wrong for this profile: the flag stops every container in the project the moment ANY
+#      one of them exits, and `thunderid-db-init` is *designed* to exit — immediately, and
+#      first. On a genuinely empty machine that can tear the stack down before
+#      `thunderid-setup` has finished generating the key material, leaving a half-built
+#      identity store. It has not bitten anyone here only because these volumes were created
+#      before this file existed.
 #
 #   2. EVERY TIME after that, to start or restart the server:
 #
@@ -96,10 +104,28 @@ services:
   # Neither of these runs during a normal `docker compose up`. See note 2 above.
 
   # Seed the database files out of the image into the shared volume.
+  #
+  # ⚠️ The guard is not optional. `cp -r` copies the image's EMPTY seed databases over
+  # whatever is already in the volume, so running the init profile a second time — by
+  # habit, or because you forgot you had run it — silently destroys every user,
+  # application and role you have registered, with no error and no backup. The volume is
+  # the identity store; nothing here is backed up (see the note at the bottom of this file).
+  # So: refuse to touch a volume that already has contents, and say why.
   thunderid-db-init:
     profiles: ["init"]
     image: ghcr.io/thunder-id/thunderid:1.0.0
-    command: sh -c "cp -r /opt/thunderid/database/* /data/"
+    command: >
+      sh -c '
+        if [ -n "$$(ls -A /data 2>/dev/null)" ]; then
+          echo "REFUSING TO RESEED: /data is not empty - the identity store already exists.";
+          echo "Seeding would overwrite every registered user, application and role.";
+          echo "This is the expected outcome if setup has already been run: skip step 1 and";
+          echo "just start the server with \"docker compose -f deploy/docker-compose.thunderid.yml up -d\".";
+          echo "To deliberately start over, destroy the volumes first with \"docker compose -p thunderid-local down -v\".";
+          exit 1;
+        fi;
+        cp -r /opt/thunderid/database/* /data/
+      '
     volumes:
       - thunderid-db:/data
     restart: "no"
