@@ -370,6 +370,13 @@ than copying the image's empty seed databases over the identity store, which is 
 A refusal with `REFUSING TO RESEED` is the correct outcome on a machine that is already set up — it
 is not an error to work around, and specifically not one to resolve with `down -v`.
 
+**Verified against a live Docker daemon 2026-08-25.** Running step 1 on the already-set-up machine
+refused and exited 1 without copying anything. Two side effects worth knowing so they are not
+mistaken for damage: Compose *recreated* the `thunderid-db-init` and `thunderid-setup` **container
+objects** (containers, not volumes — the identity store was never opened), and `thunderid-setup`
+never executed at all because it depends on `db-init`, which failed first. The running `thunderid`
+server was untouched and stayed up throughout. Both are exactly what should happen.
+
 **Tag pin vs digest pin — decided 2026-08-25, keep the tag.** Review (CodeRabbit, PR #28) asked for
 the three `image:` lines to name the recorded digest
 (`sha256:12b7348b…`) instead of `1.0.0`. Declined deliberately, and the distinction is worth having
@@ -659,7 +666,11 @@ skill was rewritten to do exactly that, which is a strong hint the details move.
   names for one thing, and it is why the client-secret question keeps reopening. It is not a second
   credential.
 
-  **So the refresh path cannot run, by construction.** A session works until the access token
+  **So the refresh path cannot run, by construction.** ⚠️ **True only of the embedded-mode app
+  described above, which no longer exists — see the ⚡ Superseded block immediately below, and the
+  2026-08-25 re-read confirming `refresh_token` is enabled with an 86400 s window. Nothing in this
+  paragraph, including the "Gate 26 must resolve it" instruction, is current.** A session works
+  until the access token
   expires, at which point `thunderIDProxy` clears the session cookie and the user lands back on
   `/signin`. That is the expected behaviour of this configuration, not a bug to hunt. Acceptable
   locally; **Gate 26 must resolve it** — most likely by registering a proper OAuth application
@@ -693,11 +704,51 @@ skill was rewritten to do exactly that, which is a strong hint the details move.
   | **Token** | Attributes selectable into the access token and the ID token / userinfo (`email`, `groups`, `roles`, `userType`, `ouid`, `username`, …) — **none added yet**. The sample access-token payload is `aud, client_id, exp, grant_type, iat, iss, jti, nbf, scope, sub`. Access-token validity **3600 s**; separate validity tabs for ID token and refresh token. |
   | **Advanced** | Grant types `authorization_code` + **`refresh_token`** — the thing embedded mode could not have. Response type `code`. **Authorized redirect URIs: `http://localhost:3000`** (bare origin, no path — matches `getClientOrigin.js`, which returns proto + host only). Post-logout redirect URIs: `http://localhost:3000`. Client auth method `client_secret_basic`; **Public Client off** (confidential), **PKCE required on**, PAR off. Identity Assertions (**ID-JAG**) toggle present and **off** — this is the Gate 25 lever. Default audience blank, with the note *"Leave empty to use the application client ID"*. |
 
+  ##### ✅ Re-read from the running server, 2026-08-25
+
+  The table above was transcribed from the Console by eye at registration time. Read back from
+  ThunderID's admin API on 2026-08-25 — same application, no changes made — it holds up, and adds
+  three numbers that were not recorded:
+
+  | Field | Value | Note |
+  |---|---|---|
+  | `grantTypes` | `["authorization_code", "refresh_token"]` | Refresh really is enabled |
+  | `refreshToken.validityPeriod` | **86400** (24 h) | Not previously recorded |
+  | `accessToken.validityPeriod` | 3600 (1 h) | Matches |
+  | `idToken.validityPeriod` | 3600 | Not previously recorded |
+  | `includeActClaim` | **false** | This is the ID-JAG toggle. Off, as intended — Gate 25's lever |
+  | `pkceRequired` | true | Matches |
+  | `publicClient` | false | Confidential, matches |
+  | `tokenEndpointAuthMethod` | `client_secret_basic` | Matches |
+  | `dpopBoundAccessTokens` | false | Not previously recorded |
+  | `requirePushedAuthorizationRequests` | false | PAR off, matches |
+  | `redirectUris` / `postLogoutRedirectUris` | `["http://localhost:3000"]` | Bare origin, matches |
+  | `allowedUserTypes` | `["Person"]` | |
+  | `isRegistrationFlowEnabled` / `isRecoveryFlowEnabled` | false / false | Matches the no-`/signup` decision |
+
+  **What this settles: the 24-hour refresh window is a fact, not an assumption.** A session should
+  now survive the 1-hour access-token expiry and last up to 24 hours. Still not *observed* — nobody
+  has sat through an hour — but the registration permits it and, per the SDK reading further down,
+  `thunderIDProxy` renews from the refresh token in the session cookie once `clientId` and
+  `clientSecret` are present, which they now are in `frontend/.env.local`.
+
+  **What it does not settle: the audience.** `Default Audience` is **blank**, and that is the
+  *correct* state, not an oversight — it is only the fallback `aud` for tokens that do not target a
+  resource server. The setting that actually drives `aud` is the **default-resource-server flag,
+  which lives on the resource server, not on the application**, and the admin API exposes no
+  resource-server tool (17 tools: applications, flows, themes, org units, user types, SDK snippets).
+  So `Agentic ERP API` / `https://api.agentic-erp.local` being registered and default rests on the
+  manual Console change recorded here on 2026-08-23 plus the `aud` decoded from a real token that
+  day — not on anything read from the server since. That is good evidence, not verification. To
+  verify properly: read it in the Console, or decode `aud` from a freshly minted token.
+
   **Two consequences worth carrying forward:**
 
   1. ~~**Backend token validation (this gate) should expect `aud` = the client ID**
      (`vAf_zSFT1qj4733Xy3jgQw`), because Default Audience is blank.~~ **⚠️ Superseded — do not
-     follow this.** It was correct when written and stopped being correct the moment the
+     follow this.** Note the reasoning was wrong as well as the conclusion: a blank Default Audience
+     does not imply the client ID will be used, because a token targeting a resource server takes
+     its `aud` from there instead. It was correct when written and stopped being correct the moment the
      `Agentic ERP API` resource server was registered, which is exactly the "if a Resource Server is
      registered later" case the original sentence flagged. The real audience, read off a live token
      and confirmed against `THUNDERID_AUDIENCE` in `core/config.py`, is

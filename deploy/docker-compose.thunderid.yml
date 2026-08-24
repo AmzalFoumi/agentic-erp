@@ -150,9 +150,19 @@ services:
         if [ -n "$$(ls -A /data 2>/dev/null)" ]; then
           echo "REFUSING TO RESEED: /data is not empty - the identity store already exists.";
           echo "Seeding would overwrite every registered user, application and role.";
-          echo "This is the expected outcome if setup has already been run: skip step 1 and";
-          echo "just start the server with \"docker compose -f deploy/docker-compose.thunderid.yml up -d\".";
-          echo "To deliberately start over, destroy the volumes first with \"docker compose -p thunderid-local down -v\".";
+          echo "";
+          echo "Nothing is wrong. This is the expected outcome if setup has already been run.";
+          echo "You almost certainly want step 2 instead - just start the server:";
+          echo "  docker compose -f deploy/docker-compose.thunderid.yml up -d";
+          echo "";
+          echo "There is no safe way to re-run step 1. Starting over means DELETING the";
+          echo "identity store: every user account, every registered application and its";
+          echo "client secret, every role, and the signing keys - so every token ever issued";
+          echo "stops working, and anyone signed in is signed out for good. None of it is";
+          echo "backed up and none of it can be recovered. Only if you genuinely want that,";
+          echo "and have re-read the volume note at the bottom of the compose file, does";
+          echo "destroying the volumes come first. This message deliberately does not print";
+          echo "that command: look it up when you mean it, do not paste it from an error.";
           exit 1;
         fi;
         cp -r /opt/thunderid/database/* /data/
