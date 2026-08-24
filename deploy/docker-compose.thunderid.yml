@@ -37,6 +37,37 @@
 # To upgrade: bump the tag here, verify against ThunderID's release notes, and record the
 # change in docs/AUTH-PLAN.md. Do not revert to `latest`.
 #
+# ── Tag pin vs digest pin: a deliberate choice, 2026-08-25 ───────────────────────────
+#
+# Review asked for the three `image:` lines to use the recorded digest instead of the tag.
+# **Declined for now, on purpose.** The two are not the same kind of pin:
+#
+#   • A TAG is a label the vendor can move. `1.0.0` means "whatever image carries that
+#     label today". If they re-release 1.0.0 with a security patch, we pick it up on the
+#     next `docker compose pull` or on a fresh machine — without editing this file.
+#   • A DIGEST is a fingerprint of the image contents. It cannot be moved. It means "this
+#     exact image, or fail" — which also means patches never arrive until someone edits
+#     this line by hand.
+#
+# We keep the tag because we *want* vendor patches to a version we have already validated.
+# The cost, stated plainly so nobody is surprised: **a tag pin cannot tell you the image
+# changed.** A patched 1.0.0 and a tampered 1.0.0 look identical from here. That is an
+# accepted risk while this file is local-only and the port is loopback-bound; it is NOT
+# acceptable for anything internet-reachable — see the Gate 26 note in docs/AUTH-PLAN.md.
+#
+# **Fallback — pin to the digest if you ever suspect the image changed under you.** The
+# digest recorded above is the one Gate 23 validated against. To compare it with what the
+# tag resolves to right now:
+#
+#     docker buildx imagetools inspect ghcr.io/thunder-id/thunderid:1.0.0    # remote
+#     docker image inspect --format '{{index .RepoDigests 0}}' \
+#       ghcr.io/thunder-id/thunderid:1.0.0                                   # local copy
+#
+# If it differs and the vendor's release notes do not explain why, replace `:1.0.0` on all
+# three `image:` lines below with `@sha256:12b7348b6727b756b8155c5157804bc05ef5d0ffa5f42bc6307747bd18425a36`
+# — that restores the exact validated image — and record what prompted it in
+# docs/AUTH-PLAN.md. Keep the tag in a comment on each line so the version stays readable.
+#
 # ─────────────────────────────────────────────────────────────────────────────────────
 # HOW TO RUN — two commands, and the order matters.
 #

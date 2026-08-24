@@ -346,7 +346,8 @@ still recommend it. But it is absent from the current getting-started page, so i
 chosen fresh.
 
 **Install reference, as built at Gate 23 and restructured 2026-08-18:**
-`deploy/docker-compose.thunderid.yml` in this repo, pinned to image tag `1.0.0`. Data lives in Docker
+`deploy/docker-compose.thunderid.yml` in this repo, pinned to image **tag** `1.0.0` — deliberately a
+tag and not the digest; see "Tag pin vs digest pin" below. Data lives in Docker
 **named volumes**, not the working directory, so the `npx` trap does not apply here. Server at
 `https://localhost:8090`, console at `/console`, **self-signed certificate** — accept it in a browser
 once before any client will talk to it. The admin password is *not* `admin`/`admin` on this path: it
@@ -363,6 +364,44 @@ docker compose -f deploy/docker-compose.thunderid.yml --profile init up
 # EVERY time after that. Safe to repeat; does not touch key material.
 docker compose -f deploy/docker-compose.thunderid.yml up -d
 ```
+
+Step 1 is now **safe to run by mistake**: `thunderid-db-init` refuses on a non-empty volume rather
+than copying the image's empty seed databases over the identity store, which is what it used to do.
+A refusal with `REFUSING TO RESEED` is the correct outcome on a machine that is already set up — it
+is not an error to work around, and specifically not one to resolve with `down -v`.
+
+**Tag pin vs digest pin — decided 2026-08-25, keep the tag.** Review (CodeRabbit, PR #28) asked for
+the three `image:` lines to name the recorded digest
+(`sha256:12b7348b…`) instead of `1.0.0`. Declined deliberately, and the distinction is worth having
+written down because it is not a style preference:
+
+| | What it means | What it costs |
+|---|---|---|
+| **Tag** `:1.0.0` | "whatever image carries that label today" — the vendor can move it | We receive their patches automatically; we cannot detect that the image changed |
+| **Digest** `@sha256:…` | "this exact image, or fail" — cannot be moved by anyone | Provably the validated bytes; patches never arrive until a human edits the file |
+
+**We keep the tag because we want vendor patches to a version already validated**, and because
+nothing here is internet-reachable: the port is loopback-bound and the file is local-only. The
+accepted risk, stated plainly rather than hidden: a patched `1.0.0` and a tampered `1.0.0` are
+indistinguishable from inside this repo.
+
+**This flips at Gate 26.** Anything reachable from the internet should be digest-pinned, with
+upgrades performed as a deliberate, recorded edit — the whole argument for the tag ("patches arrive
+without us noticing") is an argument *against* it once the thing is exposed. Added to the Gate 26
+requirements below.
+
+**The digest is the documented fallback.** If the image ever appears to have changed under us,
+compare what the tag resolves to against the recorded value:
+
+```bash
+docker buildx imagetools inspect ghcr.io/thunder-id/thunderid:1.0.0    # what the registry serves now
+docker image inspect --format '{{index .RepoDigests 0}}' \
+  ghcr.io/thunder-id/thunderid:1.0.0                                   # what this machine pulled
+```
+
+If they differ and the release notes do not explain it, swap all three `image:` lines to
+`@sha256:12b7348b6727b756b8155c5157804bc05ef5d0ffa5f42bc6307747bd18425a36` — the exact image Gate 23
+validated — keep the tag in a comment for readability, and record what prompted the switch here.
 
 **Why this changed.** Gate 23 recorded "stopping and starting the stack re-runs setup, and every
 previously issued token stops verifying" as a property of ThunderID. It is not — it was a property of
@@ -1053,6 +1092,14 @@ deployment decision, which is why it belongs here rather than in Gate 24. This g
   `local`/`test`, in the same fail-loudly-at-the-boundary spirit as the module's own docstring;
 - keep both escape hatches fully working in `local`/`test`, because the test suite depends on
   `AUTH_ENABLED=false` and offline work depends on both.
+
+**Requirement: digest-pin the ThunderID image once it is exposed.** The local file deliberately pins
+the *tag* `1.0.0` so vendor patches arrive without an edit (reasoning and the comparison table are
+under the install reference above). That trade is only defensible while the thing is loopback-bound
+and local. Whatever deployment path Gate 26 chooses — hardened Compose or the Helm chart — must name
+the image **by digest**, and treat an upgrade as a deliberate, recorded change verified against the
+vendor's release notes. The argument for the tag is that changes arrive unnoticed; that is precisely
+the argument against it in a deployment.
 
 **Open decision: how ThunderID is actually deployed.** `deploy/docker-compose.thunderid.yml` is
 **temporary — a local development recipe, not the deployment path.** It was committed at Gate 23 to
