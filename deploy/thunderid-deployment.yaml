@@ -1,0 +1,122 @@
+# ThunderID deployment configuration — HOST COPY, bind-mounted over the image's own.
+#
+# ⚠️ LOCAL DEVELOPMENT ONLY. See docker-compose.thunderid.yml for the wider warnings.
+#
+# WHY THIS FILE EXISTS ON THE HOST
+# The image ships its own /opt/thunderid/deployment.yaml. That path is NOT on any of the
+# three named volumes, so an in-container edit survives `stop`/`start` but is silently
+# discarded whenever the container is recreated. Enabling DCR (below) has to persist, so
+# this is a host copy bind-mounted over the image's.
+#
+# ⚠️ **PINNED TO IMAGE 1.0.0.** This was extracted with `docker cp` from image tag 1.0.0.
+# It now shadows whatever the image ships. On ANY image bump you must re-extract the
+# vendor's new deployment.yaml, re-apply the `oauth:` block below, and diff the rest —
+# otherwise a new binary runs against a stale config. Recorded in docs/AUTH-PLAN.md.
+#
+# To re-extract:
+#   docker cp thunderid-local-thunderid-1:/opt/thunderid/deployment.yaml <tmp>
+#
+# NOTE: `server.hostname: 0.0.0.0` is correct here and must stay. It is the bind address
+# *inside* the container, where binding loopback-only would make the container
+# unreachable from the host. Restricting exposure is done at the Compose port-publishing
+# level (`127.0.0.1:8090:8090`), not here.
+
+server:
+  hostname: "0.0.0.0"
+  public_url: "https://localhost:8090"
+  port: 8090
+  security:
+    # Gates the Direct API endpoints. The secret is generated into config/secrets/direct_auth_secret
+    # by setup.sh and read from there at load time. Callers present it in the Direct-Auth-Secret header.
+    direct_auth_secret: "file://config/secrets/direct_auth_secret"
+
+# ── Added for this project; not in the vendor's shipped file. ────────────────────────
+#
+# Dynamic Client Registration. Lets an MCP client (Claude Code) register its own OAuth
+# client against ThunderID's /oauth2/dcr/register endpoint instead of the developer
+# hand-creating an application in the Console and pasting credentials across.
+#
+# This is what unlocks ThunderID's own admin MCP server at https://localhost:8090/mcp,
+# which answers with `401 ... scope="system"` until a client can obtain a badge.
+#
+# ⚠️ `insecure: true` means ANY client may register WITHOUT authenticating. The vendor's
+# docs are explicit: "This setting is for local development only ... Do not enable it in
+# production." It is only tolerable because Compose publishes the port on loopback.
+# **If port 8090 is ever republished on 0.0.0.0, this must come out first** — the two
+# together let anything on the network register clients against the identity provider.
+oauth:
+  dcr:
+    insecure: true
+
+tls:
+  min_version: "1.3"
+  cert_file: "config/certs/server.cert"
+  key_file: "config/certs/server.key"
+
+database:
+  config:
+    type: "sqlite"
+    sqlite:
+      path: "database/configdb.db"
+      options: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+      max_open_conns: 500
+      max_idle_conns: 100
+      conn_max_lifetime: 3600
+
+  runtime_transient:
+    type: "sqlite"
+    sqlite:
+      path: "database/runtime_transient.db"
+      options: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+      max_open_conns: 500
+      max_idle_conns: 100
+      conn_max_lifetime: 3600
+
+  entity:
+    type: "sqlite"
+    sqlite:
+      path: "database/entitydb.db"
+      options: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+      max_open_conns: 500
+      max_idle_conns: 100
+      conn_max_lifetime: 3600
+
+  runtime_persistent:
+    type: "sqlite"
+    sqlite:
+      path: "database/runtime_persistent.db"
+      options: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+      max_open_conns: 500
+      max_idle_conns: 100
+      conn_max_lifetime: 3600
+
+crypto:
+  encryption:
+    key: "file://config/certs/crypto.key"
+  password_hashing:
+    algorithm: "PBKDF2"
+  keys:
+    - id: "default-key"
+      cert_file: "config/certs/signing.cert"
+      key_file: "config/certs/signing.key"
+    - id: "ecdsa-key"
+      cert_file: "config/certs/ecdsa-signing.cert"
+      key_file: "config/certs/ecdsa-signing.key"
+
+jwt:
+    preferred_key_id: "default-key"
+
+passkey:
+  allowed_origins:
+    - "https://localhost:8090"
+
+# This is a sample email client configuration. Update it with real SMTP server details for production use.
+email:
+  smtp:
+    host: "127.0.0.1"
+    port: 2525
+    username: "dev"
+    password: "dev"
+    from_address: "noreply@thunderid.dev"
+    enable_start_tls: false
+    enable_authentication: true
