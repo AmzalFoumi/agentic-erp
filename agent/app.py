@@ -125,13 +125,22 @@ def get_actor(request: Request) -> Actor:
     route at `frontend/src/app/api/agent/[...path]/route.ts` from the browser's
     session.
 
-    **This function does not verify the token, and that is deliberate.** The
-    agent holds no signing keys and has no JWKS client; it treats the token as
-    an opaque credential and lets the MCP server - which does verify, against
-    ThunderID's published keys - be the judge. Adding a second verification path
-    here would be two chances to get it right and two chances to get it wrong.
-    An invalid token therefore does not fail here; it fails at the first tool
-    call, as a refusal from the ERP.
+    **This function does not verify the token, and that is a deferral rather
+    than a rule.** The agent holds no signing keys and has no JWKS client, so it
+    treats the token as an opaque credential and lets the MCP server - which
+    does verify, against ThunderID's published keys - be the judge of anything
+    the *ERP* is asked to do. An invalid token therefore does not fail here; it
+    fails at the first tool call, as a refusal from the ERP.
+
+    ⚠️ **That is not sufficient for this service's own decisions.** `_owns`
+    gates conversation ownership on the unverified `sub` (see `_subject_of`),
+    and the MCP server's answer cannot stand in for a check here: it validates
+    against *its own* audience, and forwarding a received token onward is the
+    token-passthrough pattern the MCP specification forbids. The earlier
+    reasoning on this line - "a second verification path is two chances to get
+    it wrong" - was withdrawn on 2026-08-26 for those two reasons. What holds
+    the gap shut today is `HOST` below; closing it is the first item of gate 26,
+    written out in `docs/DEPLOY-PLAN.md`.
 
     **One narrow exception, and it is not verification.** A token whose payload
     cannot be decoded at all is refused here with a 401. That is a question
@@ -180,13 +189,17 @@ def get_actor(request: Request) -> Actor:
 def _subject_of(token: str) -> str | None:
     """Read the `sub` claim out of a JWT **without verifying it**.
 
-    Safe here only because of what the value is allowed to do: label a log line.
-    See the warning on `UserActor` - and note the frontend's `subjectOf()` in
-    `lib/auth/current-user.ts` does exactly this, for exactly this reason.
+    ⚠️ **The value is not only a label.** It reaches `_owns`, so it decides who
+    may read and continue a conversation - an access-control decision made from
+    a claim nobody checked. See the warning on `UserActor` for what that does
+    and does not expose, and `docs/DEPLOY-PLAN.md` for the fix. The frontend's
+    `subjectOf()` in `lib/auth/current-user.ts` looks identical but is not in
+    the same position: it labels UI and gates nothing.
 
-    Hand-decoded rather than reaching for a JWT library, which would put one in
-    the agent's virtualenv and invite someone to conclude that verification
-    belongs here.
+    Hand-decoded rather than reaching for a JWT library, which was a deliberate
+    choice while nothing here made decisions. That condition no longer holds, so
+    this function is expected to be replaced by a verifying one rather than kept
+    - gate 26 retires the "no JWT library in `agent/`" rule along with it.
 
     Returns `None` when there is no readable `sub`, and the caller turns that
     into a 401. It must not invent a placeholder: a shared placeholder is a

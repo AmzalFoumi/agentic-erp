@@ -1228,7 +1228,7 @@ file in `services/` changed at all — the call sites already took an `Actor` an
 | `mcp_server/server.py` | `token_verifier=` + `auth=AuthSettings(...)`; `_actor()` returns a real `TokenActor`, raises when auth is on and no token is in context, falls back to `SystemActor("mcp")` only when `AUTH_ENABLED=false` |
 | **`agent/auth.py`** (new) | `get_scoped_token(...)` — the one place a grant type is named. Sends `resource`, never `audience`. **Reads the scope that came back**: a partial grant is returned with a warning logged (`thunderid_scopes` is a ceiling, not a minimum), and only a wholly empty grant raises |
 | `agent/actor.py` | `UserActor`, carrying the raw token. `can()` returns True because the agent is not an authorization decision point — the ERP is |
-| `agent/app.py` | `get_actor()` reads the bearer token; deliberately does **not** verify it (no keys, no JWKS client — the MCP server is the judge) |
+| `agent/app.py` | `get_actor()` reads the bearer token and does **not** verify it — the MCP server judges anything the *ERP* is asked to do. ⚠️ A **gate 25 deferral, not a permanent rule**: `_owns` gates conversation ownership on the unverified `sub`, which is this service's own access-control decision and cannot be delegated. Held shut by the loopback binding; closed by gate 26 — `DEPLOY-PLAN.md`, "Entry price: the agent-server's own door" |
 | `agent/mcp_client.py` | `Client(streamable_http_client(url, http_client=httpx2.AsyncClient(...)))`. The `_actor` stored unused since Gate 20 is finally used. **The one line a future ID-JAG swap touches** |
 | `frontend/.../api/agent/[...path]/route.ts` | Forwards `Authorization: Bearer <session token>` |
 
@@ -1242,9 +1242,14 @@ after the refusal, because a refusal that is only a message is not a refusal.
 on every agent route. Answered as **404, never 403** — conversation ids are sequential integers, so
 a 403 would confirm which ids are real.
 
-**Two decisions worth not re-litigating.** The agent does not verify tokens locally: two
-verification paths is how one of them ends up weaker, and the agent's virtualenv has no JWKS client
-on purpose. And `agent/auth.py` prefers pinning `deploy/thunderid-server.cert` over
+**One decision worth not re-litigating, and one that was.** ⚠️ The claim that used to stand here —
+*the agent does not verify tokens locally, because two verification paths is how one of them ends up
+weaker* — **was withdrawn on 2026-08-26.** It holds for ERP permissions, which really are the MCP
+server's to judge, and it does not hold for conversation ownership, which is the agent-server's own
+decision: `mcp_server/` validates against *its own* audience, and forwarding a received token onward
+is token passthrough, which the MCP specification forbids. Verification in `agent/` is therefore
+deferred to gate 26, not ruled out — see `DEPLOY-PLAN.md`. The decision that does stand:
+`agent/auth.py` prefers pinning `deploy/thunderid-server.cert` over
 `verify=False` — the file is gitignored (each machine regenerates it), so its absence falls back to
 `THUNDERID_VERIFY_TLS` and logs a WARNING rather than failing.
 

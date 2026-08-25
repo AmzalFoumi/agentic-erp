@@ -91,21 +91,39 @@ class UserActor:
     The one field that matters is `token` - the access token that arrived with
     the request. Everything the ERP will actually allow is decided from that
     token, by the MCP server, against ThunderID's public keys. This class does
-    **no verification**, and must not start: two verification paths is how one
-    of them ends up weaker, and the agent's virtualenv has no JWKS client on
-    purpose.
+    **no verification** as built - the agent's virtualenv has no JWKS client
+    yet. That is a deferral with a date on it, not a rule: see the warning
+    below and `docs/DEPLOY-PLAN.md`.
 
-    ### ⚠️ `id` is decoded without checking the signature
+    ### ⚠️ `id` is decoded without checking the signature, and it **does** gate
 
-    Safe only because of what it is allowed to do: label a log line and stamp a
-    conversation. It gates nothing. Every question with an answer that matters -
-    may this person adjust stock, whose name goes in `updated_by` - is settled
-    in `backend/services/`, against a token `backend/authn/` verified itself.
-    The same distinction, and the same warning, is written on the frontend's
-    `subjectOf()` in `frontend/src/lib/auth/current-user.ts`.
+    Everything the *ERP* will allow is still settled in `backend/services/`,
+    against a token `backend/authn/` verified itself - `id` has no bearing on
+    whether this person may adjust stock, or on whose name goes in `updated_by`.
 
-    If this id ever starts gating something, it is wrong, and the fix is to ask
-    the backend rather than to add a verification step here.
+    But gate 25 gave this field one real job: `app.py` uses it as the ownership
+    key for **conversations**, so it decides who may read and continue a chat.
+    That is an access-control decision made from an unverified claim, and it is
+    a known open finding, not an accident - anyone able to reach the
+    agent-server could hand-craft a token naming someone else and read their
+    chat history. They could not change any data that way.
+
+    **What holds it shut today is `app.py`'s `HOST = "127.0.0.1"`**, which is
+    why this is scheduled rather than urgent. The fix is written out in
+    `docs/DEPLOY-PLAN.md`, "Entry price: the agent-server's own door": verify
+    the token here - signature, expiry, issuer, a recognised audience - before
+    reading `sub`. Rewrite this section when that lands; do not delete it.
+
+    An earlier version of this docstring said the id "gates nothing" and that a
+    gating use "is wrong, and the fix is to ask the backend". The first half
+    stopped being true at gate 25, and the second was withdrawn on 2026-08-26:
+    asking `mcp_server/` would answer against *its* audience, not this service's,
+    and forwarding a received token is the token-passthrough shape the MCP
+    specification forbids outright. Both reasons are in `DEPLOY-PLAN.md`.
+
+    The frontend's `subjectOf()` in `frontend/src/lib/auth/current-user.ts` is
+    **not** in the same position: it labels UI and gates nothing, so its own
+    warning is still accurate as written.
 
     ### `can()` always returns True, and that is not a bypass
 
