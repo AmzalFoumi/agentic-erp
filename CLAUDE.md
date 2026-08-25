@@ -117,7 +117,7 @@ user it's acting for. Do not delete the loopback binding before gate 26.
 
 ### Error handling has two independent translation layers
 
-`core/exceptions.py`'s four errors map differently per adapter — e.g. `ValidationError` → HTTP 400
+`core/exceptions.py`'s five errors map differently per adapter — e.g. `ValidationError` → HTTP 400
 in `api/` (not 422 — that's reserved for FastAPI's own schema-validation failures) vs. a
 `CallToolResult(isError=True)` text message in `mcp_server/` (never a JSON-RPC error code — that
 channel is for protocol failures, not domain ones). Every API error response carries `{"error":

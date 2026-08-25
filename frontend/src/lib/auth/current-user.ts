@@ -72,7 +72,18 @@ async function accessToken(): Promise<string | undefined> {
     const sessionId = await getSessionId();
     if (!sessionId) return undefined;
     return await getAccessToken(sessionId);
-  } catch {
+  } catch (error) {
+    // Logged rather than swallowed. `undefined` here is indistinguishable from
+    // "nobody is signed in", and the caller renders the signed-out state for
+    // both — which is the right behaviour for a page, and the wrong behaviour
+    // for an operator: ThunderID being down would look exactly like a quiet
+    // Tuesday. This line is the only signal that the two are different.
+    //
+    // Note the genuinely absent session does NOT reach here: `getSessionId()`
+    // returns falsy and we return above. So anything caught here is a real
+    // fault — the provider unreachable, a malformed session cookie — never the
+    // ordinary anonymous case, and it does not log on every public request.
+    console.error("[auth] Could not obtain an access token:", error);
     return undefined;
   }
 }

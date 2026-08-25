@@ -82,8 +82,16 @@ def verify(monkeypatch, signing_key):
     required-claims list - runs exactly as it does in production.
 
     Patched as a plain attribute rather than by clearing the lru_cache, so
-    monkeypatch's own teardown restores the real function. Nothing here ever
+    monkeypatch's own teardown restores the real function. This fixture never
     populates the real cache.
+
+    One test in this module does, and harmlessly:
+    `test_garbage_is_refused_without_reaching_the_network` deliberately takes no
+    fixture, so `_jwk_client()` runs and its lru_cache holds a real PyJWKClient
+    for the rest of the session. No network call happens - constructing the
+    client does not fetch anything, and the token is rejected while decoding its
+    header, before any key lookup. That ordering is the property that test
+    exists to pin.
     """
     from authn import tokens
 
@@ -265,3 +273,46 @@ def test_an_unreachable_key_set_is_logged_as_a_provider_fault(
         "PyJWKClientError clause still sits above the PyJWTError clause"
     )
     assert "key set unreachable" in caplog.records[0].getMessage()
+
+
+def test_every_rejection_reason_looks_identical_to_the_caller(verify, signing_key):
+    """The refusal must not say *why* it refused.
+
+    `verify_access_token`'s docstring promises this: a caller who can tell
+    "expired" from "wrong audience" from "bad signature" can use the endpoint as
+    an oracle to map our configuration - probing audience strings until one
+    fails differently, for instance. The reason goes to the log, never to the
+    response.
+
+    Nothing pinned that promise until now, so a well-meaning change like
+    `raise AuthenticationError(f"Token invalid: {exc}")` would have leaked every
+    reason at once and kept the suite green. This asserts the *set* of messages
+    across four genuinely different failures collapses to exactly one string.
+    """
+    other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = int(time.time())
+
+    bad_tokens = {
+        "expired": _token(signing_key, exp=now - 1, iat=now - 3600, nbf=now - 3600),
+        "wrong audience": _token(signing_key, aud="https://someone-elses.example"),
+        "wrong issuer": _token(signing_key, iss="https://not-our-thunderid.example"),
+        "signed by a stranger": _token(other_key),
+    }
+
+    messages = {}
+    for reason, token in bad_tokens.items():
+        with pytest.raises(AuthenticationError) as caught:
+            verify(token)
+        messages[reason] = str(caught.value)
+
+    assert len(set(messages.values())) == 1, (
+        "the refusal message must not vary with the reason for refusal - a "
+        f"caller could tell these apart and probe our config: {messages}"
+    )
+
+    # And it must not name the reason even in the single shared string.
+    only_message = next(iter(set(messages.values()))).lower()
+    for leaked in ("expired", "audience", "issuer", "signature", "algorithm"):
+        assert leaked not in only_message, (
+            f"the shared refusal message names {leaked!r}: {only_message!r}"
+        )

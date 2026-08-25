@@ -23,44 +23,51 @@
 import { createRouteMatcher, thunderIDProxy } from "@thunderid/nextjs/server";
 
 /**
- * Everything the app actually serves, listed explicitly rather than protecting
- * by exclusion. An allow-list of *public* routes fails open when someone adds a
- * screen and forgets to update it; this fails closed.
+ * The routes anyone may see without signing in. **Everything else is
+ * protected**, including routes that do not exist yet.
  *
- * `/api/agent` is here because that route forwards to the agent service - which
- * is privileged, and must not be reachable by an anonymous browser tab just
- * because it happens to live under a different prefix. Gate 25 replaces that
- * blanket check with real delegation; until then, "signed in" is the floor.
+ * ⚠️ **This list is the inverse of what it was until 2026-08-25, and the
+ * direction is the entire point.** It used to name the *protected* routes
+ * (`/products*`, `/api/agent*`) while the comment here claimed the opposite
+ * policy. Naming the protected routes fails **open**: add `/orders` tomorrow,
+ * forget to list it, and it renders for anonymous visitors. Naming the public
+ * routes fails **closed**: forget, and the new screen demands a session. The
+ * old list happened to cover every route that existed, so nothing was actually
+ * exposed - but the comment told the next reader that new screens were covered
+ * automatically, which was false. Raised by review on PR #29.
  *
- * ⚠️ **`/` is deliberately NOT protected, and this is load-bearing.**
+ * ⚠️ **`/` is public, and that is load-bearing rather than a convenience.**
  * `protectRoute()` redirects to `config.signInUrl ?? "/"`, and in
  * ThunderID-hosted ("Gate") mode `NEXT_PUBLIC_THUNDERID_SIGN_IN_URL` is unset -
- * so the fallback is `/`. Listing `/` here would make it redirect to itself.
- * `app/page.tsx` is the signed-out landing instead, and carries the one
- * `<SignInButton>` that leaves for the hosted page.
+ * so the fallback is `/`. Protecting `/` would make it redirect to itself,
+ * forever. `app/page.tsx` is the signed-out landing, and carries the one
+ * `<SignInButton>` that leaves for the hosted page. It is also where ThunderID
+ * returns the browser after login. Do not remove it from this list.
  *
- * ⚠️ **The patterns end in `*`, NOT `(.*)`, and that is not a style choice.**
+ * ⚠️ **No `*` here, and that is deliberate.** `createRouteMatcher` compiles
+ * each pattern to `^pattern$` - fully anchored (verified in
+ * `dist/server/proxy/createRouteMatcher.js`). So `"/"` matches the root and
+ * *only* the root. Writing `"/*"` would make every path public and silently
+ * disable this file. If a genuinely public sub-page ever appears, add its exact
+ * path; do not reach for a wildcard.
+ *
+ * ⚠️ **If a pattern ever does need a wildcard, it is `*`, NOT `(.*)`.**
  * `createRouteMatcher` escapes every `.` before it expands `*`, so the `(.*)`
  * idiom used throughout the vendor's own JSDoc compiles to a regex that
  * demands a literal dot after the prefix. `/products` and `/products/123` do
- * not match it; only `/products.something` does. With `(.*)` this matcher
+ * not match it; only `/products.something` does. With `(.*)` the old matcher
  * returned false for every real request, and route protection was silently a
- * complete no-op. The plain `*` glob is the form their implementation
- * actually supports.
- *
- * Checked against @thunderid/nextjs 1.0.6 (the latest published release) and
- * against the package source on the SDK repo's `main` on 2026-08-24 — both
- * carry the same behaviour, so there is no fixed version to upgrade to. The
- * one cost of `*` is that it also matches `/productsfoo`; that over-protects
- * rather than under-protects, which is the safe direction to be wrong in.
+ * complete no-op. Checked against @thunderid/nextjs 1.0.6 (the latest
+ * published release) and against the package source on the SDK repo's `main`
+ * on 2026-08-24 - both carry the same behaviour, so there is no fixed version
+ * to upgrade to.
  */
-const isProtectedRoute = createRouteMatcher([
-  "/products*",
-  "/api/agent*",
+const isPublicRoute = createRouteMatcher([
+  "/",
 ]);
 
 export default thunderIDProxy(async (thunderid, request) => {
-  if (isProtectedRoute(request)) {
+  if (!isPublicRoute(request)) {
     // Redirects to `/` when there is no valid session - see the note above on
     // why that is the fallback.
     //
@@ -81,5 +88,12 @@ export const config = {
   // Next's standard exclusion set: static assets and the favicon never need a
   // session check, and running one on each would put a cookie read in front of
   // every image request.
+  //
+  // Note the interaction with the fail-closed list above: anything served from
+  // `public/` that is NOT covered by these exclusions now requires a session.
+  // Today that is only the five unused `create-next-app` SVGs, which nothing in
+  // `src/` references. If a genuinely public asset is ever added - an og:image,
+  // a logo on the signed-out landing page - it must be added to `isPublicRoute`
+  // or it will 302 to `/` and render as a broken image for signed-out visitors.
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

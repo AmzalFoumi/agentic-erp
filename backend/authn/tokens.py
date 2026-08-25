@@ -78,6 +78,15 @@ def _jwk_client() -> PyJWKClient:
         settings.thunderid_jwks_url,
         cache_jwk_set=True,
         lifespan=300,
+        # PyJWT's default is 30 seconds, which is far too long to hold a worker
+        # on a call we make while a request waits. It matters more than the
+        # cache suggests: `get_signing_key()` refetches with the cache
+        # *bypassed* whenever a token's `kid` is not in the cached set, and it
+        # does that before any signature is checked - so an unverified token can
+        # trigger the fetch. 5s is generous for a call that is normally to a
+        # host we operate. A slow JWKS becomes a fast 401 (logged WARNING by the
+        # PyJWKClientError clause below) instead of a stalled request.
+        timeout=5,
         ssl_context=ssl_context,
     )
 
