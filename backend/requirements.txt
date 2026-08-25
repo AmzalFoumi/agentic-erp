@@ -71,3 +71,18 @@ httpx==0.28.1
 # Enforces the services/ boundary rule mechanically instead of by memory.
 # Adoption reasoning and config history: docs/BACKEND-PLAN.md, Gate 4.
 import-linter==2.13
+
+# ---------- Authentication (the authn/ package, gate 24) ----------
+
+# Verifies the access tokens ThunderID issues: signature, issuer, audience,
+# expiry. [crypto] pulls in `cryptography`, which supplies the RSA primitives -
+# without it pyjwt can only do HMAC and RS256 verification fails at import.
+#
+# Both were already present as transitive dependencies before gate 24. They are
+# pinned explicitly now because we import them directly, and a package you
+# import is a package you own the version of.
+#
+# ⚠️ `jwt` is also listed in BOTH forbidden_modules contracts in pyproject.toml.
+# Adding the dependency without that line would let services/ import it and the
+# architecture boundary would weaken silently. Verified against PyPI 2026-08-23.
+pyjwt[crypto]==2.13.0

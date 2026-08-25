@@ -59,12 +59,13 @@ specifically a JavaScript one, and `backend/` is already a server. See "Identity
 
 ---
 
-## Identity seam: reserved, not implemented (2026-07-31)
+## Identity seam: reserved, not implemented (2026-07-31 — still accurate for gates 7–13)
 
-Nothing in gates 7–13 implements authentication. No provider is chosen, no login screen is built, no
-token is issued or validated. The full reasoning, the verified provider landscape, and the two
-conditions that make the deferral expire are recorded in **`docs/AUTH-PLAN.md`** — read it there, it
-is not duplicated here.
+Nothing in gates 7–13 implements authentication. No login screen is built, no token is issued or
+validated. (A provider *has* since been chosen — ThunderID, at Gate 23 — but no gate below 24
+changes any of the code described here.) The full reasoning, the verified provider landscape, and
+the two conditions that make the deferral expire are recorded in **`docs/AUTH-PLAN.md`** — read it
+there, it is not duplicated here.
 
 What lands in this codebase, at Gate 10:
 
@@ -141,6 +142,21 @@ lives at `frontend/src/lib/...`; the path references were updated rather than th
   Next.js — is `PLAN.md`'s standing verify-docs rule restated at the point of use. They sit **below**
   the four plan docs in precedence: they say nothing about this project's architecture, only about
   the framework.
+
+  ⚠️ **`frontend/AGENTS.md` is build output, like `src/lib/api/schema.d.ts`.** It is not written by
+  us and not written once at scaffold time: `next dev` regenerates the block between the
+  `nextjs-agent-rules` markers on **every start** (`node_modules/next/dist/server/lib/generate-agent-files.js`),
+  and announces it in the log as `✓ Generated AGENTS.md for AI agents`. So it reappears as an
+  uncommitted change whenever the installed Next version's generator text differs from the committed
+  copy — which is exactly what happened on 2026-08-24, when the file caught up from the 16.2.12 text
+  to 16.3.1's. Reverting it is pointless; commit it and move on. Turning it off means
+  `agentRules: false` in `next.config.ts`, which also throws away the read-the-real-docs instruction
+  — not worth it on this project.
+
+  Related, and the actual root cause of the churn: `package.json` pins Next as **`^16.3.1`**, a
+  floating range. That is the same drift this project deliberately stamped out for the ThunderID
+  image (pinned `1.0.0`, never `latest`). Left as-is for now, noted so the next surprise minor
+  version is recognised rather than investigated.
 
 **shadcn style: `base-nova`**, which pulls **`@base-ui/react` instead of Radix**. Recorded because it
 is invisible from `components.json` alone and determines which primitive library Gate 11's component
@@ -451,6 +467,22 @@ Figma-grade product for an API with six endpoints.
 
 **1. App shell.** Persistent navigation, the density toggle, the agent region. Navigation has exactly
 two destinations — Products and New product. No dashboard, no reports, no account settings.
+
+> **Amended 2026-08-23: a dashboard is wanted, later.** The "no dashboard" above was a *scoping*
+> decision for gates 9–13, not a permanent one — an API with six endpoints had nothing to put on
+> one. The developer has since asked for a dashboard screen at some point after the auth gates. It
+> is **not scheduled and not designed**; treat this as a recorded intent, not a licence to build one
+> opportunistically. Two things it will need first: something worth summarising (the API exposes no
+> aggregates today) and a decision on where it lives. `/` is now the signed-out landing (see Gate 24
+> in `docs/AUTH-PLAN.md`), so the dashboard would be its own route — `/inventory` was the name
+> floated — and would become the post-login destination. **Corrected 2026-08-24: that is a change to
+> application code, not to configuration.** An earlier revision of this line said the route "would
+> become `NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL`". It would not: that variable is sent verbatim as
+> the OAuth `redirect_uri` and must stay **unset** so it resolves to the bare origin the Console has
+> registered — setting it to a path breaks sign-in before the login page even renders. Where a
+> signed-in visitor goes next is decided in `src/app/page.tsx`. See the "⚠️ Corrected — AFTER_SIGN_IN_URL
+> is the redirect_uri, not a landing page" block under Gate 24 in `docs/AUTH-PLAN.md`. Until then the
+> product list stays the signed-in landing and the nav keeps its two destinations.
 
 **2. Product list — the primary screen**, the one someone has open all day. The table, one search
 input (name and SKU together, not an advanced filter panel), page-number pagination with a total, a

@@ -420,3 +420,67 @@ def test_list_envelope_is_in_the_openapi_document(client):
 
     product = schema["components"]["schemas"]["ProductRead"]
     assert "needs_reorder" in product["properties"]
+
+
+# ---------------------------------------------------------------------------
+# Authentication and authorization at the HTTP boundary (gate 24)
+# ---------------------------------------------------------------------------
+#
+# These are translation tests like the rest of this file: they check that the
+# adapter turns "no credential" into 401 and "insufficient permission" into
+# 403, not that the permission rules themselves are right. That is
+# tests/test_auth.py and tests/test_products.py respectively.
+
+
+def test_a_request_without_a_token_is_401(unauthenticated_client, monkeypatch):
+    """The exit condition for gate 24, stated as a test.
+
+    Note `auth_enabled` is forced on. It defaults to True, but a developer with
+    it switched off in backend/.env would otherwise see this test pass for the
+    wrong reason - and a test that goes green when authentication is disabled
+    is worse than no test.
+    """
+    from core.config import settings
+
+    monkeypatch.setattr(settings, "auth_enabled", True)
+
+    response = unauthenticated_client.get("/products")
+
+    assert response.status_code == 401
+    assert response.json()["error"] == "AuthenticationError"
+    # RFC 6750, and required of an OAuth resource server by the MCP spec.
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_an_authenticated_actor_without_the_scope_is_403(client, unique_sku):
+    """401 and 403 must not collapse into each other.
+
+    We know who this is - the token was fine - and they still may not create a
+    product. `services/` raises PermissionDeniedError and api/errors.py maps it
+    to 403, with no WWW-Authenticate header: retrying with fresh credentials
+    would not help.
+    """
+    from api.deps import get_actor
+    from api.main import app
+    from core.actor import TokenActor
+
+    app.dependency_overrides[get_actor] = lambda: TokenActor(
+        "01a02d8f-0355-74cd-b102-3b1ab2372d64", frozenset({"product.read"})
+    )
+
+    response = client.post(
+        "/products",
+        json={
+            "sku": unique_sku,
+            "name": "Scope test",
+            "category": "Test",
+            "unit": "pack",
+            "cost_price": "1.00",
+            "sell_price": "2.00",
+            "reorder_level": 1,
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"] == "PermissionDeniedError"
+    assert "WWW-Authenticate" not in response.headers

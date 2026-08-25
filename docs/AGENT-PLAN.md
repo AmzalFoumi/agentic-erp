@@ -1199,7 +1199,7 @@ fake toolset would not surface it. The note now points past Gate 19.
 `frontend/src/app/api/agent/[...path]/route.ts`. The ESLint `no-restricted-imports` amendment
 lands here: transport-only proxying to `AGENT_BASE_URL` permitted in exactly that one file.
 
-**Not in this gate:** the panel's five states.
+**Not in this gate:** the panel's six unbuilt states (see the Gate 21 note on the count).
 
 **Built 2026-08-12.** Design spec:
 `docs/superpowers/specs/2026-08-12-gate-20-agent-http-design.md`.
@@ -1269,6 +1269,12 @@ deploy soon; the ordering chosen was Gate 20 local → auth → deploy. Recorded
 real and structural, not incidental: a deployed frontend has no route to a developer's loopback
 port, so the proxy route is local-only *by construction*. Fixing that means a tunnel, a reverse
 proxy, or a public bind, and every one of those trips "The stop condition" below.
+
+> **Scheduled 2026-08-14 (Gate 22).** "auth" in that ordering is now four numbered gates —
+> **22 (docs), 23 (spike), 24 (human login), 25 (agent delegation)** — with **deploy as Gate 26**.
+> `app.py`'s `HOST = "127.0.0.1"` and its test are deleted **in Gate 26 and not before**. Gate 25 is
+> the one that touches this directory: `agent/auth.py` is added, and `mcp_client.py`'s connection
+> changes shape to carry a token. See `docs/AUTH-PLAN.md`.
 
 **Proven by tests, following Gate 19's precedent** — `agent/tests/test_app.py`, no network, no
 Gemini, no Postgres: the same `scripted_model` and `RecordingToolset` injected through a
@@ -1349,7 +1355,8 @@ the Claude Design project if the markup has moved.
 **Also at this gate:** revisit the resumability deferral, per its condition above — this is the
 first point at which real turn duration is observable.
 
-**Closed 2026-08-13 — code complete and reviewed, manual browser verification still pending.**
+**Closed 2026-08-13 — code complete and reviewed. Manual browser verification completed and the
+gate's commits merged to `main`; confirmed 2026-08-18.**
 The re-fetch condition above didn't trigger: the six-state table in `FRONTEND-PLAN.md` matched
 what was needed and nothing suggested the Claude Design project's markup had moved since Gate 12e,
 so no DesignSync re-fetch happened this gate.
@@ -1456,6 +1463,41 @@ aria-label on the panel's input, and any visible indication when a turn's `statu
 dropped.
 
 ---
+
+## Known defect — the panel reopens an old conversation (found 2026-08-23, deferred)
+
+Observed while verifying Gate 24's sign-in: the agent panel came back with a **previous
+conversation's history** rather than a new one, and happily acted on it (it created a product
+mid-verification). Reported by the developer and **deliberately deferred** — auth was the work in
+flight.
+
+> **⚠️ Reclassified 2026-08-24 — this is a write-safety defect, not a feature bug.** The original
+> note called it "a feature bug, not a security one". That undersells it, and the evidence is in the
+> sentence above: the agent **created a row in the database** that nobody asked for, off history
+> that was not the current conversation. Showing the wrong thread would be cosmetic; *executing* it
+> is not. Whether the actor is wrong or merely the conversation is, the outcome is an unattended
+> write.
+>
+> It stays deferred to Gate 25 for the reason in point 2 below — the fix would otherwise be written
+> twice — but it is now **an exit condition of Gate 25, not a follow-up**, and it must not reach
+> Gate 26 (deployment) open. Recorded as such in the Gate 25 row of `docs/PLAN.md`.
+>
+> If Gate 25 turns out not to close it — i.e. the mount-selection path is independent of who the
+> actor is — then the write side needs its own guard: a mutation tool must not run against a
+> conversation the user did not just choose. Decide that *after* diagnosis, not before.
+
+Not diagnosed yet. The suspects, in the order worth checking:
+
+1. **Conversation selection on mount.** `Gate 21`'s panel starts a conversation against
+   `/api/agent`; if it resumes the most recent row rather than creating one, this is exactly the
+   symptom.
+2. **Scope of "most recent".** Until Gate 24 every caller was the same `SystemActor`, so *all*
+   conversations belonged to one identity. Now that a real `sub` arrives, conversations may need to
+   be keyed on it — which would make this partly an auth-adjacent fix after all.
+
+⚠️ Point 2 means this should be re-examined **when Gate 25 threads the authenticated actor through
+the agent**, not before, or the fix gets written twice. Pick it up with the feature work that
+follows the auth gates.
 
 ## Re-evaluation, per step 4 of the stop-gate ritual
 

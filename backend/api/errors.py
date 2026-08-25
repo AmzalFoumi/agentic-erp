@@ -60,9 +60,13 @@ three.
 
 `PermissionDeniedError` is 403, never 401. 401 means "I do not know who you
 are"; 403 means "I know, and no". By the time a service raises this, an Actor
-exists - authentication already succeeded. Authentication failure will be
-raised by `get_actor` in deps.py when there is a real auth provider, and that
-one is a 401.
+exists - authentication already succeeded. Authentication failure is raised by
+`get_actor` in deps.py as `AuthenticationError`, and that one is a 401.
+
+A 401 additionally carries `WWW-Authenticate: Bearer`, which is not decoration:
+RFC 6750 requires it, and the MCP authorization spec requires it of a resource
+server. It is what tells a client *how* to authenticate rather than merely that
+it failed to.
 """
 
 from fastapi import FastAPI, Request, status
@@ -71,6 +75,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from core.exceptions import (
+    AuthenticationError,
     DomainError,
     DuplicateError,
     NotFoundError,
@@ -82,6 +87,7 @@ from core.exceptions import (
 # irrelevant here because FastAPI dispatches on the exact exception class it was
 # registered against, not by scanning this in sequence.
 _STATUS_BY_EXCEPTION: dict[type[DomainError], int] = {
+    AuthenticationError: status.HTTP_401_UNAUTHORIZED,
     NotFoundError: status.HTTP_404_NOT_FOUND,
     DuplicateError: status.HTTP_409_CONFLICT,
     ValidationError: status.HTTP_400_BAD_REQUEST,
@@ -124,8 +130,17 @@ def install_error_handlers(app: FastAPI) -> None:
         """
 
         async def handler(request: Request, exc: Exception) -> JSONResponse:
+            # RFC 6750: a 401 must say which scheme the client should use.
+            # Only on 401 - sending it on a 403 would invite a client to retry
+            # with fresh credentials for a request that will never be allowed.
+            headers = (
+                {"WWW-Authenticate": "Bearer"}
+                if status_code == status.HTTP_401_UNAUTHORIZED
+                else None
+            )
             return JSONResponse(
                 status_code=status_code,
+                headers=headers,
                 content={
                     # `type(exc).__name__` is the class name as a string:
                     # "NotFoundError". This is what the frontend switches on.
