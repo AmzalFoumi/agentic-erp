@@ -96,10 +96,16 @@ from whatever it has and passes it down. **As of gate 24 the HTTP side is real**
 membership over the token's `scope` claim. Not one service function changed when that landed — the
 call sites already existed, which was the entire point of doing this early.
 
-`SystemActor` (grants everything) now survives in exactly one place: behind `AUTH_ENABLED=false`,
-for tests and offline work. **Gate 25 closed the second one** — `mcp_server/server.py`'s `_actor()`
-returns a real `TokenActor` built from a token the SDK verified via `mcp_server/auth.py`, and raises
-rather than inventing an identity when auth is on. `agent/app.py`'s `get_actor()` is real too. The frontend's third seam,
+`SystemActor` (grants everything) now survives behind one condition — `AUTH_ENABLED=false`, for
+tests and offline work — but in **two** places, and both are live code paths, not leftovers:
+`mcp_server/server.py`'s `_actor()` and `agent/app.py`'s `get_actor()` (`agent/app.py:158`). This
+line used to say "exactly one place"; that was wrong, found by CodeRabbit on PR #31. It matters
+because it means **one boolean turns identity off across two services at once**, which is why gate
+26 lists `AUTH_ENABLED` among the things a deployment must not be able to flip
+(`docs/DEPLOY-PLAN.md`). What gate 25 did close is the *unconditional* fallback: with auth on,
+`mcp_server/server.py` now returns a real `TokenActor` built from a token the SDK verified via
+`mcp_server/auth.py`, and raises rather than inventing an identity. `agent/app.py`'s `get_actor()`
+is real too on that path. The frontend's third seam,
 `frontend/src/lib/auth/current-user.ts`, is **no longer hardcoded** — it reads the real session and
 returns `CurrentUser | null`. It has no callers yet; it exists as the seam, not as live code.
 

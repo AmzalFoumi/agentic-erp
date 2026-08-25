@@ -290,7 +290,12 @@ the real package registry.
 
 ---
 
-## Project file structure — as it actually exists (last refreshed 2026-08-18 at the end of gate 23, when `deploy/` was added; the `agent/` folder added 2026-08-06, its database and test files added at gates 18–19)
+## Project file structure — as it actually exists (last refreshed 2026-08-26 at the end of gate 25; `deploy/` added at gate 23, the `agent/` folder 2026-08-06, its database and test files at gates 18–19)
+
+⚠️ **This inventory is a snapshot, and a stale one is worse than none** — it is the thing a new
+session reads to decide what already exists. Three entries had drifted a full gate behind and were
+still describing gate-25 files as unwritten when CodeRabbit caught it on PR #31. Refresh it in the
+same commit as the gate that changes the tree, not afterwards.
 
 ```text
 agentic-erp/
@@ -337,7 +342,7 @@ agentic-erp/
 │   │                               # be used — see AGENT-PLAN.md, gate 16, for why
 │   ├── conversation.py             # gate 17: runs one turn. Gate 19 added the approval
 │   │                               # pause and resume; still the only file callers import
-│   ├── auth.py                     # gate 25 (NOT YET WRITTEN): the one place that swaps the
+│   ├── auth.py                     # gate 25 (written 2026-08-25): the one place that swaps the
 │   │                               # signed-in person's access pass for a narrower one for the
 │   │                               # agent. The only file that names an OAuth grant type
 │   ├── store.py  models.py  database.py  alembic/
@@ -363,7 +368,7 @@ agentic-erp/
         │                           # form fields, error display) — pulled out of the built screens
         │                shell/     # navigation, density toggle, theme toggle, the agent panel
         └── lib/         api/client.ts  api/schema.d.ts (auto-generated, never hand-edited)
-                         api-error.ts  format.ts  auth/current-user.ts (the login placeholder)
+                         api-error.ts  format.ts  auth/current-user.ts (reads the real session)
 ```
 
 Four files exist that weren't part of the original plan, each added for a reason explained in
@@ -381,8 +386,9 @@ auto-generated and treated like a third-party library — excluded from code-qua
 rather than designing them ahead of time, as explained in gate 13. And `lib/api/` is the *only*
 folder allowed to use the generated API-connection code or make network requests directly — this is
 the website's equivalent of the backend's strict separation rule, and it's enforced automatically by
-a linting rule. `lib/auth/current-user.ts` is the placeholder for login, hardcoded to always say
-"system" for now — see `docs/AUTH-PLAN.md`.
+a linting rule. `lib/auth/current-user.ts` is the login seam. It was hardcoded to "system" until
+gate 25; it now reads the real signed-in session and returns `CurrentUser | null`. It still has no
+callers — it is the seam, not live code — see `docs/AUTH-PLAN.md`.
 
 Note: the original sketch expected `services/inventory.py` to be the first fully-built file.
 `products.py` ended up being the first one instead, because tracking inventory movements requires

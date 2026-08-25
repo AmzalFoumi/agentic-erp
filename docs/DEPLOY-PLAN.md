@@ -145,7 +145,13 @@ the deployment work or not at all.
    that cannot be *parsed*, which is a strictly weaker claim, and passing it is not evidence.
 2. A test that an **expired** token is refused.
 3. A test that a token carrying an **unrecognised `aud`** is refused.
-4. `grep -n "without verifying" agent/app.py` returns nothing.
+4. **Read the call path from `get_actor()` to the verifier and confirm the signature check is on
+   it.** This condition used to read *"`grep -n "without verifying" agent/app.py` returns
+   nothing"*, which was replaced on 2026-08-26 after CodeRabbit pointed out on PR #31 that it is
+   satisfiable by editing a comment. A phrase-based check cannot tell a fixed function from a
+   reworded one, and a done-condition that passes while the hole is open is worse than no
+   condition — it is a green light with nothing behind it. Conditions 1–3 are the real evidence;
+   this one is the eyeball pass that catches a verifier that is present but never called.
 5. Only then may `HOST = "127.0.0.1"` in `agent/app.py` be reconsidered — and gap (1) above (no
    rate limiting) is still outstanding independently.
 
