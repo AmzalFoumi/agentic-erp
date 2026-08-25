@@ -95,25 +95,35 @@ from whatever it has and passes it down. **As of gate 24 the HTTP side is real**
 membership over the token's `scope` claim. Not one service function changed when that landed — the
 call sites already existed, which was the entire point of doing this early.
 
-`SystemActor` (grants everything) survives in two places, both deliberate: behind
-`AUTH_ENABLED=false` for tests and offline work, and — ⚠️ **still unfixed** — in
-`mcp_server/server.py`'s `_actor()`, which is gate 25. The frontend's third seam,
+`SystemActor` (grants everything) now survives in exactly one place: behind `AUTH_ENABLED=false`,
+for tests and offline work. **Gate 25 closed the second one** — `mcp_server/server.py`'s `_actor()`
+returns a real `TokenActor` built from a token the SDK verified via `mcp_server/auth.py`, and raises
+rather than inventing an identity when auth is on. `agent/app.py`'s `get_actor()` is real too. The frontend's third seam,
 `frontend/src/lib/auth/current-user.ts`, is **no longer hardcoded** — it reads the real session and
 returns `CurrentUser | null`. It has no callers yet; it exists as the seam, not as live code.
 
 **The deferral had two expiry conditions**, also in `PLAN.md`: either the MCP server becomes
 HTTP-reachable by anything that is not the developer's own machine, or a second human user exists.
-**Condition 1 fired on 2026-08-13** — the goal of hosting all four services *is* that condition — so
+**Condition 1 fired on 2026-08-13** — the goal of hosting all five services *is* that condition — so
 auth is now scheduled as gates 22–26 and is a hard prerequisite for deployment. **`docs/AUTH-PLAN.md`
 is the whole workstream** — don't re-research the provider question, and read it before touching any
 gate from 23 on.
 
-**Known trap, fixed at gate 25 and not before:** `mcp_server/server.py`'s `_actor()` hardcodes
-`SystemActor` — the API is authenticated as of gate 24, the MCP server is not. That's fine only because no unauthenticated caller exists yet — `agent/app.py` binds
-to `127.0.0.1` with a test that fails if that changes, and that test is what stands between this code
-and anonymous write access. The moment an agent runs server-side on behalf of a logged-in user, the
-authenticated actor must be threaded through instead, otherwise the agent is more powerful than the
-user it's acting for. Do not delete the loopback binding before gate 26.
+**The trap this file carried from gate 6 is closed (2026-08-25).** `mcp_server/server.py`'s
+`_actor()` no longer hardcodes `SystemActor`; `tests/test_mcp_auth.py` fails if it comes back. Two
+things about the shape of the fix are worth knowing before touching it:
+
+- **Two audiences, not one.** `thunderid_audience` is the HTTP API's; `thunderid_mcp_audience` is
+  the MCP server's, a separate ThunderID resource server. The MCP authorization spec requires an MCP
+  server to check the token was minted for *itself*, which is unimplementable if both doors share a
+  string. `verify_access_token(token, audience=...)` takes it as a parameter.
+- **A `200 OK` from ThunderID proves nothing.** Asking token exchange for a permission that does not
+  exist returns a valid, correctly-audienced token carrying **no `scope` claim at all**. Every check
+  must read the scope that came back; empty means *zero* permissions, never "unspecified, so allow".
+
+**The loopback binding still stays until gate 26.** It is no longer the only thing between this code
+and anonymous writes, but nothing rate-limits an unauthenticated caller yet and ThunderID's
+certificate is still self-signed. Do not delete `agent/app.py`'s `HOST = "127.0.0.1"` or its test.
 
 ### Error handling has two independent translation layers
 

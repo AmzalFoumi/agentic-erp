@@ -1215,6 +1215,39 @@ never learns which door the token came through.
    demands at least one redirect URI.
 8. **The ThunderID docs live at `https://thunderid.dev/docs/v1.0.x/`.** `thunderid.io` returns empty.
 
+#### Code side, completed 2026-08-25 — what was built
+
+Both halves of Gate 25 are now done. Nothing in the ThunderID Console changed for this half, and no
+file in `services/` changed at all — the call sites already took an `Actor` and already called
+`can()`, which was the entire point of doing that in gate 3.
+
+| File | What it does now |
+|---|---|
+| `core/config.py` | `thunderid_mcp_audience`, a **second** audience. `authn/tokens.py`'s `verify_access_token(token, *, audience=None)` takes it as a parameter — one check, two expected strings, rather than two copies to drift |
+| **`mcp_server/auth.py`** (new) | `ThunderIDTokenVerifier` — the SDK's `TokenVerifier` protocol, translating to `AccessToken`. In `mcp_server/` and not `authn/` **because the SDK is a dialect**, exactly like `mcp_server/errors.py`. Enforced by a new import-linter contract, "Authn stays adapter-free" |
+| `mcp_server/server.py` | `token_verifier=` + `auth=AuthSettings(...)`; `_actor()` returns a real `TokenActor`, raises when auth is on and no token is in context, falls back to `SystemActor("mcp")` only when `AUTH_ENABLED=false` |
+| **`agent/auth.py`** (new) | `get_scoped_token(...)` — the one place a grant type is named. Sends `resource`, never `audience`. **Compares the scope that came back against what was asked for** and raises if short |
+| `agent/actor.py` | `UserActor`, carrying the raw token. `can()` returns True because the agent is not an authorization decision point — the ERP is |
+| `agent/app.py` | `get_actor()` reads the bearer token; deliberately does **not** verify it (no keys, no JWKS client — the MCP server is the judge) |
+| `agent/mcp_client.py` | `Client(streamable_http_client(url, http_client=httpx2.AsyncClient(...)))`. The `_actor` stored unused since Gate 20 is finally used. **The one line a future ID-JAG swap touches** |
+| `frontend/.../api/agent/[...path]/route.ts` | Forwards `Authorization: Bearer <session token>` |
+
+**Exit condition met**, by the two tests in `backend/tests/test_mcp_auth.py`:
+`test_a_row_written_through_the_agent_carries_the_users_own_identity` and
+`test_a_read_only_agent_is_refused_and_the_stock_does_not_move` — the second reads the database
+after the refusal, because a refusal that is only a message is not a refusal.
+
+**The inherited defect is closed.** `ConversationRow.started_by` was a placeholder that always said
+"system"; it now records the OIDC `sub`, and `store.conversation_exists(id, *, actor_id)` checks it
+on every agent route. Answered as **404, never 403** — conversation ids are sequential integers, so
+a 403 would confirm which ids are real.
+
+**Two decisions worth not re-litigating.** The agent does not verify tokens locally: two
+verification paths is how one of them ends up weaker, and the agent's virtualenv has no JWKS client
+on purpose. And `agent/auth.py` prefers pinning `deploy/thunderid-server.cert` over
+`verify=False` — the file is gitignored (each machine regenerates it), so its absence falls back to
+`THUNDERID_VERIFY_TLS` and logs a WARNING rather than failing.
+
 ### Gate 26 — deploy
 
 Unblocked only now. Five services. `agent/app.py`'s `HOST = "127.0.0.1"` and its test are deleted
