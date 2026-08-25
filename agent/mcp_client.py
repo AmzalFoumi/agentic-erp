@@ -226,12 +226,17 @@ class ErpToolset(AbstractToolset[Any]):
             # SEP-990 flow, which drops into this same client. Nothing above this
             # file would change. See docs/AUTH-PLAN.md, "ID-JAG is a parameter,
             # not a second architecture".
-            transport = streamable_http_client(
-                self._base_url,
-                http_client=httpx2.AsyncClient(
-                    headers={"Authorization": f"Bearer {token}"}
-                ),
+            #
+            # The client is entered into `self._stack` rather than handed over
+            # bare: `streamable_http_client` closes only a client it created
+            # itself, so a caller-supplied one is the caller's to clean up. Left
+            # unregistered, its connection pool outlived every turn. Found by
+            # CodeRabbit on PR #30 and confirmed against the mcp 2.0.0 client
+            # transport docs.
+            http_client = await self._stack.enter_async_context(
+                httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"})
             )
+            transport = streamable_http_client(self._base_url, http_client=http_client)
 
         self._client = await self._stack.enter_async_context(Client(transport))
         return self

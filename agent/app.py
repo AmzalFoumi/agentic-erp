@@ -153,10 +153,24 @@ def get_actor(request: Request) -> Actor:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return UserActor(token, actor_id=_subject_of(token))
+    subject = _subject_of(token)
+    if subject is None:
+        # A token whose `sub` cannot be read is refused rather than labelled.
+        # This used to fall back to the literal string "unknown", which was
+        # harmless while the id only labelled a log line and became a defect at
+        # gate 25 when `_owns` started gating on it: every undecodable token
+        # shared one owner value, so those callers could read each other's
+        # conversations. Raised by CodeRabbit on PR #30.
+        raise HTTPException(
+            status_code=401,
+            detail="This bearer token could not be read.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return UserActor(token, actor_id=subject)
 
 
-def _subject_of(token: str) -> str:
+def _subject_of(token: str) -> str | None:
     """Read the `sub` claim out of a JWT **without verifying it**.
 
     Safe here only because of what the value is allowed to do: label a log line.
@@ -165,8 +179,11 @@ def _subject_of(token: str) -> str:
 
     Hand-decoded rather than reaching for a JWT library, which would put one in
     the agent's virtualenv and invite someone to conclude that verification
-    belongs here. Anything unreadable becomes "unknown": this is a label, so a
-    malformed token must not turn into a crash before the ERP has had its say.
+    belongs here.
+
+    Returns `None` when there is no readable `sub`, and the caller turns that
+    into a 401. It must not invent a placeholder: a shared placeholder is a
+    shared identity, and `_owns` gates on this value.
     """
     try:
         payload = token.split(".")[1]
@@ -175,9 +192,9 @@ def _subject_of(token: str) -> str:
         padded = payload + "=" * (-len(payload) % 4)
         claims = json.loads(base64.urlsafe_b64decode(padded))
         subject = claims.get("sub")
-        return subject if isinstance(subject, str) else "unknown"
+        return subject if isinstance(subject, str) and subject else None
     except Exception:
-        return "unknown"
+        return None
 
 
 def _owns(conversation_id: int, actor: Actor) -> bool:
@@ -308,14 +325,14 @@ def get_conversation(
             "pending_since": since.isoformat(),
         }
 
-    history = store.load_history(conversation_id)
-
     # An unknown id and an empty conversation are indistinguishable here, since
-    # `load_history` returns [] for both. Checked explicitly so a typo'd id is a
-    # 404 rather than a conversation that silently appears to exist and then
-    # fails to accept a turn on the foreign key.
-    if not history and not _owns(conversation_id, actor):
-        raise HTTPException(status_code=404, detail=f"No conversation {conversation_id}")
+    # `load_history` returns [] for both. That distinction is already made by
+    # `_require_own` above, which 404s a conversation that does not exist as
+    # well as one belonging to someone else - so an empty history at this point
+    # is a real conversation nobody has spoken in yet, and returning it is
+    # correct. The second `_owns` check that used to stand here was unreachable
+    # and repeated the query; removed on CodeRabbit's finding, PR #30.
+    history = store.load_history(conversation_id)
 
     return {
         "messages": VercelAIAdapter.dump_messages(

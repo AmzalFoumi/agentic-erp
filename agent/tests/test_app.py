@@ -15,6 +15,7 @@ looks-right assertion and be the worst bug in the project.
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
@@ -442,22 +443,27 @@ def test_a_bearer_token_becomes_an_actor_carrying_it(monkeypatch):
     assert token not in repr(actor)
 
 
-def test_an_unreadable_token_is_labelled_rather_than_fatal(monkeypatch):
-    """`sub` is a label, so a malformed token must not become a 500.
+def test_an_unreadable_token_is_refused_rather_than_labelled(monkeypatch):
+    """A token with no readable `sub` is a 401, never a placeholder identity.
 
-    The ERP still gets the last word: the token travels unchanged and is
-    refused there. Turning an unreadable label into a crash would mean the
-    agent deciding something it has no information to decide.
+    This assertion is the inverse of the one it replaces. While `id` only
+    labelled a log line, the old fallback to the literal string "unknown" was
+    harmless. Gate 25 made `_owns` gate on that value, at which point every
+    undecodable token shared a single owner and those callers could read one
+    another's conversations. Raised by CodeRabbit on PR #30.
+
+    401 rather than 500: we do know what went wrong, and it is the credential.
     """
     monkeypatch.setattr(app_module.settings, "auth_enabled", True)
 
     class _Request:
         headers = {"authorization": "Bearer not-a-jwt"}
 
-    actor = app_module.get_actor(_Request())  # type: ignore[arg-type]
+    with pytest.raises(HTTPException) as caught:
+        app_module.get_actor(_Request())  # type: ignore[arg-type]
 
-    assert actor.id == "unknown"
-    assert actor.token == "not-a-jwt"
+    assert caught.value.status_code == 401
+    assert caught.value.headers["WWW-Authenticate"] == "Bearer"
 
 
 def test_a_new_conversation_records_who_started_it(fake_store, monkeypatch):

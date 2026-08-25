@@ -142,9 +142,11 @@ async def get_scoped_token(
             paid for here.
 
     Raises:
-        DelegationError: on a transport failure, an OAuth error, or - the case
-            that matters - a `200 OK` whose token does not carry what was asked
-            for.
+        DelegationError: on a transport failure, an OAuth error, an
+            unreadable body, or - the case that matters - a `200 OK` whose
+            token carries **no scope at all**. A token carrying *some* of what
+            was asked for is returned, not refused: `scopes` is a ceiling, and
+            `services/` refuses individual permissions.
     """
     if not settings.thunderid_client_id or not settings.thunderid_client_secret:
         raise DelegationError(
@@ -198,7 +200,17 @@ async def get_scoped_token(
         )
         raise DelegationError("The login server refused to issue a token.")
 
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        # A 200 carrying something that is not JSON - a proxy's error page, say.
+        # Caught so that every failure leaving this function is a
+        # `DelegationError`, which is what its `Raises:` block promises and what
+        # `app.py` translates. A decode error escaping raw would surface as a
+        # 500 with a stack trace.
+        _log.warning("Token exchange returned a body that is not JSON.")
+        raise DelegationError("The login server returned no usable token.") from exc
+
     token = payload.get("access_token")
     if not isinstance(token, str) or not token:
         raise DelegationError("The login server returned no usable token.")
@@ -210,8 +222,7 @@ async def get_scoped_token(
     raw_granted = payload.get("scope", "")
     granted = frozenset(raw_granted.split()) if isinstance(raw_granted, str) else frozenset()
 
-    missing = wanted - granted
-    if missing:
+    if wanted - granted:
         _log.warning(
             "Token exchange returned less than was asked for. Wanted %s, got "
             "%s. This is a 200 OK - ThunderID narrows silently rather than "
@@ -220,8 +231,22 @@ async def get_scoped_token(
             sorted(wanted),
             sorted(granted) or "nothing at all",
         )
+
+    # ⚠️ A partial grant is the normal case, not a failure. `thunderid_scopes`
+    # is a **ceiling** - see the note on it in config.py - so a person holding
+    # only `product.read` legitimately gets one scope back out of four. This
+    # used to refuse on any shortfall, which turned the ceiling into a minimum
+    # and locked read-only users out of even asking a question. Found by
+    # CodeRabbit on PR #30. Per-permission refusal belongs to `services/`, which
+    # has the actual information; this function's job is only to notice a token
+    # that can do nothing at all.
+    if not granted:
+        # No scope whatsoever is the shape ThunderID returns for a permission it
+        # did not recognise. Such a token authenticates and is then refused by
+        # every `can()`, so it is refused here instead, where the cause is still
+        # legible in the log line above.
         raise DelegationError(
-            "You do not have all of the permissions this action needs."
+            "You do not have any of the permissions this agent needs."
         )
 
     return ScopedToken(access_token=token, scopes=granted)

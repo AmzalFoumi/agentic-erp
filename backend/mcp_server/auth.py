@@ -33,6 +33,7 @@ kind of property that is rewritten by someone being helpful.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from mcp.server.auth.provider import AccessToken
@@ -61,14 +62,23 @@ class ThunderIDTokenVerifier:
         `WWW-Authenticate` header the spec requires. Raising here would surface
         as a 500 and tell an anonymous caller that something inside broke.
 
-        `async` because the protocol is, not because anything here awaits.
-        `authn/tokens.py` verifies against a cached key set and only touches the
-        network on a cache miss - see its note on `timeout=5`, which exists so
-        that a slow key fetch cannot hold this coroutine open.
+        ### Why the verification runs in a thread
+
+        `verify_access_token` is ordinary blocking code. Almost always it hits
+        `authn/tokens.py`'s cached key set and returns instantly - but on a key
+        id it has not seen, PyJWT fetches the key set over the network using
+        `urllib`, which blocks for up to its `timeout=5`. Blocking here does not
+        delay only this request: it stops the event loop, so *every* concurrent
+        Streamable HTTP request stalls with it. The timeout caps that stall, it
+        does not prevent it - an earlier version of this docstring claimed
+        otherwise, which CodeRabbit corrected on PR #30.
+
+        `asyncio.to_thread` moves that work to a worker thread, which is what
+        makes the `async` on this method honest.
         """
         try:
-            actor = verify_access_token(
-                token, audience=settings.thunderid_mcp_audience
+            actor = await asyncio.to_thread(
+                verify_access_token, token, audience=settings.thunderid_mcp_audience
             )
         except AuthenticationError:
             # Deliberately not logged here. `authn/tokens.py` has already logged
