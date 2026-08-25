@@ -216,45 +216,45 @@ class ErpToolset(AbstractToolset[Any]):
         # connection to a different host and shares nothing with this one.
         token = await self._scoped_token()
 
-        if token is None:
-            # AUTH_ENABLED=false. Anonymous, exactly as before this gate, and
-            # matched by `_actor()` on the other end falling back to SystemActor.
-            transport = streamable_http_client(self._base_url)
-        else:
-            # **The one line where a future ID-JAG swap happens.** The SDK ships
-            # `IdentityAssertionOAuthProvider`, an `httpx2.Auth` implementing the
-            # SEP-990 flow, which drops into this same client. Nothing above this
-            # file would change. See docs/AUTH-PLAN.md, "ID-JAG is a parameter,
-            # not a second architecture".
-            #
-            # The client is entered into `self._stack` rather than handed over
-            # bare: `streamable_http_client` closes only a client it created
-            # itself, so a caller-supplied one is the caller's to clean up. Left
-            # unregistered, its connection pool outlived every turn. Found by
-            # CodeRabbit on PR #30 and confirmed against the mcp 2.0.0 client
-            # transport docs.
-            # ⚠️ The timeouts and `follow_redirects` are not decoration. Passing
-            # our own client means the SDK does **not** build one, so its
-            # `create_mcp_http_client()` defaults never apply and httpx's own
-            # 5-seconds-for-everything takes over. An MCP call is a long phone
-            # call, not a knock at the door: the agent connects and then waits
-            # while the model thinks and tools run, so a 5-second read timeout
-            # severs any turn lasting longer than that. The values below are the
-            # SDK's own recommended ones, copied from
-            # `mcp/shared/_httpx_utils.py::create_mcp_http_client` (mcp 2.0.0) -
-            # spelled out rather than imported, because that module is private
-            # and could be renamed without notice. Found by CodeRabbit on PR #30,
-            # a regression introduced by the exit-stack fix directly above.
-            http_client = await self._stack.enter_async_context(
-                httpx2.AsyncClient(
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=httpx2.Timeout(30.0, read=300.0),
-                    follow_redirects=True,
-                )
-            )
-            transport = streamable_http_client(self._base_url, http_client=http_client)
-
         try:
+            if token is None:
+                # AUTH_ENABLED=false. Anonymous, exactly as before this gate, and
+                # matched by `_actor()` on the other end falling back to SystemActor.
+                transport = streamable_http_client(self._base_url)
+            else:
+                # **The one line where a future ID-JAG swap happens.** The SDK ships
+                # `IdentityAssertionOAuthProvider`, an `httpx2.Auth` implementing the
+                # SEP-990 flow, which drops into this same client. Nothing above this
+                # file would change. See docs/AUTH-PLAN.md, "ID-JAG is a parameter,
+                # not a second architecture".
+                #
+                # The client is entered into `self._stack` rather than handed over
+                # bare: `streamable_http_client` closes only a client it created
+                # itself, so a caller-supplied one is the caller's to clean up. Left
+                # unregistered, its connection pool outlived every turn. Found by
+                # CodeRabbit on PR #30 and confirmed against the mcp 2.0.0 client
+                # transport docs.
+                # ⚠️ The timeouts and `follow_redirects` are not decoration. Passing
+                # our own client means the SDK does **not** build one, so its
+                # `create_mcp_http_client()` defaults never apply and httpx's own
+                # 5-seconds-for-everything takes over. An MCP call is a long phone
+                # call, not a knock at the door: the agent connects and then waits
+                # while the model thinks and tools run, so a 5-second read timeout
+                # severs any turn lasting longer than that. The values below are the
+                # SDK's own recommended ones, copied from
+                # `mcp/shared/_httpx_utils.py::create_mcp_http_client` (mcp 2.0.0) -
+                # spelled out rather than imported, because that module is private
+                # and could be renamed without notice. Found by CodeRabbit on PR #30,
+                # a regression introduced by the exit-stack fix directly above.
+                http_client = await self._stack.enter_async_context(
+                    httpx2.AsyncClient(
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=httpx2.Timeout(30.0, read=300.0),
+                        follow_redirects=True,
+                    )
+                )
+                transport = streamable_http_client(self._base_url, http_client=http_client)
+
             self._client = await self._stack.enter_async_context(Client(transport))
         except BaseException:
             # ⚠️ `__aexit__` is never called when `__aenter__` raises, so
@@ -264,6 +264,17 @@ class ErpToolset(AbstractToolset[Any]):
             # simply not running is enough to take this path. Found by
             # CodeRabbit on PR #30, on the same line as the leak fixed one
             # commit earlier: this is the *other* half of that path.
+            #
+            # ⚠️ The `try` starts *above* the client construction, not between
+            # it and the `Client(...)` line, and that placement is the fix
+            # rather than style. Everything after `enter_async_context` must be
+            # inside it: when the guard began one line lower,
+            # `streamable_http_client` raising left the authenticated client
+            # open with nothing to close it.
+            # `test_the_authenticated_client_keeps_the_mcp_read_timeout` made
+            # exactly that call fail and had to close the client by hand - the
+            # manual cleanup was the leak, visible in a test. Found by
+            # CodeRabbit on PR #31.
             await self._stack.aclose()
             raise
         return self
@@ -282,6 +293,24 @@ class ErpToolset(AbstractToolset[Any]):
         conversation turn, tokens live an hour, and exchanging on every tool call
         would put a round trip to the login server in front of every question the
         model asks.
+
+        ### `DelegationError` is deliberately not caught here, or in `app.py`
+
+        CodeRabbit raised on PR #31 that a ThunderID failure escapes untranslated
+        and returns a raw 500. Checked against the installed pydantic-ai and it
+        does not. `VercelAIAdapter.dispatch_request` returns a
+        `StreamingResponse` *before* the run begins, so the toolset is entered
+        inside the stream and a FastAPI exception handler could never fire - it
+        would be dead code. What actually happens is that
+        `UIEventStream.encode_stream` catches every mid-stream exception and
+        turns it into `ErrorChunk(error_text=str(error))`, which the panel
+        renders. No status code, no stack trace, no leaked internals.
+
+        That makes `DelegationError`'s message the text the person reads, which
+        is why `auth.py` writes those messages for a human ("You do not have any
+        of the permissions this agent needs") and logs the OAuth detail
+        separately. The translation boundary exists; it is the message itself.
+        ⚠️ Keep it that way: any new `DelegationError` message is user-visible.
         """
         if not settings.auth_enabled:
             return None

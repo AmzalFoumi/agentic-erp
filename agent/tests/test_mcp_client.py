@@ -77,8 +77,15 @@ async def test_the_authenticated_client_keeps_the_mcp_read_timeout(monkeypatch):
     )
     assert timeout.connect == 30.0
 
-    for client in built:
-        await client.aclose()
+    # ⚠️ This used to close the clients by hand. That cleanup was not tidiness -
+    # it was covering for `__aenter__`, which left the authenticated client open
+    # when `streamable_http_client` raised, exactly as this test makes it do.
+    # The guard in `__aenter__` now starts above that call, so the assertion
+    # below is what the manual loop was hiding. Found by CodeRabbit on PR #31.
+    assert built[0].is_closed, (
+        "the authenticated http client survived a failed transport build; its "
+        "connection pool would stay open until the process exits"
+    )
 
 
 async def test_a_failed_connection_does_not_leak_the_authenticated_client(monkeypatch):
