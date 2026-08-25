@@ -233,8 +233,24 @@ class ErpToolset(AbstractToolset[Any]):
             # unregistered, its connection pool outlived every turn. Found by
             # CodeRabbit on PR #30 and confirmed against the mcp 2.0.0 client
             # transport docs.
+            # ⚠️ The timeouts and `follow_redirects` are not decoration. Passing
+            # our own client means the SDK does **not** build one, so its
+            # `create_mcp_http_client()` defaults never apply and httpx's own
+            # 5-seconds-for-everything takes over. An MCP call is a long phone
+            # call, not a knock at the door: the agent connects and then waits
+            # while the model thinks and tools run, so a 5-second read timeout
+            # severs any turn lasting longer than that. The values below are the
+            # SDK's own recommended ones, copied from
+            # `mcp/shared/_httpx_utils.py::create_mcp_http_client` (mcp 2.0.0) -
+            # spelled out rather than imported, because that module is private
+            # and could be renamed without notice. Found by CodeRabbit on PR #30,
+            # a regression introduced by the exit-stack fix directly above.
             http_client = await self._stack.enter_async_context(
-                httpx2.AsyncClient(headers={"Authorization": f"Bearer {token}"})
+                httpx2.AsyncClient(
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=httpx2.Timeout(30.0, read=300.0),
+                    follow_redirects=True,
+                )
             )
             transport = streamable_http_client(self._base_url, http_client=http_client)
 
