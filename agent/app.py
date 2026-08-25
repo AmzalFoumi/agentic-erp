@@ -133,6 +133,13 @@ def get_actor(request: Request) -> Actor:
     An invalid token therefore does not fail here; it fails at the first tool
     call, as a refusal from the ERP.
 
+    **One narrow exception, and it is not verification.** A token whose payload
+    cannot be decoded at all is refused here with a 401. That is a question
+    about the token's *shape*, answerable without any key - "is this even a
+    JWT" rather than "did ThunderID sign this". It is refused rather than
+    labelled because `_owns` gates on the subject, and a token with no readable
+    subject has no identity to gate on. See `_subject_of`.
+
     `auth_enabled=False` restores the pre-gate-25 behaviour of handing out a
     SystemActor. That is for the test suite and for local work unrelated to
     auth; it must never be set in a deployed environment, and it defaults to
