@@ -544,6 +544,25 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.transport == "stdio":
+        if settings.auth_enabled:
+            # stdio carries no HTTP request, so there is nowhere for a bearer
+            # token to travel and `get_access_token()` returns None on every
+            # call. `_actor()` then raises `AuthenticationError` for each tool
+            # invocation, one at a time, with no mention of the setting that
+            # caused it - so the developer meets the same opaque failure over
+            # and over instead of one message naming the cause. `parser.error`
+            # exits 2 with the text on stderr, which is the argparse convention
+            # for "this combination of options cannot work".
+            #
+            # Raised by CodeRabbit on PR #30 as an outside-diff comment (the
+            # line was not part of that PR's changes, so GitHub could not post
+            # it inline).
+            parser.error(
+                "stdio cannot carry a bearer token, so every tool call would be "
+                "refused with an authentication error. Set AUTH_ENABLED=false in "
+                "backend/.env for a local stdio run, or use "
+                "--transport streamable-http."
+            )
         mcp.run(transport="stdio")
         return
 

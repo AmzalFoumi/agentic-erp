@@ -82,10 +82,17 @@ def _token(signing_key: rsa.RSAPrivateKey, **overrides: Any) -> str:
 def _verify(verifier, token: str):
     """Drive `verify_token` from a synchronous test.
 
-    The SDK's `TokenVerifier` protocol is async, so ours is too - but nothing in
-    it actually awaits: `authn/tokens.py` checks a signature against a cached
-    key set. Rather than take a pytest async plugin as a new dependency for a
-    coroutine that never yields, the three lines of `asyncio.run` go here, once.
+    The SDK's `TokenVerifier` protocol is async, so ours is too - and it really
+    does suspend: `verify_token` awaits `asyncio.to_thread(...)`, which hands the
+    blocking signature check to a worker thread so the event loop is not stalled
+    while `authn/tokens.py` verifies against its cached key set. `asyncio.run`
+    drives that coroutine to completion from a synchronous test, which avoids
+    taking a pytest async plugin as a new dependency for this one file. The one
+    line goes here, once.
+
+    (An earlier version of this docstring claimed nothing in the verifier ever
+    awaited. That was true until the `to_thread` hand-off landed in the same PR;
+    corrected after CodeRabbit pointed it out on PR #30.)
     """
     return asyncio.run(verifier.verify_token(token))
 
@@ -347,3 +354,51 @@ def test_a_read_only_agent_is_refused_and_the_stock_does_not_move(
         "the write happened despite the refusal - a refusal that is only a "
         "message is not a refusal"
     )
+
+
+# ---------------------------------------------------------------------------
+# The stdio guard
+# ---------------------------------------------------------------------------
+
+
+def test_a_stdio_run_is_refused_while_auth_is_on(monkeypatch):
+    """stdio plus AUTH_ENABLED=true must fail once, loudly, naming the setting.
+
+    `AUTH_ENABLED` defaults to true and stdio is the default transport, so the
+    two defaults together are the shape a developer hits first. stdio has no
+    HTTP request to carry a bearer header, so without this guard every tool call
+    is refused separately with an authentication error that never mentions the
+    cause. Raised by CodeRabbit on PR #30.
+
+    `parser.error` raises SystemExit(2) - argparse's convention for an
+    unusable combination of options - which is what is asserted here.
+    """
+    from mcp_server import server as server_module
+
+    monkeypatch.setattr(server_module.settings, "auth_enabled", True)
+
+    with pytest.raises(SystemExit) as caught:
+        server_module.main(["--transport", "stdio"])
+
+    assert caught.value.code == 2
+
+
+def test_a_stdio_run_is_allowed_when_auth_is_off(monkeypatch):
+    """The other half: the guard must not break the supported local workflow.
+
+    `AUTH_ENABLED=false` is how the developer runs stdio, so this asserts the
+    guard lets it through - `mcp.run` is stubbed because actually starting the
+    server would block on stdin forever.
+    """
+    from mcp_server import server as server_module
+
+    monkeypatch.setattr(server_module.settings, "auth_enabled", False)
+
+    started: list[str] = []
+    monkeypatch.setattr(
+        server_module.mcp, "run", lambda transport: started.append(transport)
+    )
+
+    server_module.main(["--transport", "stdio"])
+
+    assert started == ["stdio"]
