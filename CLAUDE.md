@@ -19,7 +19,8 @@ read when you are working in the area they cover.
 | `docs/PLAN.md` | Progress table (gates 0–26), stop gates, division of labour, verify-docs rule, structure | **Every gate. Root — wins over all others** |
 | `docs/BACKEND-PLAN.md` | Gates 0–8 as built, backend decisions and deferrals | Changing backend code |
 | `docs/FRONTEND-PLAN.md` | Gates 9–13, screen and capability inventories, design-system rationale | Changing frontend code |
-| `docs/AUTH-PLAN.md` | Gates 22–26: provider decision (**ThunderID, confirmed by the Gate 23 spike**), RFC 8693 delegation, the ID-JAG-later rule, permission mapping | The auth gates |
+| `docs/AUTH-PLAN.md` | Gates 22–25: provider decision (**ThunderID, confirmed by the Gate 23 spike**), RFC 8693 delegation, the ID-JAG-later rule, permission mapping | The auth gates |
+| `docs/DEPLOY-PLAN.md` | Gate 26: hosting the five services, and the three security gaps gate 25 deferred into it | Deployment work |
 | `docs/AGENT-PLAN.md` | Gates 14–21, the Pydantic AI / Gemini decision, the agent's own schema, the localhost stop condition | Changing anything in `agent/` |
 | `CLAUDE.md` (this file) | A summary for agent onboarding | Subordinate to all five |
 | `frontend/AGENTS.md` (+ `frontend/CLAUDE.md`, which just includes it) | **Build output** — rewritten by `next dev` on every start, not hand-edited. One instruction: read `node_modules/next/dist/docs/` rather than trusting training data about Next.js | Writing Next.js code. Framework-only — says nothing about this project, so it never overrides the five above |
@@ -105,7 +106,7 @@ returns `CurrentUser | null`. It has no callers yet; it exists as the seam, not 
 **The deferral had two expiry conditions**, also in `PLAN.md`: either the MCP server becomes
 HTTP-reachable by anything that is not the developer's own machine, or a second human user exists.
 **Condition 1 fired on 2026-08-13** — the goal of hosting all five services *is* that condition — so
-auth is now scheduled as gates 22–26 and is a hard prerequisite for deployment. **`docs/AUTH-PLAN.md`
+auth is now scheduled as gates 22–25 and is a hard prerequisite for deployment (gate 26, `docs/DEPLOY-PLAN.md`). **`docs/AUTH-PLAN.md`
 is the whole workstream** — don't re-research the provider question, and read it before touching any
 gate from 23 on.
 
