@@ -1125,6 +1125,134 @@ identity; and an agent scoped read-only is **refused** `stock.adjust` by `servic
 test is the one that matters, and it must assert the write did not happen — not that the reply looked
 like a refusal.
 
+#### Identity-provider side, completed 2026-08-25 — what was built and where reality differed
+
+The Console half of Gate 25 is **done**. No application code changed. Everything below was verified
+empirically — by decoding a real token's `aud` and `scope`, never by a status code, because of the
+Gate 23 finding restated at the end of this section.
+
+**Built:**
+
+| Thing | Value |
+|---|---|
+| Agent | `AIsle Agent`, Client ID `6in2mfBltFEEMpYjF5upZA`, Agent ID `01a038f2-baa4-7a5a-a21c-b87124977fb8`, owner `amzal` |
+| Grants | `client_credentials`, `authorization_code`, token exchange · `client_secret_basic` · PKCE on, PAR off |
+| Redirect URI | `http://localhost:8002/callback` — `localhost`, **not** `127.0.0.1`, which ThunderID rejects |
+| Role | `AIsle Full Access` (`01a038dd-5c3f-7c4e-af07-d6e1595c7e2d`), assigned to user `amzal` and `AIsle Agent` **only** |
+| New resource server | `Agentic ERP MCP` / `https://mcp.agentic-erp.local` / type **API** / delimiter `.` / **not default** |
+
+The client secret was shown once, saved to the developer's password manager and to gitignored
+`agent/.env`. `includeActClaim` was left **off** as planned — nothing in this gate needed it.
+`AIsle Gate` was not touched. `AIsle Web` is dead and was never read.
+
+**`Agentic ERP MCP` exists because the resource-server section above says it must** — the built-in
+`System` resource server's identifier ends in `/mcp` but is not our MCP server. `backend/mcp_server/`
+is a separately reachable network service from Gate 26 on, so it needs its own `aud`. Sharing the
+API's audience was considered and rejected: the MCP authorization spec requires an MCP server to
+validate that the audience is *itself*, which is unimplementable when "itself" and "the other door"
+are the same string — and it would throw away the destination half of delegation, leaving the agent
+holding a full-building key.
+
+Its permissions are a **deliberate duplicate** of the API server's four (`product.read`,
+`product.create`, `product.update`, `stock.adjust`). ThunderID resource servers cannot share a
+permission set. The duplication costs nothing at runtime: `services/` checks the same strings and
+never learns which door the token came through.
+
+**Verified by token, 2026-08-25:**
+
+1. `client_credentials` + `resource=<MCP>` → `aud=https://mcp.agentic-erp.local`, all four scopes.
+2. **Token exchange across two resource servers**: an API-audience token exchanged with
+   `resource=<MCP>`, `scope=product.read` → `aud=https://mcp.agentic-erp.local`, `scope` exactly
+   `product.read`. **Audience moved and scope shrank in one call.** Previously untested — Gate 23
+   only exercised single-resource narrowing.
+3. Over-asking with a nonexistent `admin.delete` → **HTTP 200, `scope` absent from both the response
+   body and the token payload.** Gate 23's finding, reconfirmed on the new resource server.
+
+> ⚠️ **Hard requirement for the code half of this gate, from (3).** ThunderID issued a structurally
+> valid token, correctly stamped `aud=https://mcp.agentic-erp.local`, carrying **no `scope` claim at
+> all**. The `TokenVerifier` MUST treat a missing or empty `scope` as **zero permissions** — `can()`
+> false for everything — never as "unspecified, therefore allow". Nothing in the HTTP response
+> distinguishes this token from a successful one. This needs its own regression test.
+
+**Handoff to the code half:**
+
+- A second audience setting is needed — `THUNDERID_MCP_AUDIENCE=https://mcp.agentic-erp.local` in
+  `core/config.py` and `backend/.env.example`, alongside the existing `thunderid_audience`.
+  **Audit of the repo on 2026-08-25 found exactly one audience anywhere**: `thunderid_audience`
+  (`core/config.py:93`), consumed by `authn/tokens.py:109`. No code sends a `resource=` parameter at
+  all, so today's human sign-in gets its `aud` purely from the default-resource-server flag.
+- `agent/.env.example` has **no ThunderID section**, and its auth note still says "the agent and the
+  MCP server both run with no authentication at all". This gate makes that false.
+
+**Drift from this document, found while doing the work:**
+
+1. **The admin MCP cannot do most of this gate.** Its 17 tools cover applications, flows, themes, org
+   units, user types and SDK snippets — there is **no resource-server, role, user or agent tool**.
+   This doc previously noted only the resource-server gap. The gate is therefore Console clicks,
+   specified and verified externally.
+2. **Resource servers have three types** — API ("REST or HTTP APIs secured as an OAuth2 audience"),
+   MCP ("Model Context Protocol servers"), Custom. This doc describes only the generic API type.
+3. **The MCP type defaults its delimiter to colon**, and the delimiter is **immutable**. A trap for a
+   dot-based codebase; caught in the wizard, before creation.
+4. **The MCP type cannot express business permissions.** It has no Default toggle and no Resource
+   Hierarchy — only flat tool/resource capabilities where the handle *is* the scope, the delimiter is
+   never applied, and handles cannot contain a dot (a handle of `product/read` previews verbatim as
+   `product/read`). Per the vendor docs this is by design: *"turn each tool into a permission. The
+   permission's handle becomes the scope tools validate."* **`Agentic ERP MCP` was therefore created
+   as the API type**, after a first attempt as MCP type was deleted.
+   Switching `services/` to tool-level permissions was considered and rejected: `services/` is shared
+   by two adapters and only one of them has "tools", so per-tool naming would make the shared logic
+   speak MCP's vocabulary — the coupling `CLAUDE.md`'s one rule exists to prevent — and several tools
+   legitimately map to one permission.
+5. **Roles span resource servers.** The Permissions tab is "grouped by resource server" and one role
+   can hold permissions from several. So there is **no** second MCP role; `AIsle Full Access` was
+   extended and now holds 12 nodes (6 per server).
+6. **Parent permissions are held but not issued.** The Console will not accept a child without its
+   parent, so the role carries the bare `product` and `stock` alongside the four dotted strings. Neither
+   parent appears in a minted token's `scope`. Exact four-item assertions remain valid.
+7. **Agents are a distinct entity class**, not applications — own Console section, own Access tab, an
+   Owner, and an Operating Mode. Enabling **Delegated mode** force-adds `authorization_code` and then
+   demands at least one redirect URI.
+8. **The ThunderID docs live at `https://thunderid.dev/docs/v1.0.x/`.** `thunderid.io` returns empty.
+
+#### Code side, completed 2026-08-25 — what was built
+
+Both halves of Gate 25 are now done. Nothing in the ThunderID Console changed for this half, and no
+file in `services/` changed at all — the call sites already took an `Actor` and already called
+`can()`, which was the entire point of doing that in gate 3.
+
+| File | What it does now |
+|---|---|
+| `core/config.py` | `thunderid_mcp_audience`, a **second** audience. `authn/tokens.py`'s `verify_access_token(token, *, audience=None)` takes it as a parameter — one check, two expected strings, rather than two copies to drift |
+| **`mcp_server/auth.py`** (new) | `ThunderIDTokenVerifier` — the SDK's `TokenVerifier` protocol, translating to `AccessToken`. In `mcp_server/` and not `authn/` **because the SDK is a dialect**, exactly like `mcp_server/errors.py`. Enforced by a new import-linter contract, "Authn stays adapter-free" |
+| `mcp_server/server.py` | `token_verifier=` + `auth=AuthSettings(...)`; `_actor()` returns a real `TokenActor`, raises when auth is on and no token is in context, falls back to `SystemActor("mcp")` only when `AUTH_ENABLED=false` |
+| **`agent/auth.py`** (new) | `get_scoped_token(...)` — the one place a grant type is named. Sends `resource`, never `audience`. **Reads the scope that came back**: a partial grant is returned with a warning logged (`thunderid_scopes` is a ceiling, not a minimum), and only a wholly empty grant raises |
+| `agent/actor.py` | `UserActor`, carrying the raw token. `can()` returns True because the agent is not an authorization decision point — the ERP is |
+| `agent/app.py` | `get_actor()` reads the bearer token and does **not** verify it — the MCP server judges anything the *ERP* is asked to do. ⚠️ A **gate 25 deferral, not a permanent rule**: `_owns` gates conversation ownership on the unverified `sub`, which is this service's own access-control decision and cannot be delegated. Held shut by the loopback binding; closed by gate 26 — `DEPLOY-PLAN.md`, "Entry price: the agent-server's own door" |
+| `agent/mcp_client.py` | `Client(streamable_http_client(url, http_client=httpx2.AsyncClient(...)))`. The `_actor` stored unused since Gate 20 is finally used. **The one line a future ID-JAG swap touches** |
+| `frontend/.../api/agent/[...path]/route.ts` | Forwards `Authorization: Bearer <session token>` |
+
+**Exit condition met**, by the two tests in `backend/tests/test_mcp_auth.py`:
+`test_a_row_written_through_the_agent_carries_the_users_own_identity` and
+`test_a_read_only_agent_is_refused_and_the_stock_does_not_move` — the second reads the database
+after the refusal, because a refusal that is only a message is not a refusal.
+
+**The inherited defect is closed.** `ConversationRow.started_by` was a placeholder that always said
+"system"; it now records the OIDC `sub`, and `store.conversation_exists(id, *, actor_id)` checks it
+on every agent route. Answered as **404, never 403** — conversation ids are sequential integers, so
+a 403 would confirm which ids are real.
+
+**One decision worth not re-litigating, and one that was.** ⚠️ The claim that used to stand here —
+*the agent does not verify tokens locally, because two verification paths is how one of them ends up
+weaker* — **was withdrawn on 2026-08-26.** It holds for ERP permissions, which really are the MCP
+server's to judge, and it does not hold for conversation ownership, which is the agent-server's own
+decision: `mcp_server/` validates against *its own* audience, and forwarding a received token onward
+is token passthrough, which the MCP specification forbids. Verification in `agent/` is therefore
+deferred to gate 26, not ruled out — see `DEPLOY-PLAN.md`. The decision that does stand:
+`agent/auth.py` prefers pinning `deploy/thunderid-server.cert` over
+`verify=False` — the file is gitignored (each machine regenerates it), so its absence falls back to
+`THUNDERID_VERIFY_TLS` and logs a WARNING rather than failing.
+
 ### Gate 26 — deploy
 
 Unblocked only now. Five services. `agent/app.py`'s `HOST = "127.0.0.1"` and its test are deleted
@@ -1347,3 +1475,16 @@ Two smaller items also retired:
   `http_client=httpx.AsyncClient(verify=CA_CERT)` to the verifier. That is the correct answer to the
   self-signed-certificate problem — trust the CA explicitly — and Gate 25's own verifier should use
   that shape rather than the spike's `verify=False`.
+
+---
+
+## Gate 26 entry price: the agent-server's own door
+
+**Moved to `docs/DEPLOY-PLAN.md` on 2026-08-26.** It was written here on the day it was decided,
+because gate 26 used to sit at the end of this doc's range. It does not belong here: gates 22-25
+are about *who you are*, gate 26 is about *where the code runs*. The finding (the agent-server
+reads a name off a token without checking its signature), why the first mitigation was withdrawn
+against the MCP specification, the door/badge rule, B1 versus B2, and the five checkable
+conditions for "done" are all in `DEPLOY-PLAN.md`, "Entry price: the agent-server's own door".
+
+**This document is now closed at gate 25.**
