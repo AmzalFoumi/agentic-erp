@@ -254,7 +254,18 @@ class ErpToolset(AbstractToolset[Any]):
             )
             transport = streamable_http_client(self._base_url, http_client=http_client)
 
-        self._client = await self._stack.enter_async_context(Client(transport))
+        try:
+            self._client = await self._stack.enter_async_context(Client(transport))
+        except BaseException:
+            # ⚠️ `__aexit__` is never called when `__aenter__` raises, so
+            # anything already on the stack - the authenticated `http_client`
+            # entered just above - would stay open for the life of the process,
+            # one leaked connection pool per failed turn. An MCP server that is
+            # simply not running is enough to take this path. Found by
+            # CodeRabbit on PR #30, on the same line as the leak fixed one
+            # commit earlier: this is the *other* half of that path.
+            await self._stack.aclose()
+            raise
         return self
 
     async def _scoped_token(self) -> str | None:

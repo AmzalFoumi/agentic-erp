@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import logging
 import os
+import ssl
 from dataclasses import dataclass
 
 import httpx
@@ -100,8 +101,8 @@ class ScopedToken:
     scopes: frozenset[str]
 
 
-def _verify() -> str | bool:
-    """What to pass to httpx as `verify`. A path, or a bool.
+def _verify() -> ssl.SSLContext | bool:
+    """What to pass to httpx as `verify`. An SSL context, or a bool.
 
     Prefers pinning ThunderID's own self-signed certificate, which still refuses
     an attacker's certificate, over disabling verification wholesale. Falls back
@@ -109,9 +110,17 @@ def _verify() -> str | bool:
     machine's Compose run generates its own - and says so at WARNING, because a
     silent downgrade from "pinned" to "unchecked" is exactly the kind of thing
     that survives into a deployment.
+
+    ⚠️ A **context**, not the path. Handing httpx a path string still works on
+    the pinned `httpx==0.28.1` but is deprecated there, and the deprecation is
+    the kind that becomes a hard failure on a future bump - at which point the
+    symptom would be "the agent cannot reach the login server", nowhere near
+    this line. Building the context here also keeps the rest of the default
+    security policy that `create_default_context` sets, rather than only the
+    trust store. Raised by CodeRabbit on PR #30.
     """
     if os.path.isfile(settings.thunderid_ca_cert):
-        return settings.thunderid_ca_cert
+        return ssl.create_default_context(cafile=settings.thunderid_ca_cert)
 
     if not settings.thunderid_verify_tls:
         _log.warning(

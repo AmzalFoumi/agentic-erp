@@ -79,3 +79,65 @@ async def test_the_authenticated_client_keeps_the_mcp_read_timeout(monkeypatch):
 
     for client in built:
         await client.aclose()
+
+
+async def test_a_failed_connection_does_not_leak_the_authenticated_client(monkeypatch):
+    """⚠️ `__aexit__` never runs when `__aenter__` raises.
+
+    The authenticated `httpx2.AsyncClient` is entered onto the exit stack
+    *before* the MCP `Client` is, so a failure on the second line leaves the
+    first one open with nothing left to close it - one leaked connection pool
+    per failed turn, for the life of the process. An MCP server that is simply
+    not running is enough to take that path, which makes this the ordinary case
+    during local development rather than an exotic one.
+
+    Found by CodeRabbit on PR #30, on the same line as the leak fixed one commit
+    earlier: this is the other half of it.
+    """
+    built: list[httpx2.AsyncClient] = []
+    real_client = httpx2.AsyncClient
+
+    def _record(**kwargs):
+        client = real_client(**kwargs)
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(mcp_client_module.httpx2, "AsyncClient", _record)
+    monkeypatch.setattr(mcp_client_module.settings, "auth_enabled", True)
+
+    async def _fake_exchange(user_token, **_kwargs):
+        from auth import ScopedToken
+
+        return ScopedToken(access_token="scoped", scopes=frozenset({"product.read"}))
+
+    monkeypatch.setattr(mcp_client_module, "get_scoped_token", _fake_exchange)
+    monkeypatch.setattr(
+        mcp_client_module, "streamable_http_client", lambda *_a, **_k: object()
+    )
+
+    class _Unreachable:
+        """Stands in for `Client`, failing the way an absent server does."""
+
+        def __init__(self, _transport):
+            pass
+
+        async def __aenter__(self):
+            raise ConnectionError("no MCP server here")
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    monkeypatch.setattr(mcp_client_module, "Client", _Unreachable)
+
+    toolset = ErpToolset(
+        "http://127.0.0.1:8001/mcp",
+        actor=UserActor("user-token", actor_id="someone"),
+    )
+    with pytest.raises(ConnectionError):
+        await toolset.__aenter__()
+
+    assert built, "no httpx client was built - the test's seam is wrong"
+    assert built[0].is_closed, (
+        "the authenticated http client survived a failed connection; its "
+        "connection pool would stay open until the process exits"
+    )
