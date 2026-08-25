@@ -1,0 +1,227 @@
+"""Trading the user's token for a narrower one. The delegation half of gate 25.
+
+### The idea, before the mechanism
+
+The person signs in to the web app and gets an access token - a small signed
+note from ThunderID saying "this is Fatima, and she may read products and adjust
+stock". If the agent simply forwarded that note to the ERP, the agent would be
+exactly as powerful as Fatima, forever, for anything.
+
+Instead it hands the note back to ThunderID and asks for a **smaller** one:
+still Fatima, still signed, but valid only at the MCP server and only for the
+permissions this task needs. ThunderID mints it. The important part is what it
+will not do: **it cannot hand back more authority than the note it was given**,
+no matter what the agent asks for. "The agent may only do what the user may do"
+is enforced at the issuer, not by our code, which is why it survives our bugs.
+
+### ⚠️ The failure that returns 200 OK
+
+Verified against the live server on 2026-08-25, and this is the whole reason
+`get_scoped_token` compares `granted` against `wanted` below:
+
+  - asking for **more** scope than the user has → `200 OK`, with *less* scope
+    in the response than was asked for. No error, no warning.
+  - asking for a permission that **does not exist** → `200 OK`, with a
+    structurally valid, correctly-audienced token carrying **no `scope` claim at
+    all**.
+
+Neither is distinguishable from success by looking at the status code. So this
+module never trusts a 200: it reads the `scope` that came back and refuses if
+what it needs is missing. A refusal here is far better than a token that
+authenticates and is then denied by every permission check downstream, because
+that symptom looks nothing like its cause.
+
+### The rule that keeps ID-JAG open
+
+**Never hardcode the grant type or the requested token type.** Both are
+parameters of this one function. Switching to ID-JAG later means passing
+`ID_JAG_TOKEN_TYPE` and swapping what `mcp_client.py` hands its transport (the
+SDK already ships `IdentityAssertionOAuthProvider` for exactly that slot);
+agent-to-agent delegation
+means supplying `actor_token`, which this function already accepts. Nothing
+above this file names an OAuth mechanism. See docs/AUTH-PLAN.md, "ID-JAG is a
+parameter, not a second architecture" - and note that ID-JAG is deliberately
+**off** for this gate.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from dataclasses import dataclass
+
+import httpx
+
+from config import settings
+
+_log = logging.getLogger(__name__)
+
+# RFC 8693. Spelled out rather than assembled, because a typo in a URN produces
+# `unsupported_grant_type`, which reads like a server misconfiguration.
+TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
+
+ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
+
+# The ID-JAG output type. Present so the switch is a value, not a rewrite; not
+# used anywhere today. See this module's docstring.
+ID_JAG_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:id-jag"
+
+
+class DelegationError(Exception):
+    """Token exchange did not produce a token we can use.
+
+    A plain exception rather than one of `core/exceptions.py`'s: `agent/` is a
+    separate service with a separate virtualenv and never imports the backend
+    (docs/AGENT-PLAN.md, "Architecture"). `app.py` translates this into an HTTP
+    response, the same way each backend adapter translates its own errors.
+    """
+
+
+@dataclass(frozen=True)
+class ScopedToken:
+    """An exchanged token and, crucially, what it actually turned out to allow.
+
+    `scopes` is the set ThunderID *returned*, not the set that was requested.
+    Keeping both apart in the type is the point: a caller that reads `scopes`
+    cannot accidentally read its own wish list back.
+    """
+
+    access_token: str
+    scopes: frozenset[str]
+
+
+def _verify() -> str | bool:
+    """What to pass to httpx as `verify`. A path, or a bool.
+
+    Prefers pinning ThunderID's own self-signed certificate, which still refuses
+    an attacker's certificate, over disabling verification wholesale. Falls back
+    only when the file is genuinely absent - it is gitignored, because each
+    machine's Compose run generates its own - and says so at WARNING, because a
+    silent downgrade from "pinned" to "unchecked" is exactly the kind of thing
+    that survives into a deployment.
+    """
+    if os.path.isfile(settings.thunderid_ca_cert):
+        return settings.thunderid_ca_cert
+
+    if not settings.thunderid_verify_tls:
+        _log.warning(
+            "ThunderID's certificate is not being checked: %s does not exist "
+            "and THUNDERID_VERIFY_TLS is false. Anyone able to intercept this "
+            "connection can mint tokens the agent will use.",
+            settings.thunderid_ca_cert,
+        )
+        return False
+
+    return True
+
+
+async def get_scoped_token(
+    user_token: str,
+    *,
+    resource: str | None = None,
+    scopes: str | None = None,
+    requested_token_type: str = ACCESS_TOKEN_TYPE,
+    actor_token: str | None = None,
+    actor_token_type: str = ACCESS_TOKEN_TYPE,
+) -> ScopedToken:
+    """Exchange `user_token` for one narrowed to `resource` and `scopes`.
+
+    Args:
+        user_token: the signed-in person's access token, as it arrived.
+        resource: RFC 8707 resource indicator - which service the new token is
+            valid at. Defaults to the MCP server. **This is the parameter that
+            sets `aud`**; `audience` is accepted by ThunderID and then ignored.
+        scopes: space-delimited ceiling. Defaults to the configured set. Asking
+            for more than the user has is not an error and does not warn - it
+            silently returns less, which is what the check below is for.
+        requested_token_type: what kind of token to get back. The ID-JAG seam.
+        actor_token: who is doing the narrowing, for a delegation chain. Omitted
+            today: without it the token is correctly downscoped but carries no
+            `act` claim recording the agent. Our `created_by`/`updated_by`
+            columns already carry that accountability, so it is knowingly not
+            paid for here.
+
+    Raises:
+        DelegationError: on a transport failure, an OAuth error, or - the case
+            that matters - a `200 OK` whose token does not carry what was asked
+            for.
+    """
+    if not settings.thunderid_client_id or not settings.thunderid_client_secret:
+        raise DelegationError(
+            "The agent has no ThunderID credentials, so it cannot obtain a "
+            "token for you. Set THUNDERID_CLIENT_ID and THUNDERID_CLIENT_SECRET "
+            "in agent/.env (see agent/.env.example)."
+        )
+
+    resource = resource or settings.thunderid_mcp_audience
+    scopes = scopes if scopes is not None else settings.thunderid_scopes
+    wanted = frozenset(scopes.split())
+
+    form = {
+        "grant_type": TOKEN_EXCHANGE_GRANT,
+        "subject_token": user_token,
+        "subject_token_type": ACCESS_TOKEN_TYPE,
+        "requested_token_type": requested_token_type,
+        # RFC 8707. Not `audience` - see this module's docstring.
+        "resource": resource,
+        "scope": scopes,
+    }
+    if actor_token is not None:
+        # `actor_token_type` is required whenever `actor_token` is given.
+        form["actor_token"] = actor_token
+        form["actor_token_type"] = actor_token_type
+
+    try:
+        async with httpx.AsyncClient(verify=_verify(), timeout=10) as client:
+            response = await client.post(
+                settings.thunderid_token_url,
+                data=form,
+                # Basic, not form fields. `AIsle Agent` is registered as
+                # `client_secret_basic`; sending the secret in the body instead
+                # is answered with `unauthorized_client`.
+                auth=(settings.thunderid_client_id, settings.thunderid_client_secret),
+            )
+    except httpx.HTTPError as exc:
+        # The reason goes in the log; the caller gets a message that does not
+        # describe our infrastructure.
+        _log.warning("Token exchange failed to reach ThunderID: %s", exc)
+        raise DelegationError("Could not reach the login server.") from exc
+
+    if response.status_code != 200:
+        # OAuth error responses carry a machine-readable `error` code. Logged,
+        # not returned: `invalid_client` versus `invalid_grant` tells a caller
+        # things about our configuration they should not learn from us.
+        _log.warning(
+            "Token exchange refused (HTTP %s): %s",
+            response.status_code,
+            response.text[:500],
+        )
+        raise DelegationError("The login server refused to issue a token.")
+
+    payload = response.json()
+    token = payload.get("access_token")
+    if not isinstance(token, str) or not token:
+        raise DelegationError("The login server returned no usable token.")
+
+    # ⚠️ The line the whole module exists for. A missing `scope` key is not
+    # "unspecified, therefore everything" - it is what ThunderID returns when it
+    # did not recognise a permission that was asked for, and it means nothing
+    # was granted.
+    raw_granted = payload.get("scope", "")
+    granted = frozenset(raw_granted.split()) if isinstance(raw_granted, str) else frozenset()
+
+    missing = wanted - granted
+    if missing:
+        _log.warning(
+            "Token exchange returned less than was asked for. Wanted %s, got "
+            "%s. This is a 200 OK - ThunderID narrows silently rather than "
+            "erroring, so check the user's role and the agent's role before "
+            "suspecting the code.",
+            sorted(wanted),
+            sorted(granted) or "nothing at all",
+        )
+        raise DelegationError(
+            "You do not have all of the permissions this action needs."
+        )
+
+    return ScopedToken(access_token=token, scopes=granted)

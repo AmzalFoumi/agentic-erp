@@ -91,7 +91,7 @@ def _jwk_client() -> PyJWKClient:
     )
 
 
-def verify_access_token(token: str) -> TokenActor:
+def verify_access_token(token: str, *, audience: str | None = None) -> TokenActor:
     """Validate `token` and return the actor it describes.
 
     Raises AuthenticationError for every failure mode, with a message safe to
@@ -99,14 +99,23 @@ def verify_access_token(token: str) -> TokenActor:
     and "signature failed" is deliberately NOT exposed: a caller who can tell
     those apart can use the endpoint as an oracle to probe our configuration.
     The specific reason goes in the log, not the response.
+
+    `audience` names which resource server is being spoken to. It defaults to
+    the HTTP API's identifier, so the existing caller in `api/deps.py` is
+    unchanged; `mcp_server/` passes its own (`thunderid_mcp_audience`), because
+    the MCP authorization spec requires an MCP server to verify that the
+    audience is *itself*. A parameter rather than two functions: the check is
+    identical, only the expected string differs, and duplicating fifty lines to
+    vary one argument is how the two copies drift apart.
     """
+    expected_audience = audience if audience is not None else settings.thunderid_audience
     try:
         signing_key = _jwk_client().get_signing_key_from_jwt(token)
         claims = jwt.decode(
             token,
             signing_key.key,
             algorithms=_ALGORITHMS,
-            audience=settings.thunderid_audience,
+            audience=expected_audience,
             issuer=settings.thunderid_issuer,
             # `sub` is required because it becomes created_by/updated_by. A
             # token without one would write NULL into an audit column and the

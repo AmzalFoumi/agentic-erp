@@ -81,3 +81,62 @@ class SystemActor:
 
     def __repr__(self) -> str:
         return f"SystemActor(id={self._id!r})"
+
+
+class UserActor:
+    """The signed-in person, as the agent knows them. Added at gate 25.
+
+    ### What this holds, and what it deliberately does not
+
+    The one field that matters is `token` - the access token that arrived with
+    the request. Everything the ERP will actually allow is decided from that
+    token, by the MCP server, against ThunderID's public keys. This class does
+    **no verification**, and must not start: two verification paths is how one
+    of them ends up weaker, and the agent's virtualenv has no JWKS client on
+    purpose.
+
+    ### ⚠️ `id` is decoded without checking the signature
+
+    Safe only because of what it is allowed to do: label a log line and stamp a
+    conversation. It gates nothing. Every question with an answer that matters -
+    may this person adjust stock, whose name goes in `updated_by` - is settled
+    in `backend/services/`, against a token `backend/authn/` verified itself.
+    The same distinction, and the same warning, is written on the frontend's
+    `subjectOf()` in `frontend/src/lib/auth/current-user.ts`.
+
+    If this id ever starts gating something, it is wrong, and the fix is to ask
+    the backend rather than to add a verification step here.
+
+    ### `can()` always returns True, and that is not a bypass
+
+    The agent is not an authorization decision point. It has no permission list
+    to check against - the scopes live in the token, and the token is read by
+    the MCP server. Answering False here would only let the agent *pre-refuse*
+    something the ERP would have refused anyway, while answering True lets the
+    real check happen where the real information is. The refusal still comes,
+    from `services/`, as a `PermissionDeniedError`.
+    """
+
+    def __init__(self, token: str, *, actor_id: str) -> None:
+        self._token = token
+        self._id = actor_id
+
+    @property
+    def id(self) -> str:
+        """The OIDC `sub`, read from the token without verifying it. See above."""
+        return self._id
+
+    @property
+    def token(self) -> str:
+        """The raw access token, for `mcp_client.py` to exchange and forward."""
+        return self._token
+
+    def can(self, permission: str) -> bool:
+        """Always True - the ERP decides. See the class docstring."""
+        return True
+
+    def __repr__(self) -> str:
+        # The token is deliberately absent. A repr lands in logs and pytest
+        # output, and a bearer token printed there is a credential leak that
+        # nobody notices until it is in a CI log forever.
+        return f"UserActor(id={self._id!r})"

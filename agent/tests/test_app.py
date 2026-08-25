@@ -20,6 +20,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 
 import app as app_module
+from actor import SystemActor, UserActor
 from app import HOST, PORT, SDK_VERSION, Runtime, app, get_runtime
 from conversation import Message, decode_state
 
@@ -42,12 +43,30 @@ class FakeStore:
         self.appended: list[Message] = []
         self.pending: bytes | None = None
         self.cleared = 0
+        self.started_by: str | None = None
+        self.owner: str | None = None
 
-    def start_conversation(self, *, title: str | None = None) -> int:
+    def start_conversation(
+        self, *, title: str | None = None, started_by: str = "system"
+    ) -> int:
+        self.started_by = started_by
         return CONVERSATION_ID
 
-    def conversation_exists(self, conversation_id: int) -> bool:
-        return conversation_id == CONVERSATION_ID
+    def conversation_exists(
+        self, conversation_id: int, *, actor_id: str | None = None
+    ) -> bool:
+        """Gate 25 added the ownership check; this double mirrors its signature.
+
+        `owner` defaults to None meaning "belongs to whoever asks", so the
+        existing tests - which are about routing and streaming, not ownership -
+        are unaffected. `test_a_conversation_belonging_to_someone_else_is_a_404`
+        sets it.
+        """
+        if conversation_id != CONVERSATION_ID:
+            return False
+        if actor_id is not None and self.owner is not None:
+            return actor_id == self.owner
+        return True
 
     def append_message(self, conversation_id: int, message: Message) -> None:
         assert conversation_id == CONVERSATION_ID
@@ -84,6 +103,24 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> FakeStore:
     return fake
 
 
+@pytest.fixture(autouse=True)
+def _auth_off(monkeypatch: pytest.MonkeyPatch):
+    """Gate 25 default for this file: authentication off, overrides cleared.
+
+    Most tests here are about routing, streaming and approval - not about who is
+    asking - and requiring a signed token in each would be noise. The tests that
+    ARE about identity turn it back on explicitly.
+
+    Autouse, and it clears `dependency_overrides` on the way out, so these tests
+    stay order-independent. Overrides live on the module-level `app` object and
+    would otherwise leak from whichever test ran last, which makes a failure
+    depend on collection order - the worst kind to debug.
+    """
+    monkeypatch.setattr(app_module.settings, "auth_enabled", False)
+    yield
+    app.dependency_overrides.clear()
+
+
 @pytest.fixture
 def toolset() -> RecordingToolset:
     return RecordingToolset()
@@ -98,6 +135,16 @@ def _client(model: Any, toolset: RecordingToolset) -> TestClient:
     app.dependency_overrides[get_runtime] = lambda: Runtime(
         model=model, toolset=toolset
     )
+    # Gate 25: these tests are about routing, streaming and approval, not about
+    # who is asking - so they supply an identity rather than a token. The same
+    # `dependency_overrides` seam, used for the same reason as `get_runtime`
+    # above: the alternative is minting a signed JWT in every test of a file
+    # that has nothing to do with signatures.
+    #
+    # What `get_actor` does with a real header, and that it refuses a request
+    # without one, is asserted in `test_requires_a_bearer_token_when_auth_is_on`
+    # below - which is where that belongs.
+    app.dependency_overrides[app_module.get_actor] = lambda: SystemActor()
     return TestClient(app)
 
 
@@ -339,3 +386,117 @@ def test_the_service_binds_to_loopback() -> None:
     assert HOST == "127.0.0.1"
     # Not 8000 (FastAPI) and not 8001 (its MCP server).
     assert PORT == 8002
+
+
+# ---------------------------------------------------------------------------
+# Gate 25: who is asking
+# ---------------------------------------------------------------------------
+
+
+def test_requires_a_bearer_token_when_auth_is_on(monkeypatch):
+    """No token, no turn - and a well-formed 401 rather than a bare status.
+
+    The route this guards will run a data-changing tool against the ERP if a
+    human approves it. Until gate 25 nothing here knew *which* human: Gate 19
+    gave us approval, and approval is not authorization.
+    """
+    monkeypatch.setattr(app_module.settings, "auth_enabled", True)
+
+    response = TestClient(app).post(
+        f"/conversations/{CONVERSATION_ID}/turns", json={"messages": []}
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_a_bearer_token_becomes_an_actor_carrying_it(monkeypatch):
+    """The token travels; the `sub` is read for a label only.
+
+    ⚠️ Note what is NOT asserted: that the token is valid. The agent holds no
+    signing keys and deliberately does not verify - `backend/mcp_server/` does,
+    against ThunderID's published keys. So an unsigned token like the one below
+    is accepted *here* and refused at the first tool call, which is the design
+    and not a hole. See the docstring on `app.get_actor`.
+    """
+    import base64
+    import json as _json
+
+    def _segment(payload: dict) -> str:
+        raw = _json.dumps(payload).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    token = f"header.{_segment({'sub': 'user-42'})}.signature"
+
+    monkeypatch.setattr(app_module.settings, "auth_enabled", True)
+
+    class _Request:
+        headers = {"authorization": f"Bearer {token}"}
+
+    actor = app_module.get_actor(_Request())  # type: ignore[arg-type]
+
+    assert isinstance(actor, UserActor)
+    assert actor.id == "user-42"
+    assert actor.token == token
+    # The credential must never land in a log line or a pytest failure.
+    assert token not in repr(actor)
+
+
+def test_an_unreadable_token_is_labelled_rather_than_fatal(monkeypatch):
+    """`sub` is a label, so a malformed token must not become a 500.
+
+    The ERP still gets the last word: the token travels unchanged and is
+    refused there. Turning an unreadable label into a crash would mean the
+    agent deciding something it has no information to decide.
+    """
+    monkeypatch.setattr(app_module.settings, "auth_enabled", True)
+
+    class _Request:
+        headers = {"authorization": "Bearer not-a-jwt"}
+
+    actor = app_module.get_actor(_Request())  # type: ignore[arg-type]
+
+    assert actor.id == "unknown"
+    assert actor.token == "not-a-jwt"
+
+
+def test_a_new_conversation_records_who_started_it(fake_store, monkeypatch):
+    """Half one of the inherited defect: conversations now have an owner.
+
+    The column existed since gate 17 and was never filled in. Nothing could
+    check ownership while every row said "system".
+    """
+    monkeypatch.setattr(app_module.settings, "auth_enabled", False)
+    app.dependency_overrides[app_module.get_actor] = lambda: SystemActor("user-7")
+
+    response = TestClient(app).post("/conversations")
+
+    assert response.status_code == 200
+    assert fake_store.started_by == "user-7"
+
+
+def test_a_conversation_belonging_to_someone_else_is_a_404(fake_store, monkeypatch):
+    """⚠️ Half two, and the reason this was a write-safety problem.
+
+    Conversation ids are sequential integers. Before this, changing a number in
+    the URL opened someone else's conversation - and posting a turn to it ran
+    the agent against their history, which is how a product got created nobody
+    asked for during gate 24's verification.
+
+    404 rather than 403 on purpose: a 403 would confirm the conversation exists
+    and belongs to someone, which hands out a map of which ids are real.
+    """
+    monkeypatch.setattr(app_module.settings, "auth_enabled", True)
+    fake_store.owner = "someone-else"
+    app.dependency_overrides[app_module.get_actor] = lambda: SystemActor("intruder")
+
+    client = TestClient(app)
+
+    assert client.get(f"/conversations/{CONVERSATION_ID}").status_code == 404
+    assert (
+        client.post(f"/conversations/{CONVERSATION_ID}/turns", json={"messages": []})
+    ).status_code == 404
+    # The write path is the one that matters: nothing was run, so nothing was
+    # appended and no turn was parked.
+    assert fake_store.appended == []
+    assert fake_store.pending is None

@@ -35,6 +35,7 @@ persists through `on_complete`, and serves history back on GET so a reload can
 hydrate.
 """
 
+import base64
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -47,7 +48,7 @@ from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 from pydantic_ai.ui.vercel_ai.request_types import RequestData
 
 import store
-from actor import Actor, SystemActor
+from actor import Actor, SystemActor, UserActor
 from config import settings
 from conversation import build_agent, decode_state, to_model_history, turn_from_result
 
@@ -79,10 +80,18 @@ class _SanitizingVercelAIAdapter(VercelAIAdapter):
 # explicitly so the constraint is a line of code someone has to delete rather
 # than a flag someone forgets to pass.
 #
-# There is no authentication on this surface. POST /turns will run a
-# data-changing tool against the ERP if a human at *some* browser approves it,
-# and nothing here knows which human - Gate 19 gave us approval, and approval is
-# not authorization. Binding off this interface, or putting a tunnel, reverse
+# **Gate 25 authenticated this surface, and the binding still stays.** Until
+# then nothing here knew *which* human approved a data-changing tool call -
+# Gate 19 gave us approval, and approval is not authorization. Now `get_actor`
+# below demands a bearer token and the ERP verifies it, so the sentence that
+# used to sit here ("there is no authentication on this surface") is no longer
+# true.
+#
+# It is still not enough to open the port. Nothing here rate-limits an
+# anonymous caller, ThunderID's certificate is self-signed, and `AUTH_ENABLED`
+# is one boolean away from turning all of it off silently. Those are Gate 26's
+# list, and this line is deleted there - last, not first. Binding off this
+# interface, or putting a tunnel, reverse
 # proxy, Docker port publish, or cloud deployment in front of it, makes that
 # reachable by anyone who can route to the port.
 #
@@ -105,18 +114,94 @@ app = FastAPI(
 )
 
 
-def get_actor() -> Actor:
-    """Who is asking. **The seam where real authentication lands.**
+def get_actor(request: Request) -> Actor:
+    """Who is asking. **The seam where real authentication landed, at gate 25.**
 
-    Deliberately the same shape as `backend/api/deps.py`'s `get_actor()`, and
-    deliberately hardcoded to `SystemActor` for the same reason: no auth
-    provider is wired in yet (docs/AUTH-PLAN.md), and the choice of provider is
-    still open. Nothing in this file names one, imports one, or assumes a token
-    format - a FastAPI dependency returning an `Actor` is all the rest of the
-    code sees, so adopting a provider replaces this function's body and touches
-    nothing else in agent/.
+    Deliberately the same shape as `backend/api/deps.py`'s `get_actor()`. The
+    bet that shape represented has paid out: the body changed and nothing else
+    in `agent/` did, because every call site already took an `Actor`.
+
+    The token arrives in the `Authorization` header, forwarded by the Next.js
+    route at `frontend/src/app/api/agent/[...path]/route.ts` from the browser's
+    session.
+
+    **This function does not verify the token, and that is deliberate.** The
+    agent holds no signing keys and has no JWKS client; it treats the token as
+    an opaque credential and lets the MCP server - which does verify, against
+    ThunderID's published keys - be the judge. Adding a second verification path
+    here would be two chances to get it right and two chances to get it wrong.
+    An invalid token therefore does not fail here; it fails at the first tool
+    call, as a refusal from the ERP.
+
+    `auth_enabled=False` restores the pre-gate-25 behaviour of handing out a
+    SystemActor. That is for the test suite and for local work unrelated to
+    auth; it must never be set in a deployed environment, and it defaults to
+    True so that a missing setting fails closed.
     """
-    return SystemActor()
+    if not settings.auth_enabled:
+        return SystemActor()
+
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        # 401, not 403: the difference is "we do not know who you are" versus
+        # "we know, and no". `WWW-Authenticate` is what makes it a well-formed
+        # 401 rather than a bare status code.
+        raise HTTPException(
+            status_code=401,
+            detail="This request carries no bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return UserActor(token, actor_id=_subject_of(token))
+
+
+def _subject_of(token: str) -> str:
+    """Read the `sub` claim out of a JWT **without verifying it**.
+
+    Safe here only because of what the value is allowed to do: label a log line.
+    See the warning on `UserActor` - and note the frontend's `subjectOf()` in
+    `lib/auth/current-user.ts` does exactly this, for exactly this reason.
+
+    Hand-decoded rather than reaching for a JWT library, which would put one in
+    the agent's virtualenv and invite someone to conclude that verification
+    belongs here. Anything unreadable becomes "unknown": this is a label, so a
+    malformed token must not turn into a crash before the ERP has had its say.
+    """
+    try:
+        payload = token.split(".")[1]
+        # base64url needs its padding restored; Python's decoder is strict
+        # about it where the JWT spec strips it.
+        padded = payload + "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(padded))
+        subject = claims.get("sub")
+        return subject if isinstance(subject, str) else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _owns(conversation_id: int, actor: Actor) -> bool:
+    """Does this conversation exist and belong to `actor`?
+
+    `actor_id=None` when authentication is off, which means "do not check" -
+    the pre-gate-25 behaviour, for the test suite and offline work.
+    """
+    actor_id = actor.id if settings.auth_enabled else None
+    return store.conversation_exists(conversation_id, actor_id=actor_id)
+
+
+def _require_own(conversation_id: int, actor: Actor) -> None:
+    """404 unless this conversation exists and belongs to `actor`.
+
+    404 rather than 403 deliberately. Conversation ids are sequential integers,
+    so a 403 would confirm that id 41 exists and belongs to someone else, which
+    hands out both a count and a map. "No such conversation" is the only answer
+    that reveals nothing.
+    """
+    if not _owns(conversation_id, actor):
+        raise HTTPException(
+            status_code=404, detail=f"No conversation {conversation_id}"
+        )
 
 
 @dataclass
@@ -175,7 +260,7 @@ def health() -> dict[str, str]:
 
 
 @app.post("/conversations")
-def create_conversation() -> dict[str, int]:
+def create_conversation(actor: Actor = Depends(get_actor)) -> dict[str, int]:
     """Start a conversation and return its id.
 
     Separate from the first turn on purpose: the id is what the browser puts in
@@ -183,11 +268,17 @@ def create_conversation() -> dict[str, int]:
     own conversation would mean the client learns the id at the end of a stream,
     which is exactly when a reload is most likely to lose it.
     """
-    return {"conversation_id": store.start_conversation()}
+    # Gate 25: the conversation is stamped with who started it, and every
+    # route below checks that stamp. Before this, ids were sequential integers
+    # with no owner - so changing a number in the URL opened someone else's
+    # conversation, and posting a turn to it let the agent act on their history.
+    return {"conversation_id": store.start_conversation(started_by=actor.id)}
 
 
 @app.get("/conversations/{conversation_id}")
-def get_conversation(conversation_id: int) -> dict[str, Any]:
+def get_conversation(
+    conversation_id: int, actor: Actor = Depends(get_actor)
+) -> dict[str, Any]:
     """Everything a reloaded browser needs to carry on.
 
     Messages come back in the same wire format the streaming route emits -
@@ -201,6 +292,11 @@ def get_conversation(conversation_id: int) -> dict[str, Any]:
     `pending_since` comes back alongside so the UI can show how stale it is.
     Nothing expires it automatically - see store.save_pending.
     """
+    # Ownership first, before anything is read. A conversation belonging to
+    # someone else must be indistinguishable from one that does not exist - see
+    # store.conversation_exists - so this is a 404 rather than a 403.
+    _require_own(conversation_id, actor)
+
     pending = store.load_pending(conversation_id)
 
     if pending is not None:
@@ -218,7 +314,7 @@ def get_conversation(conversation_id: int) -> dict[str, Any]:
     # `load_history` returns [] for both. Checked explicitly so a typo'd id is a
     # 404 rather than a conversation that silently appears to exist and then
     # fails to accept a turn on the foreign key.
-    if not history and not store.conversation_exists(conversation_id):
+    if not history and not _owns(conversation_id, actor):
         raise HTTPException(status_code=404, detail=f"No conversation {conversation_id}")
 
     return {
@@ -242,6 +338,12 @@ async def run_turn_endpoint(
     with a different message list - see this module's docstring. The client's
     posted messages are the history; nothing stored is passed in.
     """
+
+    # The write-safety half of the same defect. GET leaking another person's
+    # history is bad; POST is worse - it runs the agent against that history and
+    # can create or change real inventory. Checked here as well as on GET,
+    # because a client that never called GET can still post.
+    _require_own(conversation_id, actor)
 
     agent = build_agent(
         settings, actor=actor, model=runtime.model, toolset=runtime.toolset

@@ -198,6 +198,73 @@ class Settings(BaseSettings):
     # mistake is a thirty-second convenience, not a decision.
     mcp_base_url: str = "http://127.0.0.1:8001/mcp"
 
+    # ---------------------------------------------------------------------
+    # ThunderID (gate 25). A deliberate copy of the block in
+    # backend/core/config.py, NOT an import - see this module's docstring. The
+    # two are different roles and will drift on purpose: the backend is a
+    # resource server and holds no credentials, while the agent is an OAuth
+    # *client* and holds a secret.
+    # ---------------------------------------------------------------------
+
+    # Where token exchange happens. The agent is the only part of this system
+    # that ever calls ThunderID rather than merely verifying its signatures.
+    thunderid_token_url: str = "https://localhost:8090/oauth2/token"
+
+    # The agent's own credentials - `AIsle Agent`, registered 2026-08-25.
+    #
+    # ⚠️ Optional so the agent still starts with AUTH_ENABLED=false, for tests
+    # and offline work. `get_scoped_token` raises if they are missing when it
+    # actually needs them, which is a clearer failure than a startup error on a
+    # machine that was never going to exchange a token.
+    #
+    # ThunderID registers this client as `client_secret_basic`: the credentials
+    # go in an HTTP Basic header, NOT in the form body. Sending them as
+    # `client_secret_post` is answered with `unauthorized_client`, which reads
+    # like a permissions problem and is not one.
+    thunderid_client_id: str | None = None
+    thunderid_client_secret: str | None = None
+
+    # The resource server the exchanged token is minted for: `Agentic ERP MCP`,
+    # NOT the HTTP API. RFC 8707 calls this the resource indicator, and it is
+    # the parameter that actually sets the token's `aud`.
+    #
+    # ⚠️ `audience` is a decoy. ThunderID accepts it for RFC 8693 compatibility
+    # and then ignores it - verified twice against a live server. Passing
+    # `audience` and expecting `aud` to follow fails silently.
+    thunderid_mcp_audience: str = "https://mcp.agentic-erp.local"
+
+    # What the agent asks for on the user's behalf, space-delimited in the same
+    # vocabulary `services/` uses. It is a ceiling, not a grant: ThunderID
+    # returns the intersection of this, the user's own permissions, and the
+    # agent's role - and it narrows silently rather than erroring.
+    thunderid_scopes: str = "product.read product.create product.update stock.adjust"
+
+    # ⚠️ LOCAL ONLY, and the better half of a bad choice. ThunderID's
+    # development certificate is self-signed, so an ordinary HTTPS call to the
+    # token endpoint fails certificate validation. There are two ways out:
+    # trust *this specific certificate* (this setting), or turn verification
+    # off entirely (the next one). The first is far better - it still refuses an
+    # attacker's certificate - so it is tried first and the second is the
+    # fallback.
+    #
+    # Defaults to the cert the local Compose file writes out. That file is
+    # gitignored (.gitignore line 33) because every machine regenerates its own,
+    # so this path is frequently absent and its absence must not be fatal;
+    # `auth.py` falls back to `thunderid_verify_tls` when it is missing.
+    thunderid_ca_cert: str = str(AGENT_DIR.parent / "deploy" / "thunderid-server.cert")
+
+    # ⚠️ LOCAL ONLY. The blunt fallback: no certificate checking at all, which
+    # means anyone able to intercept the connection to ThunderID can hand the
+    # agent a token of their own devising. Gate 26 removes the need for both
+    # this and the setting above by giving ThunderID a real certificate.
+    thunderid_verify_tls: bool = True
+
+    # Escape hatch matching backend/core/config.py's. False means the agent
+    # accepts any caller as an all-powerful SystemActor and sends no token to
+    # the MCP server - the pre-gate-25 behaviour, for the test suite and for
+    # local work unrelated to auth. Defaults True so forgetting fails closed.
+    auth_enabled: bool = True
+
 
 # One shared instance, created when this module is first imported. Everything
 # else in agent/ does `from config import settings` - Gate 17 deliberately
