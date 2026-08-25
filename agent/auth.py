@@ -17,7 +17,8 @@ is enforced at the issuer, not by our code, which is why it survives our bugs.
 ### ⚠️ The failure that returns 200 OK
 
 Verified against the live server on 2026-08-25, and this is the whole reason
-`get_scoped_token` compares `granted` against `wanted` below:
+`get_scoped_token` reads the `scope` that came back rather than trusting the
+status code:
 
   - asking for **more** scope than the user has → `200 OK`, with *less* scope
     in the response than was asked for. No error, no warning.
@@ -26,10 +27,19 @@ Verified against the live server on 2026-08-25, and this is the whole reason
     all**.
 
 Neither is distinguishable from success by looking at the status code. So this
-module never trusts a 200: it reads the `scope` that came back and refuses if
-what it needs is missing. A refusal here is far better than a token that
-authenticates and is then denied by every permission check downstream, because
-that symptom looks nothing like its cause.
+module never trusts a 200: it reads the `scope` that came back and decides from
+that. The two cases are **not** treated alike, and the difference matters:
+
+  - a **partial** grant is returned, with a warning logged. `thunderid_scopes`
+    is a ceiling, not a minimum, so a read-only user legitimately gets one scope
+    back out of four. Refusing that shortfall - which this module did until
+    CodeRabbit found it on PR #30 - locked such a user out of even asking a
+    read-only question. Deciding permission-by-permission is `services/`'s job;
+    it has the information, and this function does not.
+  - an **empty** grant is refused. A token that can do nothing at all
+    authenticates and is then denied by every permission check downstream, and
+    that symptom looks nothing like its cause. Refusing it here, next to the log
+    line that explains why, is far kinder than debugging it there.
 
 ### The rule that keeps ID-JAG open
 

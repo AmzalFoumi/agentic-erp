@@ -1226,7 +1226,7 @@ file in `services/` changed at all — the call sites already took an `Actor` an
 | `core/config.py` | `thunderid_mcp_audience`, a **second** audience. `authn/tokens.py`'s `verify_access_token(token, *, audience=None)` takes it as a parameter — one check, two expected strings, rather than two copies to drift |
 | **`mcp_server/auth.py`** (new) | `ThunderIDTokenVerifier` — the SDK's `TokenVerifier` protocol, translating to `AccessToken`. In `mcp_server/` and not `authn/` **because the SDK is a dialect**, exactly like `mcp_server/errors.py`. Enforced by a new import-linter contract, "Authn stays adapter-free" |
 | `mcp_server/server.py` | `token_verifier=` + `auth=AuthSettings(...)`; `_actor()` returns a real `TokenActor`, raises when auth is on and no token is in context, falls back to `SystemActor("mcp")` only when `AUTH_ENABLED=false` |
-| **`agent/auth.py`** (new) | `get_scoped_token(...)` — the one place a grant type is named. Sends `resource`, never `audience`. **Compares the scope that came back against what was asked for** and raises if short |
+| **`agent/auth.py`** (new) | `get_scoped_token(...)` — the one place a grant type is named. Sends `resource`, never `audience`. **Reads the scope that came back**: a partial grant is returned with a warning logged (`thunderid_scopes` is a ceiling, not a minimum), and only a wholly empty grant raises |
 | `agent/actor.py` | `UserActor`, carrying the raw token. `can()` returns True because the agent is not an authorization decision point — the ERP is |
 | `agent/app.py` | `get_actor()` reads the bearer token; deliberately does **not** verify it (no keys, no JWKS client — the MCP server is the judge) |
 | `agent/mcp_client.py` | `Client(streamable_http_client(url, http_client=httpx2.AsyncClient(...)))`. The `_actor` stored unused since Gate 20 is finally used. **The one line a future ID-JAG swap touches** |
@@ -1470,3 +1470,106 @@ Two smaller items also retired:
   `http_client=httpx.AsyncClient(verify=CA_CERT)` to the verifier. That is the correct answer to the
   self-signed-certificate problem — trust the CA explicitly — and Gate 25's own verifier should use
   that shape rather than the spike's `verify=False`.
+
+---
+
+## Gate 26 entry price: the agent-server's own door
+
+**Decided 2026-08-26. Nothing below is implemented — this section is the record of what was
+deferred, why, and what "done" looks like, so gate 26 does not have to re-derive it.**
+
+### The finding
+
+`agent/app.py` gates conversation ownership on `actor.id`, which comes from `_subject_of()` —
+a function that reads the `sub` claim out of the JWT **without checking its signature**. Anyone
+who can reach the agent-server can therefore hand-craft a token naming someone else and read that
+person's chat history. They cannot *change* any data that way, because `mcp_server/` does verify
+what it is given; reading is enough to matter. Raised by CodeRabbit on PR #30.
+
+**What holds it shut today:** `agent/app.py`'s `HOST = "127.0.0.1"`, which is why this is a gate 26
+item rather than an open hole — gate 26 is the moment that binding is removed.
+
+### Why the original mitigation was rejected
+
+The first proposal was that the agent-server ask `mcp_server/` to verify the token, on the reasoning
+that "two verification paths is how one of them ends up weaker". Rechecked against the MCP
+authorization specification (2025-11-25 release, re-read 2026-08-26) and **withdrawn**, for two
+independent reasons:
+
+1. **It answers the wrong question.** `mcp_server/` validates against *its own* audience,
+   `https://mcp.agentic-erp.local`. A "yes, valid" from it says nothing about whether the token was
+   minted for the agent-server. Audience checking is per-door by definition and cannot be
+   centralised — which is the same argument that produced two audiences at gate 25.
+2. **It is the forbidden shape.** Forwarding a received token to another service is *token
+   passthrough*: *"an anti-pattern where a server accepts tokens from a client without validating
+   that they were issued specifically for that server, subsequently passing them to downstream
+   APIs. This practice is strictly forbidden."* The resulting bug class is the confused deputy.
+
+The general rule the spec states, and which this project should follow: **every service that makes
+an access-control decision from a token validates that token itself**; a service acting as a client
+onward *"must use separate tokens issued by the upstream authorization server rather than passing
+through tokens received from the client."* `agent/auth.py`'s RFC 8693 exchange is already exactly
+that second half, and is correct as built.
+
+### The rule, stated once
+
+**Anything in the middle of a chain needs both a resource server and a client** — a *door* to
+receive tokens, a *badge* to request the next one. Only the two ends are simple: the browser is a
+client only, `mcp_server/` is a resource server only.
+
+| Service | Door (resource server) | Badge (client) |
+|---|---|---|
+| frontend | — (nothing calls into it) | `AIsle Gate` ✅ |
+| `api/` | `Agentic ERP API` ✅ | — |
+| **`agent/`** | **missing** ❌ | `AIsle Agent` ✅ |
+| `mcp_server/` | `Agentic ERP MCP` ✅ | — |
+
+The agent-server is the only service in the middle, and it is missing the half that receives.
+
+### The two pieces of work, in priority order
+
+**B1 — verify the token (this is the security fix).**
+`agent/app.py` must check signature, expiry, issuer, and that `aud` is a recognised audience
+*before* reading `sub`. Accepting the API's audience (`https://api.agentic-erp.local`) is
+acceptable here: the agent-server is a front door of the same application, not an MCP server, so
+the spec's strict same-audience requirement is not literally binding on it. This closes the finding
+in full — the hole is "an unchecked name is trusted", not "the name on the pass is wrong".
+
+Consequences to accept deliberately when doing it:
+
+- **The "no JWT library in `agent/`" rule is retired.** It was reasoned from "the agent is not an
+  authorization decision point — the ERP is", which is false about the agent's *own* conversations.
+  A door that makes access decisions must be able to read passes. `agent/actor.py`'s existing
+  warning (*"If this id ever starts gating something, it is wrong"*) is the same observation and
+  should be rewritten, not deleted, when this lands.
+- `_subject_of()` in its current hand-decoding form goes away. The frontend's `subjectOf()` in
+  `lib/auth/current-user.ts` may stay — it labels UI, it gates nothing.
+- The agent's virtualenv gains `pyjwt[crypto]`. Note that `backend/pyproject.toml`'s two
+  `forbidden_modules` lists govern `backend/` only and are unaffected.
+
+**B2 — give the agent-server its own audience (deferred further, and optional).**
+Register `Agentic ERP Agent` / `https://agent.agentic-erp.local` (type API, delimiter `.`, **not**
+default), and have the frontend obtain a token stamped for it. This narrows the blast radius — an
+agent-server token would no longer also open the API — but it requires new token handling in the
+frontend's `app/api/agent/[...path]/route.ts`, and it is *not* what closes the finding. Do it with
+the deployment work or not at all.
+
+### How to tell when it is done
+
+1. `agent/tests/` contains a test that a **validly-shaped but wrongly-signed** token is refused
+   with 401. Today's `test_an_unreadable_token_is_refused_rather_than_labelled` only covers a token
+   that cannot be *parsed*, which is a strictly weaker claim, and passing it is not evidence.
+2. A test that an **expired** token is refused.
+3. A test that a token carrying an **unrecognised `aud`** is refused.
+4. `grep -n "without verifying" agent/app.py` returns nothing.
+5. Only then may `HOST = "127.0.0.1"` in `agent/app.py` be reconsidered — and item (1) of gate 26's
+   three (no rate limiting) is still outstanding independently.
+
+### ThunderID-side work required
+
+**For B1: none.** No new resource server, no new permissions, no role changes. B1 uses tokens
+ThunderID already issues, checked against the JWKS endpoint it already publishes. The admin MCP
+session is *not* needed.
+
+**For B2:** one new resource server, via the Console or the admin MCP — see "Identity-provider
+side, completed 2026-08-25" above for the shape `Agentic ERP MCP` used.
