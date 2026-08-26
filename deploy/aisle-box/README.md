@@ -11,8 +11,7 @@ You do not need to install Python, Node, or a database. You need Docker Desktop,
 ## Run it
 
 **1. Put the settings file in place.** The submission includes a file called `aisle.env`.
-Copy it into *this* folder and rename it to `.env` — a dot, then `env`, with no name in
-front:
+Copy it into *this* folder and rename it to `.env`:
 
 ```bash
 cp /path/to/aisle.env deploy/aisle-box/.env
@@ -26,9 +25,8 @@ into the one blank line:
 GEMINI_API_KEY=
 ```
 
-**Leaving it blank is fine.** The whole inventory system still works — sign in, browse
-products, edit them, adjust stock. Only the AI chat panel stops working, and it tells you
-so rather than hanging.
+**Leaving it blank is fine, with a caveat.** The whole system still works. The agentic parts stop working, and it tells you
+so rather than hanging. 
 
 **3. Start it.**
 
@@ -56,10 +54,8 @@ server running on your own computer.
 The first time your browser is sent to the login server it will say something like *"Your
 connection is not private"* or *"Warning: Potential Security Risk Ahead"*.
 
-**This is expected, and here is exactly what it means.** A certificate is a small file that
-proves a server is really who it claims to be. Normally a company on the internet vouches
-for that file. This login server generates its own certificate on your machine, on first
-run, and signs it itself — nobody else vouches for it. Your browser cannot tell "made by
+**This is expected, and here is exactly what it means.** 
+This login server generates its own certificate on your machine, on first run, and signs it itself — nobody else vouches for it. Your browser cannot tell "made by
 this computer thirty seconds ago" apart from "made by an impostor", so it warns you.
 
 Nothing is leaving your machine. Click **Advanced → Proceed to localhost**.

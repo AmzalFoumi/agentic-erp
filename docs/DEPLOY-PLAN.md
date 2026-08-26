@@ -155,12 +155,31 @@ so a deployment must not be able to flip it by editing a text file.
 | 26a | Box skeleton — Compose stack, deployment config without `oauth.dcr.insecure`, first-run seed fix | ✅ `a36ce82` |
 | 26b | Service images — `backend/`, `agent/`, `frontend/` Dockerfiles, `output: "standalone"` | ✅ `1cd3523`, `01f473f` |
 | 26c | Identity baked in — pre-built login-server database, `judge` account, pre-commit leak scan | ✅ `95e03bc` |
-| 26d | Wiring and TLS trust — the four app services join the namespace, certificates mounted | in progress |
-| 26e | Database access for judges — the `aisle_demo` role | grants done and verified; password rotation outstanding |
-| 26f | Judge experience — `deploy/aisle-box/README.md`, `.env.example`, and the written-down fallback | in progress |
-| 26g | Full dry run from a clean checkout, timed | not started |
-| 26h | Persist the plan — this rewrite, plus `PLAN.md`, `CLAUDE.md`, `deploy/README.md` | in progress |
+| 26d | Wiring and TLS trust — the four app services join the namespace, certificates mounted | ✅ verified in a browser 2026-08-26 |
+| 26e | Database access for judges — the `aisle_demo` role | ✅ grants verified, password rotated, reached from inside the box |
+| 26f | Judge experience — `deploy/aisle-box/README.md`, `.env.example`, and the written-down fallback | ✅ done; `aisle.env` itself is assembled outside the repo |
+| 26g | Full dry run from a clean checkout, timed | ✅ 2026-08-26 — 63s build, 4s start, whole demo walked in a browser |
+| 26h | Persist the plan — this rewrite, plus `PLAN.md`, `CLAUDE.md`, `deploy/README.md` | ✅ done |
 | 26i | B1 — the agent-server's own token verification (optional, not part of the box) | not started |
+
+### 26g — what the dry run actually proved, 2026-08-26
+
+Walked in a real browser against a box rebuilt from nothing (`down -v`, `--no-cache`):
+
+1. Certificate warning appears exactly as the README describes; accepting it works.
+2. `judge` / `AisleDemo2026!` signs in and lands on the products list — 24 products, live
+   from Supabase through the `aisle_demo` login.
+3. The AI panel took "Add 8 units to Sourdough loaf 800g", resolved it to the right SKU, and
+   **asked for approval before writing**. Confirming moved stock 274 → 282.
+4. **The row is stamped with the judge's own ThunderID id**, `01a03e4b-…`, confirmed against
+   `ENTITY` in the seeded database as `judge@aisle.demo` — not the agent's id and not
+   `system`. That is gates 22–25 working in the box rather than only in tests.
+5. The same change through the ordinary form (−8) put it back to 274, so the dry run left no
+   data behind.
+
+Minor, pre-existing, not a box problem: the Adjust-stock field reports `valuemin="0"
+valuemax="0"` to assistive technology while accepting negative numbers. A frontend
+accessibility nit, unrelated to gate 26.
 
 ### 26e — what was actually done, and how to undo it
 

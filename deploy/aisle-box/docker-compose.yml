@@ -250,6 +250,15 @@ services:
       # The one line the judge fills in themselves. Left blank, the box still runs and the
       # whole ERP works; only the AI chat panel fails, with an error from Google.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Which AI model to use. Pinned rather than left to the code's own default, so the
+      # box runs the model the developer actually demoed against - a shipped demo should
+      # not quietly use a different model from the one that was tested. Overridable from
+      # .env for anyone who wants to try another.
+      #
+      # `flash-lite` is capped at ~500 requests/day on the free tier against `gemma-31b`'s
+      # ~10-20k, which is irrelevant here because each judge brings their own key and a
+      # demo makes a handful of calls.
+      GEMINI_MODEL: ${GEMINI_MODEL:-flash-lite}
       # The agent is an OAuth *client* — it has credentials of its own, unlike the API,
       # which only verifies signatures. These belong to this box alone and were minted
       # fresh; the developer's real ones never ship.
