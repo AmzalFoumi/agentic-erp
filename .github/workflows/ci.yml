@@ -17,6 +17,14 @@ on:
   push:
     branches: [main, dev]
 
+# If a new commit lands on the same PR/branch while a run is still going,
+# cancel the stale one rather than letting it finish - its result is about
+# to be superseded anyway. github.ref scopes the group per PR/branch, so
+# runs on different PRs never cancel each other.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Least privilege for the whole workflow: every job below only reads the
 # repo. Neither job needs to write anything to GitHub, so the default
 # (broader) token permissions are switched off here rather than left
