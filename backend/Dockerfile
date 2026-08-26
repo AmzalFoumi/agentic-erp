@@ -8,40 +8,75 @@
 # for the two halves to drift apart. The compose file starts this image twice with
 # different commands instead.
 #
-# A Docker image is a sealed box containing an operating system, Python, this project's
-# dependencies, and the code — everything needed to run, with nothing borrowed from the
-# machine it runs on. That is what makes it reproducible on a stranger's laptop.
+# ── Where this shape comes from ────────────────────────────────────────────────────────
+# Structure follows Docker's own Python guide (docs.docker.com/guides/python/containerize)
+# and its build best-practices page, read 2026-08-26, not from habit:
+#   * multi-stage, with the dependencies installed in one stage and copied into the next
+#   * dependencies installed into a virtual environment so the second stage copies one
+#     folder rather than picking packages out of the system Python
+#   * a cache mount for pip's download cache, so a rebuild does not re-download
+#   * a bind mount for requirements.txt, so it never becomes a layer of its own
+#   * a non-root user created with an explicit UID
+#
+# ONE DELIBERATE DEPARTURE from that guide: it now recommends Docker Hardened Images
+# (`dhi.io/python:3.12`), which need a Docker subscription. This box is built from a public
+# repository by people we have never met, so it stays on the Docker Official Image.
 
-# python:3.12-slim — "slim" is the small Debian-based variant. Not "alpine": Alpine uses a
-# different C library, which means several Python packages have no prebuilt version for it
-# and would have to be compiled from source during the build. That turns a two-minute
-# build into a twenty-minute one on a judge's machine.
-FROM python:3.12-slim
+# ── Stage 1: install the dependencies ──────────────────────────────────────────────────
+#
+# "slim" is the smaller Debian-based variant of the official Python image. NOT "alpine":
+# the image's own documentation warns that Alpine "does use musl libc instead of glibc and
+# friends, so software will often run into issues depending on the depth of their libc
+# requirements" — and several packages here would have to be compiled from source, turning
+# a two-minute build into a long one on a judge's machine.
+FROM python:3.12-slim AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Everything goes into one self-contained folder so the next stage can copy just that.
+RUN python -m venv /opt/venv
+
+# The cache mount keeps pip's downloads between builds without putting them in the image.
+# The bind mount hands requirements.txt to this one command without copying it in — so the
+# file never becomes part of any layer, while BuildKit still re-runs this step whenever its
+# contents change.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=bind,source=requirements.txt,target=requirements.txt \
+    /opt/venv/bin/pip install -r requirements.txt
+
+# ── Stage 2: the finished image ────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
 
 # Two settings that matter specifically inside a container:
 #   PYTHONDONTWRITEBYTECODE — don't leave .pyc caches behind; they only bloat the image.
 #   PYTHONUNBUFFERED        — print log lines immediately instead of holding them in a
 #                             buffer, so `docker compose logs` shows what is happening
 #                             while it happens rather than in bursts.
+# PATH puts the copied environment first, so `python` and `uvicorn` mean the ones installed
+# in the stage above rather than the system ones.
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+# Run as an ordinary user, never root: if anything ever escapes the application, it escapes
+# as a user that owns nothing. The account has no password, no home directory and no login
+# shell — it exists only to own a running process. Pattern and flags from Docker's own
+# Python template (`docker init`).
+ARG UID=10001
+RUN adduser \
+      --disabled-password \
+      --gecos "" \
+      --home "/nonexistent" \
+      --shell "/sbin/nologin" \
+      --no-create-home \
+      --uid "${UID}" \
+      aisle
 
 WORKDIR /app
 
-# Dependencies are copied and installed BEFORE the source code, on purpose. Docker caches
-# each step and reuses it while its inputs are unchanged. Requirements change rarely and
-# source code changes constantly, so this ordering means an edit to a service file rebuilds
-# in seconds instead of reinstalling every package.
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=aisle:aisle . .
 
-COPY . .
-
-# Run as an ordinary user rather than root. If anything ever escapes the application, it
-# escapes as a user that owns nothing.
-RUN useradd --create-home --uid 10001 aisle \
- && chown -R aisle:aisle /app
 USER aisle
 
 # The default is the web API. The compose file overrides this for the MCP server.

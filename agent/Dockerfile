@@ -9,27 +9,49 @@
 # would have no physical boundary left behind it.
 #
 # Two of the pinned dependencies also only exist here: pydantic-ai-slim and httpx2.
+#
+# Structure mirrors backend/Dockerfile, which records where the shape comes from (Docker's
+# own Python guide and build best-practices page, read 2026-08-26).
 
-FROM python:3.12-slim
+# ── Stage 1: install the dependencies ──────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN python -m venv /opt/venv
+
+# Cache mount: pip's downloads survive between builds without entering the image.
+# Bind mount: requirements.txt is handed to this command without becoming a layer, and
+# BuildKit still re-runs the step whenever its contents change.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=bind,source=requirements.txt,target=requirements.txt \
+    /opt/venv/bin/pip install -r requirements.txt
+
+# ── Stage 2: the finished image ────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+ARG UID=10001
+RUN adduser \
+      --disabled-password \
+      --gecos "" \
+      --home "/nonexistent" \
+      --shell "/sbin/nologin" \
+      --no-create-home \
+      --uid "${UID}" \
+      aisle
 
 WORKDIR /app
 
-# Dependencies first, source second — see backend/Dockerfile for why the ordering matters
-# to build speed.
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=aisle:aisle . .
 
-COPY . .
-
-RUN useradd --create-home --uid 10001 aisle \
- && chown -R aisle:aisle /app
 USER aisle
 
-# ⚠️ No `--host` argument, and no port published anywhere in the compose file.
+# ⚠️ No `EXPOSE`, and no published port anywhere in the compose file.
 #
 # agent/app.py sets `HOST = "127.0.0.1"` in code, as a line someone has to deliberately
 # delete rather than a flag someone can forget. That line is the reason the agent is safe
@@ -41,8 +63,9 @@ USER aisle
 # on the developer's own machine, and nothing outside the box can reach it at all. Do not
 # add an `EXPOSE 8002` here or a `ports:` entry for this service — either one would make
 # the deferral in docs/AGENT-PLAN.md expire, and B1 has not been done.
-# The host and port here must match `HOST` and `PORT` in agent/app.py, which
+#
+# The host and port below must match `HOST` and `PORT` in agent/app.py, which
 # agent/tests/test_app.py asserts. They are repeated rather than imported because uvicorn
-# is started from the command line here, exactly as the developer starts it locally -
+# is started from the command line here, exactly as the developer starts it locally —
 # app.py has no `__main__` block of its own.
 CMD ["uvicorn", "app:app", "--host", "127.0.0.1", "--port", "8002"]
