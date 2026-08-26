@@ -54,11 +54,15 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.settings import AuthSettings
 
-from core.actor import SystemActor
+from core.actor import Actor, SystemActor, TokenActor
+from core.config import settings
 from core.database import get_session
-from core.exceptions import ValidationError
+from core.exceptions import AuthenticationError, ValidationError
 from core.models import Product
+from mcp_server.auth import ThunderIDTokenVerifier
 from mcp_server.errors import translated
 from services import products as product_service
 
@@ -66,8 +70,45 @@ from services import products as product_service
 # connected; `instructions` is prose the model sees once, describing the server
 # as a whole rather than any single tool - use it for context that would be
 # repetitive to restate in every docstring.
+#
+# **Auth (gate 25).** `token_verifier` is what actually checks a bearer token;
+# `auth` is the configuration that turns checking on and describes this server
+# as an OAuth *resource server* - one that accepts tokens issued elsewhere and
+# never issues any itself. The SDK requires both together or neither: passing a
+# verifier with no `auth` raises, and so does the reverse, which is a good
+# design because either half alone is authentication theatre.
+#
+# `resource_server_url` is this server's own identity, and it is deliberately
+# NOT the HTTP API's. See core/config.py on thunderid_mcp_audience.
+#
+# `required_scopes` is left unset on purpose. It would gate the whole server on
+# one permission, and the real check is per-operation: `services/` asks
+# `actor.can("stock.adjust")` for a stock move and `actor.can("product.read")`
+# for a lookup. A blanket requirement here would either be too weak to matter or
+# would lock a read-only agent out of reads it is entitled to.
+#
+# ⚠️ `AUTH_ENABLED=false` produces an unauthenticated server, for the test suite
+# and offline work. It must never be false anywhere reachable by anything but
+# the developer's own machine; it defaults to True so forgetting fails closed.
+_auth_settings = (
+    AuthSettings(
+        issuer_url=settings.thunderid_issuer,  # type: ignore[arg-type]
+        resource_server_url=settings.thunderid_mcp_audience,  # type: ignore[arg-type]
+        # ID-JAG stays off. It is a value of `requested_token_type` on the same
+        # endpoint, not a second architecture, and nothing in this gate needs
+        # it: `created_by`/`updated_by` already record who acted. Turning it on
+        # before there is a second party to test against would be speculative
+        # work against a draft spec. See docs/AUTH-PLAN.md.
+        identity_assertion_enabled=False,
+    )
+    if settings.auth_enabled
+    else None
+)
+
 mcp = MCPServer(
     "supermarket-inventory",
+    token_verifier=ThunderIDTokenVerifier() if settings.auth_enabled else None,
+    auth=_auth_settings,
     instructions=(
         "Tools for managing a supermarket's product catalogue and stock levels. "
         "Products are identified either by numeric id or by SKU, the code printed "
@@ -78,23 +119,63 @@ mcp = MCPServer(
 )
 
 
-def _actor() -> SystemActor:
+def _actor() -> Actor:
     """The caller identity passed to every service function.
 
-    Hardcoded to a SystemActor for now, exactly as the FastAPI adapter does -
-    the auth provider decision is deferred (docs/AUTH-PLAN.md). The id is "mcp"
-    so the `created_by` column records which front door a row came through, which
-    is genuinely useful the first time you wonder whether a human or an agent
-    created something.
+    **The trap CLAUDE.md carried since gate 6, closed at gate 25.** Until now
+    this returned an all-powerful `SystemActor` unconditionally: the HTTP API
+    was authenticated and the MCP server was not, which was survivable only
+    because `agent/app.py` binds to 127.0.0.1 with a test that fails if that
+    changes. An agent must never be more powerful than the person it acts for.
 
-    When real authentication lands, this function is one of the two places that
-    change. Nothing in `services/` moves.
+    Nothing in `services/` moved when this landed. The call sites already took
+    an actor and already called `actor.can(...)`, which was the entire point of
+    making identity a parameter in gate 3.
+
+    `get_access_token()` reads the token the SDK has *already verified* through
+    `mcp_server/auth.py` - this function does no checking of its own, and must
+    not start: two verification paths is how one of them ends up weaker.
 
     Note this is where MCP 2026-07-28 statelessness shows up concretely: there
     is no handshake in which the client says who it is once and the server
     remembers. Identity is rebuilt per call. Our design already assumed that.
     """
-    return SystemActor(actor_id="mcp")
+    token = get_access_token()
+
+    if token is None:
+        # No auth context. Two very different situations reach here, and
+        # conflating them is exactly the bug this gate exists to remove.
+        if settings.auth_enabled:
+            # Should be unreachable: with `auth` configured the SDK refuses an
+            # unauthenticated request before any tool runs. Kept as a belt to
+            # the SDK's braces, because the failure mode if it ever *is*
+            # reachable - anonymous writes stamped with a fake identity - is
+            # the worst one in this codebase. Fail closed and loudly.
+            raise AuthenticationError("This request carries no verified identity.")
+        # AUTH_ENABLED=false: the pre-gate-24 behaviour, for the test suite and
+        # for offline work. The id is "mcp" rather than "system" so an audited
+        # row still records which front door wrote it - api/deps.py uses "api".
+        return SystemActor(actor_id="mcp")
+
+    # `subject` is the OIDC `sub`, so `created_by`/`updated_by` record the
+    # actual person the agent was acting for - not the agent, and not "mcp".
+    # That is the gate's exit condition in one line.
+    #
+    # ⚠️ `scopes` can legitimately be empty: ThunderID answers a request for a
+    # permission it does not recognise with 200 OK and a token carrying no
+    # scope claim. Such an actor authenticates and is then refused by every
+    # `can()`, which is the correct fail-closed reading. If everything 403s,
+    # suspect the token before the code - mcp_server/auth.py logs a warning
+    # naming the subject when it sees one.
+    if token.subject is None:
+        # `AccessToken.subject` is Optional in the SDK because a verifier is
+        # allowed not to supply it. Ours always does - `authn/tokens.py`
+        # requires `sub` precisely because it becomes an audit column - so this
+        # is a contract check, not an expected path. A row with no provenance
+        # is not acceptable, and neither is `created_by = None`.
+        raise AuthenticationError("The verified token names no subject.")
+
+    return TokenActor(actor_id=token.subject, scopes=frozenset(token.scopes))
 
 
 def _describe(product: Product) -> dict[str, Any]:
@@ -134,6 +215,22 @@ def _describe(product: Product) -> dict[str, Any]:
         # business owns, so it belongs where both adapters can reach it. See
         # Product.needs_reorder in core/models.py.
         "needs_reorder": product.needs_reorder,
+        # Published at gate 25, and per this docstring that is a decision rather
+        # than a leak. Two reasons it earns its place:
+        #
+        # 1. It is the *confirmation* of the thing this gate built. The agent
+        #    panel shows this value back to the person who just approved a
+        #    write, so "the agent acted as you" is visible on screen instead of
+        #    being something only a test knows. Until now that line was the
+        #    hardcoded string "system" - true when SystemActor was the only
+        #    actor, and a lie afterwards, printed in exactly the place someone
+        #    would look to check the audit trail.
+        # 2. It is not a disclosure. The value is the OIDC `sub` of whoever
+        #    acted, and the only caller that can read it is one already holding
+        #    a token for this resource server.
+        #
+        # Nullable: rows written before the audit columns existed carry None.
+        "updated_by": product.updated_by,
     }
 
 
@@ -447,13 +544,40 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.transport == "stdio":
+        if settings.auth_enabled:
+            # stdio carries no HTTP request, so there is nowhere for a bearer
+            # token to travel and `get_access_token()` returns None on every
+            # call. `_actor()` then raises `AuthenticationError` for each tool
+            # invocation, one at a time, with no mention of the setting that
+            # caused it - so the developer meets the same opaque failure over
+            # and over instead of one message naming the cause. `parser.error`
+            # exits 2 with the text on stderr, which is the argparse convention
+            # for "this combination of options cannot work".
+            #
+            # Raised by CodeRabbit on PR #30 as an outside-diff comment (the
+            # line was not part of that PR's changes, so GitHub could not post
+            # it inline).
+            parser.error(
+                "stdio cannot carry a bearer token, so every tool call would be "
+                "refused with an authentication error. Set AUTH_ENABLED=false in "
+                "backend/.env for a local stdio run, or use "
+                "--transport streamable-http."
+            )
         mcp.run(transport="stdio")
         return
 
-    # Note what is *not* configured here: no auth. That is only acceptable
-    # because of the host above. The SDK adds DNS-rebinding protection of its
-    # own accord for loopback hosts, which is a backstop against a browser
-    # reaching this port - not authentication, and not a substitute for it.
+    # Auth is configured on the `mcp` object above, not here, because it is a
+    # property of the server rather than of a transport - the same tokens are
+    # required whichever way bytes arrive. (In practice only this branch can
+    # enforce it: stdio has no request to carry a header, so a stdio run is
+    # implicitly the developer's own machine and `_actor()` falls back to
+    # SystemActor only when AUTH_ENABLED is false.)
+    #
+    # The loopback host above is therefore no longer the *only* thing standing
+    # between this port and anonymous writes - but it stays until gate 26
+    # regardless. The SDK also adds DNS-rebinding protection for loopback hosts,
+    # which is a backstop against a browser reaching this port, not
+    # authentication and not a substitute for it.
     mcp.run(
         transport="streamable-http",
         host=args.host,

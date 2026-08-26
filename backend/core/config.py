@@ -92,6 +92,29 @@ class Settings(BaseSettings):
     # token on 2026-08-23.
     thunderid_audience: str = "https://api.agentic-erp.local"
 
+    # The `aud` the **MCP server** requires - a different resource server, and
+    # deliberately not the one above.
+    #
+    # Two audiences rather than one because the MCP authorization spec requires
+    # an MCP server to check that a token's audience is *itself*. Share the
+    # string and that check becomes unimplementable: "itself" and "the other
+    # front door" would be the same value, so a token minted for the HTTP API
+    # would be accepted by the MCP server and vice versa. Delegation would keep
+    # the narrowing of *scope* and throw away the narrowing of *destination* -
+    # the agent would hold a key to the whole building.
+    #
+    # Registered in the ThunderID console on 2026-08-25 as `Agentic ERP MCP`,
+    # type API, delimiter `.`, NOT the default resource server. Its four
+    # permissions duplicate the API server's on purpose: ThunderID resource
+    # servers cannot share a permission set, and the duplication costs nothing
+    # because `services/` checks the same strings either way and never learns
+    # which door a token came through. See docs/AUTH-PLAN.md, "Identity-provider
+    # side, completed 2026-08-25".
+    #
+    # ⚠️ Not to be confused with ThunderID's built-in `System` resource server,
+    # whose identifier also ends in `/mcp` and is not ours.
+    thunderid_mcp_audience: str = "https://mcp.agentic-erp.local"
+
     # ⚠️ LOCAL ONLY. ThunderID's development certificate is self-signed, so
     # fetching the JWKS over HTTPS fails certificate validation. Setting this
     # False disables that check for the JWKS fetch *only* - never for anything

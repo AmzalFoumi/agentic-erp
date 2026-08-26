@@ -44,12 +44,16 @@ live server.
 from contextlib import AsyncExitStack
 from typing import Any, Literal
 
+import httpx2
 import pydantic_core
 from mcp.client import Client
+from mcp.client.streamable_http import streamable_http_client
 from pydantic_ai import ModelRetry, RunContext, ToolDefinition
 from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 
 from actor import Actor
+from auth import get_scoped_token
+from config import settings
 
 # Validates tool arguments as "a dict with string keys and any values", i.e. it
 # checks the shape and nothing else. The real schema is enforced by the server -
@@ -167,16 +171,18 @@ class ErpToolset(AbstractToolset[Any]):
 
     def __init__(self, base_url: str, *, actor: Actor) -> None:
         self._base_url = base_url
-        # **Stored and deliberately not yet used (Gate 20).** This is the seam
-        # where identity reaches the ERP: MCP 2026-07-28 removed the initialize
-        # handshake, so a caller identifies itself with per-call `_meta` on every
-        # request, and `call_tool` below is the one line that will send it. The
-        # parameter exists now because Gate 19 created a privileged action - a
-        # human approving a write - and Gate 20 puts HTTP in front of it; adding
-        # identity afterwards is CLAUDE.md's "known trap". Today it is always a
-        # SystemActor, so sending it would change nothing and would invite
-        # backend/mcp_server/server.py's `_actor()` to trust an unauthenticated
-        # claim. It gets wired through at the auth gate, on both ends at once.
+        # **Wired through at gate 25**, having been stored and deliberately
+        # unused since Gate 20. The note that used to sit here said sending an
+        # identity would "invite backend/mcp_server/server.py's `_actor()` to
+        # trust an unauthenticated claim" - and that was the right call. What
+        # changed is not this file: the MCP server now verifies the token itself
+        # against ThunderID's published keys, so what travels below is evidence
+        # rather than an assertion. Both ends landed in the same gate, which is
+        # what made it safe.
+        #
+        # A `UserActor` carries the signed-in person's token; a `SystemActor`
+        # (AUTH_ENABLED=false) carries nothing and the connection stays
+        # anonymous, exactly as it was before this gate.
         self._actor = actor
         self._stack = AsyncExitStack()
         self._client: Client | None = None
@@ -192,13 +198,134 @@ class ErpToolset(AbstractToolset[Any]):
         return "erp"
 
     async def __aenter__(self) -> "ErpToolset":
-        # `Client(url)` is the whole of connecting over Streamable HTTP - no
-        # subprocess, no interpreter paths, no cross-venv reach. Compare
+        # `Client(url)` used to be the whole of connecting over Streamable HTTP -
+        # no subprocess, no interpreter paths, no cross-venv reach. Compare
         # `scripts/check_mcp.py`, which needs thirty lines to locate and launch
         # the backend over stdio; that gap is the reason AGENT-PLAN chose HTTP
         # for the real agent.
-        self._client = await self._stack.enter_async_context(Client(self._base_url))
+        #
+        # Gate 25 makes it two lines instead of one, because `Client(url)` builds
+        # its transport with no HTTP client and so has nowhere to put a
+        # credential. `streamable_http_client`'s own documentation says
+        # authentication is configured by passing a pre-built
+        # `httpx2.AsyncClient` - so we build one and hand it over.
+        #
+        # ⚠️ `httpx2`, not `httpx`. The SDK's signature is explicit about it, and
+        # the two packages have separate `Auth` base classes. `agent/auth.py`
+        # uses plain `httpx` for the token-endpoint call, which is a different
+        # connection to a different host and shares nothing with this one.
+        token = await self._scoped_token()
+
+        try:
+            if token is None:
+                # AUTH_ENABLED=false. Anonymous, exactly as before this gate, and
+                # matched by `_actor()` on the other end falling back to SystemActor.
+                transport = streamable_http_client(self._base_url)
+            else:
+                # **The one line where a future ID-JAG swap happens.** The SDK ships
+                # `IdentityAssertionOAuthProvider`, an `httpx2.Auth` implementing the
+                # SEP-990 flow, which drops into this same client. Nothing above this
+                # file would change. See docs/AUTH-PLAN.md, "ID-JAG is a parameter,
+                # not a second architecture".
+                #
+                # The client is entered into `self._stack` rather than handed over
+                # bare: `streamable_http_client` closes only a client it created
+                # itself, so a caller-supplied one is the caller's to clean up. Left
+                # unregistered, its connection pool outlived every turn. Found by
+                # CodeRabbit on PR #30 and confirmed against the mcp 2.0.0 client
+                # transport docs.
+                # ⚠️ The timeouts and `follow_redirects` are not decoration. Passing
+                # our own client means the SDK does **not** build one, so its
+                # `create_mcp_http_client()` defaults never apply and httpx's own
+                # 5-seconds-for-everything takes over. An MCP call is a long phone
+                # call, not a knock at the door: the agent connects and then waits
+                # while the model thinks and tools run, so a 5-second read timeout
+                # severs any turn lasting longer than that. The values below are the
+                # SDK's own recommended ones, copied from
+                # `mcp/shared/_httpx_utils.py::create_mcp_http_client` (mcp 2.0.0) -
+                # spelled out rather than imported, because that module is private
+                # and could be renamed without notice. Found by CodeRabbit on PR #30,
+                # a regression introduced by the exit-stack fix directly above.
+                http_client = await self._stack.enter_async_context(
+                    httpx2.AsyncClient(
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=httpx2.Timeout(30.0, read=300.0),
+                        follow_redirects=True,
+                    )
+                )
+                transport = streamable_http_client(self._base_url, http_client=http_client)
+
+            self._client = await self._stack.enter_async_context(Client(transport))
+        except BaseException:
+            # ⚠️ `__aexit__` is never called when `__aenter__` raises, so
+            # anything already on the stack - the authenticated `http_client`
+            # entered just above - would stay open for the life of the process,
+            # one leaked connection pool per failed turn. An MCP server that is
+            # simply not running is enough to take this path. Found by
+            # CodeRabbit on PR #30, on the same line as the leak fixed one
+            # commit earlier: this is the *other* half of that path.
+            #
+            # ⚠️ The `try` starts *above* the client construction, not between
+            # it and the `Client(...)` line, and that placement is the fix
+            # rather than style. Everything after `enter_async_context` must be
+            # inside it: when the guard began one line lower,
+            # `streamable_http_client` raising left the authenticated client
+            # open with nothing to close it.
+            # `test_the_authenticated_client_keeps_the_mcp_read_timeout` made
+            # exactly that call fail and had to close the client by hand - the
+            # manual cleanup was the leak, visible in a test. Found by
+            # CodeRabbit on PR #31.
+            await self._stack.aclose()
+            raise
         return self
+
+    async def _scoped_token(self) -> str | None:
+        """The token this connection should present, or None to stay anonymous.
+
+        Where "the agent may only do what you can do" actually happens. The
+        signed-in person's token goes to ThunderID and a **narrower** one comes
+        back: same person, valid only at the MCP server, carrying only the
+        permissions this agent is allowed to use. ThunderID cannot return more
+        authority than the token it was given, which is why the guarantee holds
+        even if this file is wrong.
+
+        Exchanged per connection rather than per call. A connection is one
+        conversation turn, tokens live an hour, and exchanging on every tool call
+        would put a round trip to the login server in front of every question the
+        model asks.
+
+        ### `DelegationError` is deliberately not caught here, or in `app.py`
+
+        CodeRabbit raised on PR #31 that a ThunderID failure escapes untranslated
+        and returns a raw 500. Checked against the installed pydantic-ai and it
+        does not. `VercelAIAdapter.dispatch_request` returns a
+        `StreamingResponse` *before* the run begins, so the toolset is entered
+        inside the stream and a FastAPI exception handler could never fire - it
+        would be dead code. What actually happens is that
+        `UIEventStream.encode_stream` catches every mid-stream exception and
+        turns it into `ErrorChunk(error_text=str(error))`, which the panel
+        renders. No status code, no stack trace, no leaked internals.
+
+        That makes `DelegationError`'s message the text the person reads, which
+        is why `auth.py` writes those messages for a human ("You do not have any
+        of the permissions this agent needs") and logs the OAuth detail
+        separately. The translation boundary exists; it is the message itself.
+        ⚠️ Keep it that way: any new `DelegationError` message is user-visible.
+        """
+        if not settings.auth_enabled:
+            return None
+
+        user_token = getattr(self._actor, "token", None)
+        if user_token is None:
+            # A SystemActor with auth on. `app.py` does not produce that
+            # combination, so reaching here means someone constructed a toolset
+            # by hand - a script, a test. Anonymous is the honest answer; the ERP
+            # will refuse it, which is the correct outcome rather than a silent
+            # escalation.
+            return None
+
+        scoped = await get_scoped_token(user_token)
+        return scoped.access_token
 
     async def __aexit__(self, *args: Any) -> bool | None:
         self._client = None

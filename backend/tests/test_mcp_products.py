@@ -70,6 +70,19 @@ def call(session: Session, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(mcp_server, "get_session", fake_get_session)
 
+    # Gate 25: `_actor()` now refuses to invent an identity when authentication
+    # is on, so these in-process calls - which have no HTTP request and
+    # therefore no verified token - would every one of them fail with
+    # "carries no verified identity". Turning auth off restores the SystemActor
+    # this file has always run against.
+    #
+    # Deliberately flipping the *setting* rather than stubbing `_actor`: this
+    # way the real function runs, including its fallback branch, so a change
+    # that broke it would still be caught here. What `_actor` does with a real
+    # token, and that it fails closed without one, is tested in
+    # tests/test_mcp_auth.py - which is where those assertions belong.
+    monkeypatch.setattr(mcp_server.settings, "auth_enabled", False)
+
     def invoke(_tool: str, /, **arguments):
         # The `/` makes `_tool` positional-only. Without it, calling
         # `invoke("create_product", name="Rice")` raises "got multiple values

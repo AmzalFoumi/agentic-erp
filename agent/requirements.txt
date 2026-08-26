@@ -60,3 +60,10 @@ uvicorn[standard]==0.52.0
 # transitively via mcp today, which is a latent break - pinning makes it
 # intentional. Same pin as backend/requirements.txt.
 httpx==0.28.1
+
+# Gate 25. The MCP SDK's `streamable_http_client` takes an `httpx2.AsyncClient`
+# specifically - a separate package from httpx above, with its own Auth base
+# class - and that is the only way to attach a credential to the MCP
+# connection. Present transitively via mcp today; pinned here for the same
+# reason httpx is, so the version is a decision rather than an accident.
+httpx2==2.9.1

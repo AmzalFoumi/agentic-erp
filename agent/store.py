@@ -17,10 +17,15 @@ from database import get_session
 from models import ConversationRow, MessageRow
 
 
-def start_conversation(*, title: str | None = None) -> int:
-    """Create a conversation row, return its id."""
+def start_conversation(*, title: str | None = None, started_by: str = "system") -> int:
+    """Create a conversation row owned by `started_by`, return its id.
+
+    `started_by` is the OIDC `sub` of whoever asked for it, and gate 25 is where
+    the column stopped being a placeholder. It defaults to "system" for the
+    AUTH_ENABLED=false path and for anything with no human behind it.
+    """
     with get_session() as session:
-        row = ConversationRow(title=title)
+        row = ConversationRow(title=title, started_by=started_by)
         session.add(row)
         session.commit()
         return row.id
@@ -39,15 +44,37 @@ def append_message(conversation_id: int, message: Message) -> None:
         session.commit()
 
 
-def conversation_exists(conversation_id: int) -> bool:
-    """Is there a conversation with this id?
+def conversation_exists(conversation_id: int, *, actor_id: str | None = None) -> bool:
+    """Is there a conversation with this id, belonging to this person?
 
     Needed because `load_history` returns [] for an unknown id and for a real
     conversation nobody has spoken in yet, and an HTTP caller has to tell those
     apart - one is a 404, the other is a fresh chat window.
+
+    **`actor_id` is the fix for the defect gate 25 inherited.** Conversation ids
+    are sequential integers, so before this a signed-in person could open
+    someone else's conversation by changing a number in the URL - and worse,
+    *act on it*: the agent panel reopened stale history and created a product
+    nobody asked for during gate 24's verification. That is the agent writing to
+    the database off another person's history, which is a write-safety problem
+    rather than a cosmetic one.
+
+    `None` means "do not check", which is the AUTH_ENABLED=false path. It is the
+    default because every caller that has an identity now passes one explicitly,
+    and a caller that has none genuinely cannot check.
+
+    Answering False rather than raising is deliberate: a conversation belonging
+    to someone else must be indistinguishable from one that does not exist, or
+    the 404-versus-403 difference tells you how many conversations exist and
+    which ids are real.
     """
     with get_session() as session:
-        return session.get(ConversationRow, conversation_id) is not None
+        row = session.get(ConversationRow, conversation_id)
+        if row is None:
+            return False
+        if actor_id is not None and row.started_by != actor_id:
+            return False
+        return True
 
 
 def save_pending(conversation_id: int, resume_state: bytes) -> None:

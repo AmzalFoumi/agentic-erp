@@ -113,3 +113,22 @@ type = "forbidden"
 # here would be worse than one in services.
 source_modules = ["core"]
 forbidden_modules = ["fastapi", "starlette", "mcp", "uvicorn", "httpx", "jwt"]
+
+[[tool.importlinter.contracts]]
+name = "Authn stays adapter-free"
+type = "forbidden"
+# The gap the two rules above left open, raised by review on PR #28 and closed
+# here at gate 25. `authn` sits on its own layer *between* the adapters and
+# services precisely so both front doors can share it; that only holds while it
+# knows nothing about either. Without this rule, `from fastapi import ...` in
+# authn/ would pass the layers contract - it points downward - and quietly weld
+# the token verifier to HTTP, at which point the MCP server cannot reuse it.
+source_modules = ["authn"]
+# `jwt` is absent from this list, and that is the whole point of the layer:
+# services/ and core/ are barred from it because parsing a token is the
+# adapter's job, and authn/ IS the place that job was moved to.
+#
+# `mcp` is listed for the same reason as `fastapi`. The MCP SDK's TokenVerifier
+# protocol is a dialect, so the adapter for it lives in mcp_server/auth.py -
+# next to mcp_server/errors.py, which translates our exceptions the same way.
+forbidden_modules = ["fastapi", "starlette", "mcp", "uvicorn", "httpx"]

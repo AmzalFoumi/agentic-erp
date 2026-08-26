@@ -19,7 +19,8 @@ read when you are working in the area they cover.
 | `docs/PLAN.md` | Progress table (gates 0–26), stop gates, division of labour, verify-docs rule, structure | **Every gate. Root — wins over all others** |
 | `docs/BACKEND-PLAN.md` | Gates 0–8 as built, backend decisions and deferrals | Changing backend code |
 | `docs/FRONTEND-PLAN.md` | Gates 9–13, screen and capability inventories, design-system rationale | Changing frontend code |
-| `docs/AUTH-PLAN.md` | Gates 22–26: provider decision (**ThunderID, confirmed by the Gate 23 spike**), RFC 8693 delegation, the ID-JAG-later rule, permission mapping | The auth gates |
+| `docs/AUTH-PLAN.md` | Gates 22–25: provider decision (**ThunderID, confirmed by the Gate 23 spike**), RFC 8693 delegation, the ID-JAG-later rule, permission mapping | The auth gates |
+| `docs/DEPLOY-PLAN.md` | Gate 26: hosting the five services, and the three security gaps gate 25 deferred into it | Deployment work |
 | `docs/AGENT-PLAN.md` | Gates 14–21, the Pydantic AI / Gemini decision, the agent's own schema, the localhost stop condition | Changing anything in `agent/` |
 | `CLAUDE.md` (this file) | A summary for agent onboarding | Subordinate to all five |
 | `frontend/AGENTS.md` (+ `frontend/CLAUDE.md`, which just includes it) | **Build output** — rewritten by `next dev` on every start, not hand-edited. One instruction: read `node_modules/next/dist/docs/` rather than trusting training data about Next.js | Writing Next.js code. Framework-only — says nothing about this project, so it never overrides the five above |
@@ -95,25 +96,41 @@ from whatever it has and passes it down. **As of gate 24 the HTTP side is real**
 membership over the token's `scope` claim. Not one service function changed when that landed — the
 call sites already existed, which was the entire point of doing this early.
 
-`SystemActor` (grants everything) survives in two places, both deliberate: behind
-`AUTH_ENABLED=false` for tests and offline work, and — ⚠️ **still unfixed** — in
-`mcp_server/server.py`'s `_actor()`, which is gate 25. The frontend's third seam,
+`SystemActor` (grants everything) now survives behind one condition — `AUTH_ENABLED=false`, for
+tests and offline work — but in **two** places, and both are live code paths, not leftovers:
+`mcp_server/server.py`'s `_actor()` and `agent/app.py`'s `get_actor()` (`agent/app.py:158`). This
+line used to say "exactly one place"; that was wrong, found by CodeRabbit on PR #31. It matters
+because it means **one boolean turns identity off across two services at once**, which is why gate
+26 lists `AUTH_ENABLED` among the things a deployment must not be able to flip
+(`docs/DEPLOY-PLAN.md`). What gate 25 did close is the *unconditional* fallback: with auth on,
+`mcp_server/server.py` now returns a real `TokenActor` built from a token the SDK verified via
+`mcp_server/auth.py`, and raises rather than inventing an identity. `agent/app.py`'s `get_actor()`
+is real too on that path. The frontend's third seam,
 `frontend/src/lib/auth/current-user.ts`, is **no longer hardcoded** — it reads the real session and
 returns `CurrentUser | null`. It has no callers yet; it exists as the seam, not as live code.
 
 **The deferral had two expiry conditions**, also in `PLAN.md`: either the MCP server becomes
 HTTP-reachable by anything that is not the developer's own machine, or a second human user exists.
-**Condition 1 fired on 2026-08-13** — the goal of hosting all four services *is* that condition — so
-auth is now scheduled as gates 22–26 and is a hard prerequisite for deployment. **`docs/AUTH-PLAN.md`
+**Condition 1 fired on 2026-08-13** — the goal of hosting all five services *is* that condition — so
+auth is now scheduled as gates 22–25 and is a hard prerequisite for deployment (gate 26, `docs/DEPLOY-PLAN.md`). **`docs/AUTH-PLAN.md`
 is the whole workstream** — don't re-research the provider question, and read it before touching any
 gate from 23 on.
 
-**Known trap, fixed at gate 25 and not before:** `mcp_server/server.py`'s `_actor()` hardcodes
-`SystemActor` — the API is authenticated as of gate 24, the MCP server is not. That's fine only because no unauthenticated caller exists yet — `agent/app.py` binds
-to `127.0.0.1` with a test that fails if that changes, and that test is what stands between this code
-and anonymous write access. The moment an agent runs server-side on behalf of a logged-in user, the
-authenticated actor must be threaded through instead, otherwise the agent is more powerful than the
-user it's acting for. Do not delete the loopback binding before gate 26.
+**The trap this file carried from gate 6 is closed (2026-08-25).** `mcp_server/server.py`'s
+`_actor()` no longer hardcodes `SystemActor`; `tests/test_mcp_auth.py` fails if it comes back. Two
+things about the shape of the fix are worth knowing before touching it:
+
+- **Two audiences, not one.** `thunderid_audience` is the HTTP API's; `thunderid_mcp_audience` is
+  the MCP server's, a separate ThunderID resource server. The MCP authorization spec requires an MCP
+  server to check the token was minted for *itself*, which is unimplementable if both doors share a
+  string. `verify_access_token(token, audience=...)` takes it as a parameter.
+- **A `200 OK` from ThunderID proves nothing.** Asking token exchange for a permission that does not
+  exist returns a valid, correctly-audienced token carrying **no `scope` claim at all**. Every check
+  must read the scope that came back; empty means *zero* permissions, never "unspecified, so allow".
+
+**The loopback binding still stays until gate 26.** It is no longer the only thing between this code
+and anonymous writes, but nothing rate-limits an unauthenticated caller yet and ThunderID's
+certificate is still self-signed. Do not delete `agent/app.py`'s `HOST = "127.0.0.1"` or its test.
 
 ### Error handling has two independent translation layers
 
