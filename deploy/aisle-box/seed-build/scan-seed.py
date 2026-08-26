@@ -61,7 +61,12 @@ def main() -> int:
     # on PR #34, and it is the same failure shape docs/DEPLOY-PLAN.md already warns about
     # for gate-26 done-conditions.
     if not SECRETS.exists():
-        print(f"{SECRETS.name} is missing, so client secrets could NOT be checked.", file=sys.stderr)
+        # The filename is written out rather than interpolated from SECRETS.name on
+        # purpose: CodeQL's py/clear-text-logging-sensitive-data treats anything derived
+        # from a variable named SECRETS as tainted, and flagged this line high severity
+        # on PR #35 even though .name is only the filename. Do not turn it back into an
+        # f-string - it prints the same characters and re-breaks the security check.
+        print("box-secrets.json is missing, so client secrets could NOT be checked.", file=sys.stderr)
         print("Run build-seed.py first. Refusing to report the seed as safe.", file=sys.stderr)
         return 1
 
