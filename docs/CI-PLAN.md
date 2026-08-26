@@ -117,6 +117,20 @@ confirmed 3.12.4 in `backend/.venv/pyvenv.cfg` and `agent/.venv/pyvenv.cfg`, no
 - `pytest` from `agent/`.
 - `lint-imports --config agent/pyproject.toml` from the **repo root**.
 
+## `.github/workflows/docker-build.yml` — a separate file, on purpose
+
+Added after CI-2, once `deploy/aisle-box/` (the submission judges actually run) existed to
+have an opinion about. Builds the three Aisle Box images (backend, agent, frontend) on
+every PR to `main` and discards them — proves each Dockerfile still produces a working
+image, nothing more. Kept in its own file rather than folded into `ci.yml` so a slow or
+flaky Docker build never blocks or muddies the fast test signal; each file's failure now
+has one obvious meaning.
+
+Deliberately does NOT build/boot the full `docker compose` stack (Option B, considered and
+rejected for automatic PR checks) — that needs real secrets and takes much longer for a
+check that would only run once per PR. A full stack boot-test is a manual pre-submission
+rehearsal, not a CI job.
+
 ## Deliberately deferred, not forgotten
 
 Marking the CI check as **required** for merge (GitHub branch protection) is not

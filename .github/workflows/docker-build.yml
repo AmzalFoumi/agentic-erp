@@ -1,0 +1,64 @@
+# Builds the three Aisle Box images (backend, agent, frontend) on every PR to main, then
+# throws them away. This is NOT a test that the box works together - see
+# docs/CI-PLAN.md's "Option A vs Option B" note. It only proves each Dockerfile still
+# produces a working image, which is the single most likely way a change quietly breaks
+# the thing judges actually run, per docs/DEPLOY-PLAN.md's Aisle Box design.
+#
+# Deliberately does not use docker-compose - that would need real secrets
+# (THUNDERID_AGENT_CLIENT_SECRET etc, see deploy/aisle-box/docker-compose.yml) and take
+# much longer. This checks the recipe completes, nothing more.
+
+name: Docker build
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Build image (not pushed, discarded when the job ends)
+        working-directory: backend
+        run: docker build .
+
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Build image (not pushed, discarded when the job ends)
+        working-directory: agent
+        run: docker build .
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # NEXT_PUBLIC_* build args are baked into the compiled JavaScript (see
+      # frontend/Dockerfile's own comment on this). Dummy values are fine here - this job
+      # only checks `npm run build` completes, never starts the site or talks to
+      # ThunderID. Real values are supplied by deploy/aisle-box/docker-compose.yml.
+      - name: Build image (not pushed, discarded when the job ends)
+        working-directory: frontend
+        run: |
+          docker build . \
+            --build-arg NEXT_PUBLIC_THUNDERID_BASE_URL=https://localhost:8090 \
+            --build-arg NEXT_PUBLIC_THUNDERID_CLIENT_ID=ci-dummy \
+            --build-arg NEXT_PUBLIC_THUNDERID_SCOPES="openid product.read"
