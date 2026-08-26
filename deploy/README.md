@@ -41,6 +41,29 @@ application, secret, role and signing key the developer has, with no backup and 
 `down -v` is correct only against `deploy/aisle-box/` and other throwaway stacks, where the next
 `up` rebuilds everything from committed files.
 
+## Switching between the two stacks
+
+Whichever one you want, stop the other first. They fight over ports 3000 and 8090, and the
+clash is silent rather than loud (see the warning above).
+
+**Going to the box** — stop dev work first:
+
+```bash
+docker compose -f deploy/docker-compose.thunderid.yml stop   # and Ctrl-C your `npm run dev`
+docker compose -f deploy/aisle-box/docker-compose.yml up -d
+```
+
+**Coming back to dev work** — stop the box first:
+
+```bash
+docker compose -f deploy/aisle-box/docker-compose.yml stop
+docker compose -f deploy/docker-compose.thunderid.yml start
+```
+
+`stop` on the box is enough; `down -v` there is also safe, because everything it holds is
+rebuilt from committed files on the next `up`. **The same is not true of the dev stack** —
+see the warning above and the next section.
+
 ## Where your data lives
 
 Three named Docker volumes hold everything that matters — they are separate from the container,
