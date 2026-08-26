@@ -17,6 +17,13 @@ on:
   push:
     branches: [main, dev]
 
+# Least privilege for the whole workflow: every job below only reads the
+# repo. Neither job needs to write anything to GitHub, so the default
+# (broader) token permissions are switched off here rather than left
+# implicit - flagged by CodeRabbit on PR #32.
+permissions:
+  contents: read
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -25,9 +32,13 @@ jobs:
     # discarded when the job ends. Credentials are made up on the spot and
     # only ever reachable from inside this same job, so there is nothing
     # sensitive about them being in plain text here.
+    #
+    # Pinned to an exact image digest, not the "17" tag - a tag can be
+    # reassigned to point at a different image at any time with no warning;
+    # a digest cannot. Fetched from Docker Hub's registry API on 2026-08-26.
     services:
       postgres:
-        image: postgres:17
+        image: postgres:17@sha256:0b657ff48d7f76a1e907f381b1693eb4f2bf54c1d2df4feb6743d7dc601768dd
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci
@@ -47,9 +58,18 @@ jobs:
       DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/agentic_erp_ci
 
     steps:
-      - uses: actions/checkout@v4
+      # Both actions pinned to an exact commit SHA, not the "v4"/"v5" tags -
+      # a tag can be moved to point at different code later; a commit SHA
+      # cannot. Fetched from each action's own GitHub API on 2026-08-26.
+      # persist-credentials: false stops the job's GITHUB_TOKEN from being
+      # written to disk at all, so nothing pip/pytest runs during this job
+      # could pick it up even if it wanted to - flagged by CodeRabbit on
+      # PR #32.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -73,9 +93,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # Both actions pinned to an exact commit SHA, not the "v4"/"v5" tags -
+      # a tag can be moved to point at different code later; a commit SHA
+      # cannot. Fetched from each action's own GitHub API on 2026-08-26.
+      # persist-credentials: false stops the job's GITHUB_TOKEN from being
+      # written to disk at all, so nothing pip/pytest runs during this job
+      # could pick it up even if it wanted to - flagged by CodeRabbit on
+      # PR #32.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
