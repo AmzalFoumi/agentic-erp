@@ -52,11 +52,21 @@ def main() -> int:
         return 1
 
     # The box's own client secrets must appear only as hashes, never as text.
-    if SECRETS.exists():
-        for name, value in json.loads(SECRETS.read_text()).items():
-            FORBIDDEN[value] = f"the box's {name} in readable form"
-    else:
-        print(f"Note: {SECRETS.name} not present, so client secrets were not checked.")
+    #
+    # ⚠️ A MISSING SECRETS FILE IS A FAILURE, NOT A NOTE. This used to print "not present,
+    # so client secrets were not checked" and carry on to exit 0 - which meant the script
+    # could announce "Nothing publishable-unsafe found" while one of the four things it
+    # claims to check had never run. A gate that reports success without doing its job is
+    # worse than no gate: it is a green light with nothing behind it. Raised by CodeRabbit
+    # on PR #34, and it is the same failure shape docs/DEPLOY-PLAN.md already warns about
+    # for gate-26 done-conditions.
+    if not SECRETS.exists():
+        print(f"{SECRETS.name} is missing, so client secrets could NOT be checked.", file=sys.stderr)
+        print("Run build-seed.py first. Refusing to report the seed as safe.", file=sys.stderr)
+        return 1
+
+    for name, value in json.loads(SECRETS.read_text()).items():
+        FORBIDDEN[value] = f"the box's {name} in readable form"
 
     failed = False
     for path in files:

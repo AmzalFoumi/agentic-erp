@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import secrets
 import ssl
@@ -73,8 +74,19 @@ VARIABLES_FIXED = {
     "A_ISLE_AGENT_REDIRECT_URIS": ["http://localhost:8002/callback"],
 }
 
-# The certificate is self-signed and issued for `localhost`, so a build tool talking to the
-# throwaway stack on this machine has nothing to verify against. Judges never run this.
+# ⚠️ Certificate checking is OFF here, and this is the one place in gate 26 where that is
+# still true. Said plainly rather than softly, because CodeRabbit raised it on PR #34 and
+# the risk is real: `call()` below sends an ADMINISTRATOR bearer token in the Authorization
+# header, so any process that managed to bind localhost:8090 while this script runs would
+# receive it and could rewrite the configuration being seeded.
+#
+# Left as it is, deliberately, for three reasons. The certificate is generated inside a
+# Docker volume and does not exist on disk at the moment this runs, so verifying would mean
+# extracting it first. This is a developer-only build tool, run by hand, against a throwaway
+# stack on the developer's own machine - judges never run it and it is not part of the box.
+# And the attack it enables requires someone already running code on that machine.
+#
+# What would change this: running this script against anything that is not localhost. Do not.
 _CTX = ssl.create_default_context()
 _CTX.check_hostname = False
 _CTX.verify_mode = ssl.CERT_NONE
@@ -96,16 +108,39 @@ def call(path: str, token: str, payload=None, method="GET"):
         raise SystemExit(1)
 
 
-def box_secrets() -> dict[str, str]:
+def box_secrets(*, persist: bool) -> dict[str, str]:
+    """The box's own client secrets, minted on first use.
+
+    ⚠️ `persist` exists because a dry run must leave nothing behind. This function used to
+    write the file unconditionally, so `build-seed.py --token ...` with no `--apply` - the
+    run the docs call "a dry run, it changes nothing" - created durable credentials, and a
+    later real run silently reused them. The values still have to be *generated* either way,
+    because the import request needs them in order to be validated at all; they are simply
+    thrown away afterwards unless the run is real. Raised by CodeRabbit on PR #34.
+    """
     if SECRETS.exists():
         return json.loads(SECRETS.read_text())
+
     minted = {
         "A_ISLE_GATE_CLIENT_SECRET": secrets.token_urlsafe(32),
         "A_ISLE_AGENT_CLIENT_SECRET": secrets.token_urlsafe(32),
         "THUNDERID_SECRET": secrets.token_urlsafe(32),
     }
-    SECRETS.write_text(json.dumps(minted, indent=2))
-    print(f"Minted fresh box-only secrets -> {SECRETS.name} (gitignored)")
+
+    if not persist:
+        print("Dry run: secrets generated in memory only, nothing written.")
+        return minted
+
+    # ⚠️ os.open with mode 0o600 rather than Path.write_text, which applies the process
+    # umask and so lands at 0644 on a typical machine - leaving these readable by every
+    # other account on it. The mode is a no-op on Windows, where the file inherits the
+    # directory's permissions; it is not a no-op anywhere else. Raised by CodeRabbit on
+    # PR #34.
+    fd = os.open(SECRETS, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(minted, handle, indent=2)
+
+    print(f"Minted fresh box-only secrets -> {SECRETS.name} (gitignored, owner-only)")
     return minted
 
 
@@ -133,7 +168,7 @@ def main() -> int:
         args.token,
         {
             "content": config,
-            "variables": {**VARIABLES_FIXED, **box_secrets()},
+            "variables": {**VARIABLES_FIXED, **box_secrets(persist=args.apply)},
             "dryRun": not args.apply,
             # Matches what the Console itself sends. `upsert` updates rather than
             # duplicates, so this is safe to re-run.

@@ -30,7 +30,8 @@ It also means nothing in them is encrypted with `crypto.key`, so the fresh `cryp
 `setup.sh` generates on the judge's machine cannot break them.
 
 `scan-seed.py` is the gate in front of every commit. **It has already caught one real leak**
-— see below.
+— see below. It **refuses to run** without `box-secrets.json`, rather than skipping the
+client-secret check and still reporting success.
 
 ## The three scripts
 
@@ -120,7 +121,9 @@ carrying **no `scope` claim at all**. An empty scope means *zero* permissions, n
 
 ## box-secrets.json
 
-Generated on first run, **gitignored, and never committed**. It holds the box's own client
+Generated on the first `--apply` run, **gitignored, and never committed**, and written
+owner-only (`0600`, where the operating system honours that). A dry run generates the values
+in memory and writes nothing, so it really does leave no trace. It holds the box's own client
 secrets and session key — minted fresh, never the developer's real ones. They are worthless
 against anything but a copy of the login server on the holder's own machine, but they are
 plaintext, so they travel in the separately-delivered `aisle.env`, not in this repository.
