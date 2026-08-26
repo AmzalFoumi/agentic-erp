@@ -15,6 +15,7 @@
 > | `docs/AUTH-PLAN.md` | Gates 22–25: the login/security decision, the mechanism, the login providers we checked | The login/security gates |
 > | `docs/DEPLOY-PLAN.md` | Gate 26: hosting all five services, and the three things gate 25 handed over | The deployment gate |
 > | `docs/AGENT-PLAN.md` | Gates 14–21, how the AI agent works | Changing the AI agent's code |
+> | `docs/CI-PLAN.md` | Gates CI-1–CI-2: running the backend/agent test suites and `lint-imports` automatically on every PR | Changing CI, or anything that could break the test suites |
 >
 > **Every decision is written down once, in the file responsible for it**; the other files just
 > link to it instead of repeating it. Rules that apply across the whole project — stopping points,
