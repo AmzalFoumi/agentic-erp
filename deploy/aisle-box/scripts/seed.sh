@@ -18,16 +18,24 @@ if [ -f "$MARKER" ]; then
   exit 0
 fi
 
+# Always start from the image's own four databases. Two of them - runtime_persistent and
+# runtime_transient - hold sign-in sessions and half-finished login attempts, which belong
+# to whoever last used the machine they came from. Those are taken fresh from the image and
+# never shipped.
+echo "[seed] Laying down the login server's own starting databases."
+rm -f /data/*.db /data/*.db-wal /data/*.db-shm
+cp -r /opt/thunderid/database/. /data/
+
+# Then overlay Aisle's configuration on top: the applications, resource servers, roles,
+# permissions and the `judge` demo account. Only these two files are shipped, and both hold
+# passwords as PBKDF2 hashes rather than as readable text - checked before they were
+# committed, which is what makes it safe to publish them.
 if ls /seed/*.db >/dev/null 2>&1; then
-  echo "[seed] Installing the pre-configured Aisle login-server data."
-  # Clear whatever Docker pre-filled from the image first, including SQLite's sidecar
-  # write-ahead-log files - a stale -wal alongside a fresh .db is a corrupt database.
-  rm -f /data/*.db /data/*.db-wal /data/*.db-shm
+  echo "[seed] Installing Aisle's pre-configured accounts, roles and permissions."
   cp /seed/*.db /data/
 else
-  echo "[seed] No pre-configured data found - falling back to the image's own default."
-  echo "[seed] (Expected only while this box is still being built; a shipped box has it.)"
-  cp -r /opt/thunderid/database/. /data/
+  echo "[seed] No Aisle configuration found - starting from the login server's defaults."
+  echo "[seed] (Expected only while this box is being built; a shipped box has it.)"
 fi
 
 touch "$MARKER"
