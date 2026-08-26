@@ -141,6 +141,14 @@ named `aisle.env`. Compose already reads a file called `.env` next to the Compos
 judge copies `aisle.env` → `deploy/aisle-box/.env` and pastes their Gemini key into its one blank
 line. No mount arguments, no editing beyond that line.
 
+**The one deliberate exception, stated here so this section does not contradict itself.** The
+demo account's password (`judge` / `AisleDemo2026!`) *is* written in the repository, in
+`deploy/aisle-box/README.md`. That is not a leak and not an oversight: it opens nothing except
+a copy of the login server running on the reader's own machine, which they started themselves
+and which holds no data of ours. Publishing it is what removes a setup step for the judge. The
+rule above is about credentials that open something real — the database, and the box's client
+secrets — and those are in `aisle.env` only.
+
 **`AUTH_ENABLED` is not in that file and must never be.** It is hard-wired to `"true"` in
 `docker-compose.yml`. One boolean turns identity off across two services at once (see `CLAUDE.md`),
 so a deployment must not be able to flip it by editing a text file.
