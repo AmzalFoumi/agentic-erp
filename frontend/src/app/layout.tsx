@@ -38,6 +38,31 @@ export const metadata: Metadata = {
   description: "Supermarket inventory and purchasing",
 };
 
+/**
+ * Every route is rendered per request, never prerendered at build time.
+ *
+ * **This is required for `next build` to succeed at all**, and it was found by
+ * gate 26 — the first time this app had ever been built for production rather
+ * than run with `next dev`.
+ *
+ * Next decides statically-renderable pages by *trying* to prerender them and
+ * treating its own `DynamicServerError` ("this route used `headers`") as the
+ * signal to fall back to per-request rendering. `ThunderIDProvider` below reads
+ * headers, so that signal fires on every route — but the SDK catches it and
+ * rethrows it as a fatal `ThunderIDRuntimeError`, which Next cannot recognise.
+ * The build then dies on `/` with "Export encountered an error". Checked
+ * against @thunderid/nextjs 1.0.6 on 2026-08-26.
+ *
+ * Declaring it here states the truth rather than working around it: nothing in
+ * Aisle is prerenderable. Every screen needs a session and live data, and `/`
+ * itself renders differently signed in and signed out.
+ *
+ * Still supported in Next 16 (removed only when `cacheComponents` is enabled,
+ * which this project does not enable) — see
+ * `node_modules/next/dist/docs/01-app/02-guides/caching-without-cache-components.md`.
+ */
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: Readonly<{
