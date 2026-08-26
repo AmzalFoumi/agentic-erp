@@ -29,6 +29,12 @@
 *.woff2         binary
 *.zip           binary
 
+# SQLite databases. The Aisle demo box ships a pre-configured ThunderID identity
+# store as .db files (deploy/aisle-box/thunderid-seed/). Line-ending rewriting
+# would corrupt them silently - the file would still be committed, and would only
+# fail when someone tried to start the box from it.
+*.db            binary
+
 # Windows-only scripts genuinely require CRLF - cmd.exe mis-parses LF batch
 # files. The venv's activate.bat is not committed, but this guards anything
 # added later.

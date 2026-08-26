@@ -1,0 +1,336 @@
+# ═══════════════════════════════════════════════════════════════════════════════════════
+#  Aisle in a box — everything needed to run the whole demo on one machine.
+#
+#  Start it with:      docker compose up --build
+#  Stop it with:       docker compose down          (your data survives)
+#  Throw it away with: docker compose down -v       (deletes the login server's data)
+#
+#  See README.md in this folder for the step-by-step version aimed at someone who has never
+#  seen this project before.
+# ═══════════════════════════════════════════════════════════════════════════════════════
+#
+#  ⚠️ THIS IS NOT THE DEVELOPER'S OWN LOGIN SERVER.
+#
+#  `deploy/docker-compose.thunderid.yml` runs a *separate* ThunderID for day-to-day
+#  development. The two are kept apart by the `name:` line below, which Docker uses as a
+#  prefix for every volume it creates. This file's data lives in `aisle-box_thunderid-db`;
+#  the developer's lives in `thunderid-local_thunderid-db`. Nothing here can touch that.
+#
+#  But they both want port 8090, and a port can only be held by one program at a time. So
+#  stop the development one before starting this one:
+#
+#      docker compose -f deploy/docker-compose.thunderid.yml stop
+#
+#  `stop`, never `down -v` — `down -v` on that file would delete every account and signing
+#  key the developer has, with no backup.
+# ═══════════════════════════════════════════════════════════════════════════════════════
+
+name: aisle-box
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  #  aisle-net — the box's shared network.
+  #
+  #  This container does nothing. It sleeps. Its only job is to *own a network*, which
+  #  every other container then joins with `network_mode: "service:aisle-net"`.
+  #
+  #  WHY, in plain terms. Normally each container is its own little machine with its own
+  #  address, and they call each other by name — `http://api:8000`. That breaks two things
+  #  here, both of them hard:
+  #
+  #    1. The login server's certificate. A certificate is a small file that says "this
+  #       really is the server you meant, not an impostor". This one was issued for the
+  #       name `localhost` and for nothing else (checked with `openssl x509`). A container
+  #       calling it as `https://thunderid:8090` would get a name mismatch and refuse the
+  #       connection — or would have to be told to stop checking certificates at all,
+  #       which is exactly the shortcut this project is trying to get rid of.
+  #
+  #    2. The website's login library reads ONE setting for the login server's address,
+  #       and that setting is baked into the browser JavaScript when the site is built. So
+  #       it has to be a single address that is correct for the visitor's browser AND for
+  #       the website's own server-side code at the same time. With separate containers
+  #       those are two different addresses, and one setting cannot be both.
+  #
+  #  Sharing one network solves both at once: every container sees the same `localhost`,
+  #  so `https://localhost:8090` is correct everywhere — in the browser, in the built
+  #  JavaScript, in server-side code, and in the `iss` field stamped inside every token.
+  #  Certificate checking can then stay switched ON.
+  #
+  #  It also means the box's internal addresses are identical to the developer's own
+  #  machine (8000 API, 8001 MCP, 8002 agent, 3000 website, 8090 login), so there is no
+  #  second set of addresses to keep in step.
+  #
+  #  Why a separate do-nothing container rather than letting the login server own the
+  #  network: if the login server restarts, everything sharing its network loses its
+  #  connection. A container that only sleeps has nothing to crash.
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  aisle-net:
+    image: alpine:3.21
+    command: ["tail", "-f", "/dev/null"]
+    restart: unless-stopped
+    ports:
+      # Only these two are reachable from the judge's machine. The API (8000), the MCP
+      # server (8001) and the agent (8002) are deliberately NOT published — they are
+      # reachable only from inside the box. That is what keeps `agent/app.py`'s
+      # `HOST = "127.0.0.1"` line honest; see docs/DEPLOY-PLAN.md.
+      - "127.0.0.1:3000:3000"    # the Aisle website — this is what you open
+      - "127.0.0.1:8090:8090"    # the login server — your browser is redirected here
+
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  #  thunderid-seed — runs once, then exits.
+  #
+  #  Puts a ready-made login-server database in place, so nobody has to create accounts,
+  #  applications, roles or permissions by hand. Without this, a first-time user would
+  #  face an eight-step import wizard that aborts on the first error while still reporting
+  #  success (see .claude/problems/thunderid-import-aborts-on-first-error.md).
+  #
+  #  ⚠️ The guard is a marker file, NOT "is the folder empty". That is deliberate and it
+  #  is the fix for a real bug. Docker fills a brand-new volume with whatever the image
+  #  already has at that path, and it does so when the container is *created* — which
+  #  Compose does for every service up front, before any of them run. So by the time this
+  #  container starts, the folder can already look "not empty" even on a completely fresh
+  #  machine, and an emptiness check would wrongly decide the work was already done.
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  thunderid-seed:
+    image: ghcr.io/thunder-id/thunderid:1.0.0
+    user: root
+    entrypoint: ["/bin/sh", "/scripts/seed.sh"]
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./thunderid-seed:/seed:ro
+      - thunderid-db:/data
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  #  thunderid-setup — runs once, then exits.
+  #
+  #  Generates the things that must be unique to THIS machine and must never be shipped:
+  #  the certificate, the keys the login server signs tokens with, and the administrator
+  #  password. It prints that password to the log. **You can ignore it** — the demo signs
+  #  in as a normal user, not as the administrator.
+  #
+  #  ⚠️ Guarded by a marker file because it is not safe to run twice. A second run makes
+  #  new signing keys, which instantly invalidates every token already issued and signs
+  #  out anyone who was signed in.
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  thunderid-setup:
+    image: ghcr.io/thunder-id/thunderid:1.0.0
+    entrypoint: ["/bin/sh", "/scripts/setup-once.sh"]
+    working_dir: /opt/thunderid
+    volumes:
+      - ./scripts:/scripts:ro
+      - thunderid-db:/opt/thunderid/database
+      - thunderid-certs:/opt/thunderid/config/certs
+      - thunderid-secrets:/opt/thunderid/config/secrets
+    depends_on:
+      thunderid-seed:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  #  thunderid — the login server itself. Stays running.
+  #
+  #  Pinned to tag 1.0.0 rather than a digest, matching the decision recorded in
+  #  deploy/docker-compose.thunderid.yml. The digest this project validated against is
+  #  sha256:12b7348b6727b756b8155c5157804bc05ef5d0ffa5f42bc6307747bd18425a36 — swap the tag
+  #  for `@sha256:...` if you ever suspect the published image changed underneath you.
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  thunderid:
+    image: ghcr.io/thunder-id/thunderid:1.0.0
+    restart: unless-stopped
+    # No `ports:` here. It shares aisle-net's network, and aisle-net publishes 8090.
+    network_mode: "service:aisle-net"
+    volumes:
+      - ./thunderid-deployment.yaml:/opt/thunderid/deployment.yaml:ro
+      - thunderid-db:/opt/thunderid/database
+      - thunderid-certs:/opt/thunderid/config/certs:ro
+      - thunderid-secrets:/opt/thunderid/config/secrets:ro
+    depends_on:
+      aisle-net:
+        condition: service_started
+      thunderid-setup:
+        condition: service_completed_successfully
+
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  #  api — the web API the website talks to. Port 8000, published nowhere.
+  #
+  #  Built from backend/. The SAME image runs twice: once here, once as `mcp` below. They
+  #  are two front doors onto one set of business rules, so only the start command differs
+  #  (see backend/Dockerfile for why that is one image rather than two).
+  #
+  #  ⚠️ `entrypoint` is not decoration. It runs scripts/with-thunderid-ca.sh first, which
+  #  teaches this container to trust the login server's home-made certificate and THEN
+  #  starts the command below. That is what lets THUNDERID_VERIFY_TLS stay `true`. The
+  #  setting `THUNDERID_VERIFY_TLS=false` and the variable NODE_TLS_REJECT_UNAUTHORIZED
+  #  appear nowhere in this box, and that is the point of the whole arrangement.
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    network_mode: "service:aisle-net"
+    entrypoint: ["/bin/sh", "/scripts/with-thunderid-ca.sh"]
+    command: ["uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "8000"]
+    environment:
+      # The only value the judge supplies indirectly: it arrives in the .env file next to
+      # this one. Everything else here is fixed.
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in deploy/aisle-box/.env - copy it from the aisle.env supplied with the submission}
+      # ⚠️ Hard-wired ON, and deliberately NOT read from the judge's .env file. One boolean
+      # switches identity off across two services at once (see CLAUDE.md), so a deployment
+      # must not be able to flip it by editing a text file.
+      AUTH_ENABLED: "true"
+      THUNDERID_VERIFY_TLS: "true"
+      # Written by the entrypoint script above. Declared here rather than exported
+      # there so every process in the container sees it, diagnostics included.
+      SSL_CERT_FILE: /tmp/aisle-ca-bundle.crt
+    volumes:
+      - ./scripts:/scripts:ro
+      - thunderid-certs:/certs:ro
+    depends_on:
+      aisle-net:
+        condition: service_started
+      thunderid-setup:
+        condition: service_completed_successfully
+
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  #  mcp — the same image as `api`, started differently. Port 8001, published nowhere.
+  #
+  #  This is the door the AI agent knocks on. `--transport streamable-http` is required:
+  #  the default (stdio) means "a program on this machine launches me and talks down a
+  #  pipe", which cannot carry a bearer token, so the server refuses to start that way
+  #  while authentication is on.
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  mcp:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    network_mode: "service:aisle-net"
+    entrypoint: ["/bin/sh", "/scripts/with-thunderid-ca.sh"]
+    command: ["python", "-m", "mcp_server.server", "--transport", "streamable-http"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in deploy/aisle-box/.env - copy it from the aisle.env supplied with the submission}
+      AUTH_ENABLED: "true"
+      THUNDERID_VERIFY_TLS: "true"
+      # Written by the entrypoint script above. Declared here rather than exported
+      # there so every process in the container sees it, diagnostics included.
+      SSL_CERT_FILE: /tmp/aisle-ca-bundle.crt
+    volumes:
+      - ./scripts:/scripts:ro
+      - thunderid-certs:/certs:ro
+    depends_on:
+      aisle-net:
+        condition: service_started
+      thunderid-setup:
+        condition: service_completed_successfully
+
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  #  agent — the AI assistant. Port 8002, published nowhere, and that is load-bearing.
+  #
+  #  agent/app.py binds 127.0.0.1 in code rather than in a setting, because the agent reads
+  #  a name off a token without checking the token's signature yet. Sharing one network
+  #  means the website reaches it exactly as it does on the developer's machine, while
+  #  nothing outside the box can. Do not add a `ports:` entry here.
+  #
+  #  Certificate trust works differently from api/mcp: the agent already has a setting for
+  #  it, THUNDERID_CA_CERT, which trusts that one certificate for calls to the login server
+  #  and leaves every other connection alone. That is narrower than the shared bundle, so
+  #  it is used in preference — and it matters here, because this container also calls
+  #  Google's servers for the AI model.
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  agent:
+    build:
+      context: ../../agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    network_mode: "service:aisle-net"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in deploy/aisle-box/.env - copy it from the aisle.env supplied with the submission}
+      # The one line the judge fills in themselves. Left blank, the box still runs and the
+      # whole ERP works; only the AI chat panel fails, with an error from Google.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Which AI model to use. Pinned rather than left to the code's own default, so the
+      # box runs the model the developer actually demoed against - a shipped demo should
+      # not quietly use a different model from the one that was tested. Overridable from
+      # .env for anyone who wants to try another.
+      #
+      # `flash-lite` is capped at ~500 requests/day on the free tier against `gemma-31b`'s
+      # ~10-20k, which is irrelevant here because each judge brings their own key and a
+      # demo makes a handful of calls.
+      GEMINI_MODEL: ${GEMINI_MODEL:-flash-lite}
+      # The agent is an OAuth *client* — it has credentials of its own, unlike the API,
+      # which only verifies signatures. These belong to this box alone and were minted
+      # fresh; the developer's real ones never ship.
+      THUNDERID_CLIENT_ID: ${THUNDERID_AGENT_CLIENT_ID:-6in2mfBltFEEMpYjF5upZA}
+      THUNDERID_CLIENT_SECRET: ${THUNDERID_AGENT_CLIENT_SECRET:?set THUNDERID_AGENT_CLIENT_SECRET in deploy/aisle-box/.env}
+      THUNDERID_CA_CERT: /certs/server.cert
+      THUNDERID_VERIFY_TLS: "true"
+      AUTH_ENABLED: "true"
+    volumes:
+      - thunderid-certs:/certs:ro
+    depends_on:
+      aisle-net:
+        condition: service_started
+      thunderid-setup:
+        condition: service_completed_successfully
+
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  #  web — the Aisle website. Port 3000, and the ONE thing the judge opens.
+  #
+  #  ⚠️ Three of its settings are `args:` rather than `environment:`, and moving them would
+  #  break the build silently. Anything named NEXT_PUBLIC_* is written into the browser
+  #  JavaScript when the site is COMPILED, not read when it runs — so a value supplied only
+  #  at start-up would simply be absent. They are not secrets: a client ID is a name badge,
+  #  not a password.
+  #
+  #  Certificate trust here is NODE_EXTRA_CA_CERTS, which Node *adds* to the certificates
+  #  it already trusts rather than replacing them — so no merging step is needed, unlike in
+  #  the Python containers above.
+  # ─────────────────────────────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_THUNDERID_BASE_URL: https://localhost:8090
+        NEXT_PUBLIC_THUNDERID_CLIENT_ID: ${THUNDERID_GATE_CLIENT_ID:-vAf_zSFT1qj4733Xy3jgQw}
+        NEXT_PUBLIC_THUNDERID_SCOPES: openid product.read product.create product.update stock.adjust
+    restart: unless-stopped
+    network_mode: "service:aisle-net"
+    environment:
+      # Both are inside the box. The agent one is loopback for the reason given above.
+      API_BASE_URL: http://127.0.0.1:8000
+      AGENT_BASE_URL: http://127.0.0.1:8002
+      # Server-side only. No NEXT_PUBLIC_ prefix, and never add one — that would publish
+      # them to every visitor's browser.
+      THUNDERID_CLIENT_SECRET: ${THUNDERID_GATE_CLIENT_SECRET:?set THUNDERID_GATE_CLIENT_SECRET in deploy/aisle-box/.env}
+      THUNDERID_SECRET: ${THUNDERID_SECRET:?set THUNDERID_SECRET in deploy/aisle-box/.env}
+      NODE_EXTRA_CA_CERTS: /certs/server.cert
+    volumes:
+      - thunderid-certs:/certs:ro
+    depends_on:
+      aisle-net:
+        condition: service_started
+      thunderid-setup:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
+      agent:
+        condition: service_started
+
+# ═══════════════════════════════════════════════════════════════════════════════════════
+#  Volumes — a volume is a small virtual hard drive Docker plugs into a container. Deleting
+#  a container is like recycling the computer case; the plugged-in drive survives.
+#
+#  These three hold the login server's accounts, certificates and keys. `docker compose
+#  down` leaves them alone. `docker compose down -v` deletes them, which for THIS box is
+#  fine — the next `up` rebuilds everything from the seed folder.
+# ═══════════════════════════════════════════════════════════════════════════════════════
+volumes:
+  thunderid-db:
+    driver: local
+  thunderid-certs:
+    driver: local
+  thunderid-secrets:
+    driver: local

@@ -1,0 +1,32 @@
+# What NOT to copy into the image.
+#
+# Docker sends the whole folder to the build before it starts. Without this file that
+# includes .venv/ - hundreds of megabytes of Windows-specific packages that would be
+# copied in and then shadowed by the Linux ones pip installs anyway. Slow, and a real
+# source of confusing "it works locally" bugs.
+
+# The developer's virtual environment. Wrong operating system, and reinstalled in the
+# image from requirements.txt regardless.
+.venv/
+venv/
+
+# Real settings, including the database password. MUST NOT be baked into an image that
+# gets distributed. The box supplies settings at run time instead.
+.env
+.env.*
+!.env.example
+
+# Python caches and test scratch.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Tests do not run inside the shipped image.
+tests/
+
+# Editor and OS noise.
+.vscode/
+.idea/
+Thumbs.db
