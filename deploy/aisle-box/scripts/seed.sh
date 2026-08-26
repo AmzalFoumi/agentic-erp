@@ -38,8 +38,11 @@ else
   echo "[seed] (Expected only while this box is being built; a shipped box has it.)"
 fi
 
-touch "$MARKER"
+# ⚠️ ORDER MATTERS. The marker means "seeding finished", so it must be written only after
+# the last real step. With `set -e` above, a failing chown aborts here and leaves no marker,
+# so the next start retries instead of skipping a half-done seed with root-owned files.
 chown -R thunderid:thunderid /data
+touch "$MARKER"
 
 echo "[seed] Done. Contents of the login-server data folder:"
 ls -la /data

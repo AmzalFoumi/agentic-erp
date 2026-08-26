@@ -22,6 +22,10 @@ if [ -f "$MARKER" ]; then
 fi
 
 echo "[setup] First run on this machine. Generating certificates, keys and an admin account."
+# ⚠️ BOTH FAILURES MUST STOP THIS SCRIPT, and the second is the easy one to miss. There is
+# no `set -e` here, and `echo` below would otherwise hand back a success exit code even if
+# the marker was never written - which re-arms the exact rerun the header warns about: new
+# signing keys, every issued token invalidated, the admin password reset.
 ./setup.sh || exit 1
-touch "$MARKER"
+touch "$MARKER" || exit 1
 echo "[setup] Done."

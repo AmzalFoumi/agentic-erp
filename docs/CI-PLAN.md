@@ -121,8 +121,8 @@ confirmed 3.12.4 in `backend/.venv/pyvenv.cfg` and `agent/.venv/pyvenv.cfg`, no
 
 Added after CI-2, once `deploy/aisle-box/` (the submission judges actually run) existed to
 have an opinion about. Builds the three Aisle Box images (backend, agent, frontend) on
-every PR to `main` and discards them — proves each Dockerfile still produces a working
-image, nothing more. Kept in its own file rather than folded into `ci.yml` so a slow or
+every PR to `main` and discards them — proves each Dockerfile still **builds**, nothing
+more. It never starts a container, so it says nothing about whether the image runs. Kept in its own file rather than folded into `ci.yml` so a slow or
 flaky Docker build never blocks or muddies the fast test signal; each file's failure now
 has one obvious meaning.
 

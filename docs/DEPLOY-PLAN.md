@@ -44,7 +44,11 @@ gap 2 below for real. **No service code changes to make the box work.**
 
 **Recorded concern on the Supabase choice, raised once and overruled — proceeding as asked.** Every
 judge writes to the same live data, and the demo needs internet. Reduced without changing the
-decision: a **dedicated least-privilege Postgres role** (26e), and a revocation step after judging.
+decision: a **dedicated Postgres role, narrower than the `postgres` owner** (26e), and a revocation
+step after judging. Narrower is not *least* privilege and this plan does not claim it is: the role
+holds `BYPASSRLS` and full write access to three tables, and every judge shares the one credential,
+so any holder can bypass API authorization and reach another judge's data. Accepted knowingly for a
+three-day demo on throwaway data; it would not be acceptable for real hosting.
 Switching to a local Postgres container later is a one-line `DATABASE_URL` change, no code moves.
 
 ---
