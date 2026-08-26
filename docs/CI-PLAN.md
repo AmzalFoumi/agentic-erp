@@ -31,7 +31,7 @@ add a second Supabase project, and does not add any new secret.
 | Gate | What                                          | Status |
 | ---- | --------------------------------------------- | ------ |
 | CI-1 | This document — the written plan              | ✅ done — docs only, no workflow file yet |
-| CI-2 | `.github/workflows/ci.yml` built to match this plan | ⬜ not started |
+| CI-2 | `.github/workflows/ci.yml` built to match this plan | ✅ done — two parallel jobs (`backend`, `agent`), not yet verified green on a real PR |
 
 ## Decisions
 

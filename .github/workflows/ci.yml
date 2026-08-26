@@ -1,0 +1,104 @@
+# Runs the backend and agent test suites, plus the architecture boundary
+# checks, on every pull request and every push to main/dev.
+#
+# Design decisions and the traps this file works around are written up in
+# docs/CI-PLAN.md - read that before changing this file, not just this
+# comment.
+#
+# Two independent jobs, run in parallel: `backend` needs a real Postgres to
+# test against (a throwaway container, never the real Supabase project);
+# `agent` does not, but still needs a dummy .env to exist so agent/config.py
+# doesn't crash on import.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+
+    # A throwaway Postgres for this job only - built fresh by alembic below,
+    # discarded when the job ends. Credentials are made up on the spot and
+    # only ever reachable from inside this same job, so there is nothing
+    # sensitive about them being in plain text here.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: agentic_erp_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # psycopg (not psycopg2) per backend/.env.example's note on the
+      # DATABASE_URL format. sslmode is omitted deliberately - this is a
+      # plain local container, not Supabase, so there is no TLS to require.
+      DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/agentic_erp_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Build the schema
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Run tests
+        working-directory: backend
+        run: pytest
+
+      - name: Check architecture boundary
+        working-directory: backend
+        run: lint-imports
+
+  agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: agent
+        run: pip install -r requirements.txt
+
+      - name: Write a dummy .env
+        # agent/config.py builds a module-level Settings() the instant it's
+        # imported, so agent/.env must exist even though these tests never
+        # read the real values - tests/conftest.py's `settings` fixture
+        # builds its own Settings(...) instead. See docs/CI-PLAN.md.
+        working-directory: agent
+        run: |
+          echo "GEMINI_API_KEY=ci-dummy" >> .env
+          echo "DATABASE_URL=postgresql+psycopg://unused/unused" >> .env
+
+      - name: Run tests
+        working-directory: agent
+        run: pytest
+
+      - name: Check architecture boundary
+        # Run from the repo root, with --config pointing at agent/'s file -
+        # neither of the two obvious guesses works here. See
+        # agent/pyproject.toml's own comments and docs/CI-PLAN.md.
+        run: lint-imports --config agent/pyproject.toml
