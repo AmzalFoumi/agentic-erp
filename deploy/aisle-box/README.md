@@ -21,7 +21,7 @@ cp /path/to/aisle.env deploy/aisle-box/.env
 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (free, about a minute)
 into the one blank line:
 
-```
+```dotenv
 GEMINI_API_KEY=
 ```
 

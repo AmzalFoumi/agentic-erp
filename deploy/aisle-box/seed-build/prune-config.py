@@ -154,14 +154,19 @@ def main() -> int:
         return IMPORT_ORDER.index(rtype) if rtype in IMPORT_ORDER else len(IMPORT_ORDER)
 
     kept.sort(key=rank)  # stable, so documents of one type keep their original order
-    TARGET.write_text("\n---\n".join(kept), encoding="utf-8")
+    written = "\n---\n".join(kept)
 
     print(f"Read    {len(docs)} documents from {SOURCE.name}")
     for line in removed:
         print(f"Removed {line}")
-    print(f"Wrote   {len(kept)} documents to {TARGET.relative_to(REPO)}")
 
-    written = TARGET.read_text(encoding="utf-8")
+    # ⚠️ THE CHECK RUNS BEFORE THE WRITE, AND THAT ORDER IS THE WHOLE POINT.
+    # This used to write the file first and inspect it afterwards, which meant a failed
+    # check left a file containing the developer's real name and email sitting at a path
+    # this repository documents as committed - one `git add .` away from being published,
+    # with nothing but a line on the terminal saying not to. Building the text in memory
+    # and writing only once it passes makes a failure leave nothing behind. Raised by
+    # CodeRabbit on PR #35.
     leftovers = [
         needle
         for needle in (
@@ -174,8 +179,11 @@ def main() -> int:
     ]
     if leftovers:
         print(f"\nFAILED: personal or leftover data still present: {leftovers}", file=sys.stderr)
+        print("Nothing was written - any previous output is untouched.", file=sys.stderr)
         return 1
 
+    TARGET.write_text(written, encoding="utf-8")
+    print(f"Wrote   {len(kept)} documents to {TARGET.relative_to(REPO)}")
     print("\nChecked: no personal data, no development leftovers in the output.")
     return 0
 

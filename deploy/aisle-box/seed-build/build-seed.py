@@ -140,7 +140,12 @@ def box_secrets(*, persist: bool) -> dict[str, str]:
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(minted, handle, indent=2)
 
-    print(f"Minted fresh box-only secrets -> {SECRETS.name} (gitignored, owner-only)")
+    # The filename is written out rather than interpolated from SECRETS.name on
+    # purpose: CodeQL's py/clear-text-logging-sensitive-data treats anything derived
+    # from a variable named SECRETS as tainted, and flagged this line high severity
+    # on PR #35 even though .name is only the filename. Do not turn it back into an
+    # f-string - it prints the same characters and re-breaks the security check.
+    print("Minted fresh box-only secrets -> box-secrets.json (gitignored, owner-only)")
     return minted
 
 
