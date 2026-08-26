@@ -20,7 +20,7 @@ read when you are working in the area they cover.
 | `docs/BACKEND-PLAN.md` | Gates 0–8 as built, backend decisions and deferrals | Changing backend code |
 | `docs/FRONTEND-PLAN.md` | Gates 9–13, screen and capability inventories, design-system rationale | Changing frontend code |
 | `docs/AUTH-PLAN.md` | Gates 22–25: provider decision (**ThunderID, confirmed by the Gate 23 spike**), RFC 8693 delegation, the ID-JAG-later rule, permission mapping | The auth gates |
-| `docs/DEPLOY-PLAN.md` | Gate 26: hosting the five services, and the three security gaps gate 25 deferred into it | Deployment work |
+| `docs/DEPLOY-PLAN.md` | Gate 26: sub-gates 26a–26i, the **"Aisle in a box"** design (the gate's target changed on 2026-08-26 from hosting to a one-command box), and the three security gaps gate 25 deferred into it | Deployment work |
 | `docs/AGENT-PLAN.md` | Gates 14–21, the Pydantic AI / Gemini decision, the agent's own schema, the localhost stop condition | Changing anything in `agent/` |
 | `CLAUDE.md` (this file) | A summary for agent onboarding | Subordinate to all five |
 | `frontend/AGENTS.md` (+ `frontend/CLAUDE.md`, which just includes it) | **Build output** — rewritten by `next dev` on every start, not hand-edited. One instruction: read `node_modules/next/dist/docs/` rather than trusting training data about Next.js | Writing Next.js code. Framework-only — says nothing about this project, so it never overrides the five above |
@@ -128,9 +128,22 @@ things about the shape of the fix are worth knowing before touching it:
   exist returns a valid, correctly-audienced token carrying **no `scope` claim at all**. Every check
   must read the scope that came back; empty means *zero* permissions, never "unspecified, so allow".
 
-**The loopback binding still stays until gate 26.** It is no longer the only thing between this code
-and anonymous writes, but nothing rate-limits an unauthenticated caller yet and ThunderID's
-certificate is still self-signed. Do not delete `agent/app.py`'s `HOST = "127.0.0.1"` or its test.
+**The loopback binding stays, and gate 26 no longer ends it.** It is no longer the only thing
+between this code and anonymous writes, but nothing rate-limits an unauthenticated caller yet and
+B1 (the agent-server verifying the token it reads a name off) is not done. Do not delete
+`agent/app.py`'s `HOST = "127.0.0.1"` or its test, and do not give the agent a published port.
+
+That changed on 2026-08-26 when gate 26's target became a **box run on someone else's machine**
+rather than hosting: `deploy/aisle-box/` shares one network namespace across all six containers and
+publishes only 3000 and 8090, both to `127.0.0.1`, so the agent stays unreachable from outside
+without any code moving. See `docs/DEPLOY-PLAN.md`.
+
+**The two "don't check the certificate" switches are gone from the box**, and this is the one gap
+gate 26 actually closes. `THUNDERID_VERIFY_TLS` is `true` in every box container and
+`NODE_TLS_REJECT_UNAUTHORIZED` appears nowhere in it; each runtime is instead taught to trust
+ThunderID's self-signed certificate — a merged CA bundle via `SSL_CERT_FILE` for `api`/`mcp`, the
+scoped `THUNDERID_CA_CERT` for `agent`, `NODE_EXTRA_CA_CERTS` for `web`. Verified in all three on
+2026-08-26. **Only inside the box** — real hosting still needs a genuine certificate.
 
 ### Error handling has two independent translation layers
 
