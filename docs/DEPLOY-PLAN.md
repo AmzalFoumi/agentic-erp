@@ -1,44 +1,264 @@
-# DEPLOY-PLAN.md — Gate 26: putting it online
+# DEPLOY-PLAN.md — Gate 26: putting it in front of other people
 
 **Scope: gate 26 only.** `docs/PLAN.md` remains the root source of truth and the progress table;
 this file is the detail doc for the deployment gate, the way `BACKEND-PLAN.md` is for gates 0–8 and
 `AUTH-PLAN.md` is for gates 22–25.
 
-**Status: not started.** Gate 25 is code-complete but its pull request (#30) is not merged yet. The
-block is real, not a formality — see "Entry conditions" below.
+**Status: in progress on `build/aisle-box`.** Sub-gate table below.
 
 **Where this content was before.** Gate 26 was written up inside `AUTH-PLAN.md`, because at the
 time it looked like the last of the login gates. It is not: gates 22–25 are about *who you are*,
 gate 26 is about *where the code runs*. Splitting it out on 2026-08-26 closes `AUTH-PLAN.md` at
-gate 25 and gives the deployment work a doc it can grow into. Everything below was moved here
-as-is; nothing was reworded to look better than it is.
+gate 25 and gives the deployment work a doc it can grow into. Everything moved here came as-is;
+nothing was reworded to look better than it is.
 
 ---
 
-## What this gate actually is
+## What this gate actually is — restated 2026-08-26
 
-**Five things to host, not four.** The website, the web API, the agent-server, the AI agent, and
-**the login server**. ThunderID has no hosted option, so we run it ourselves — a real, recurring
-cost of the provider decision, recorded in `AUTH-PLAN.md`.
+**Five things to run, not four.** The website, the web API, the MCP server, the AI agent service,
+and **the login server**. ThunderID has no hosted option, so we run it ourselves — a real,
+recurring cost of the provider decision, recorded in `AUTH-PLAN.md`.
 
-Today all five run on the developer's machine. The container recipe in `deploy/` — its `README.md`
-covers safe shutdown and restart — is **for local use only** and is not a deployment artefact. How
-the five actually get hosted is an open decision this gate has to make; nothing is chosen yet.
+**The gate's target changed on 2026-08-26, and this is the single most important line in the file.**
+Aisle is being submitted to the Ascentic AI Launch Pad, deadline **Saturday 29 August 2026, 5pm**.
+A deployed public link is explicitly *optional* there and supporting files are allowed. So the
+deliverable is **not hosting**. It is a **reusable box**: one folder, one command, five services,
+run on the judge's own machine.
+
+That is a smaller gate than hosting, and deliberately so — but it is not a detour. The Dockerfiles
+it produces are the same artefacts real hosting needs. Only three things are box-specific: the
+Compose file, the pre-seeded identity database, and the shared network namespace. A hosted
+deployment swaps the namespace for real DNS and real certificates, which is exactly what closes
+gap 2 below for real. **No service code changes to make the box work.**
+
+### Decisions taken by the developer, 2026-08-26
+
+| Question | Answer |
+|---|---|
+| ERP database | **Shared hosted Supabase** — not a Postgres container |
+| Gemini API key | **Judge supplies their own**; the app works without it, only AI chat is off |
+| Image distribution | **Built on the judge's machine** by `docker compose up --build` — no registry |
+| Credentials | Delivered as a **submission supporting file** (`aisle.env`), never committed |
+| Fallback demo mode | **Documented, not built** — see 26f below |
+
+**Recorded concern on the Supabase choice, raised once and overruled — proceeding as asked.** Every
+judge writes to the same live data, and the demo needs internet. Reduced without changing the
+decision: a **dedicated Postgres role, narrower than the `postgres` owner** (26e), and a revocation
+step after judging. Narrower is not *least* privilege and this plan does not claim it is: the role
+holds `BYPASSRLS` and full write access to three tables, and every judge shares the one credential,
+so any holder can bypass API authorization and reach another judge's data. Accepted knowingly for a
+three-day demo on throwaway data; it would not be acceptable for real hosting.
+Switching to a local Postgres container later is a one-line `DATABASE_URL` change, no code moves.
 
 ---
 
-## Entry conditions
+## Facts established by measurement, not assumption
 
-These must all be true before gate 26 work begins:
+Recorded so no later session re-derives them.
 
-1. **PR #30 merged.** Gate 25's code is on `feat/auth/agent` and pushed, with CodeRabbit's findings
-   addressed, but the PR is still open against `dev`. Merge `#30` → `dev`, then `dev` → `main`.
-2. **Both suites green on the merge result** — `backend/` 72 passed, `agent/` 29 passed,
-   `lint-imports` 4 contracts kept / 0 broken, as of `c704312`.
-3. **Nothing else half-finished.** As of 2026-08-26 there is one known loose end, and it is
-   optional rather than blocking: pre-gate-25 conversation rows (e.g. conversation 5) carry
-   `started_by = "system"` and now 404 for every real person. Leaving them is the recommended
-   choice; a SQL update stamping them with the developer's `sub` is the alternative.
+1. **The login server's certificate is issued for `localhost` and `127.0.0.1` only.**
+   `openssl x509` on `deploy/thunderid-server.cert`: `CN=localhost`,
+   `SAN: DNS:localhost, IP:127.0.0.1`.
+2. **`@thunderid/nextjs` exposes exactly one base-URL setting.** Scanning the SDK's `dist` for
+   environment-variable names yields a single `THUNDERID_BASE_URL`, used by both browser redirects
+   and server-side token exchange — and `NEXT_PUBLIC_*` is inlined at build time. It cannot be two
+   addresses at once.
+3. **The repository is public** (`gh repo view` → `"visibility":"PUBLIC"`).
+4. **Every ThunderID secret is stored as a PBKDF2 hash, never plaintext** — 600,000 iterations, a
+   per-entity random salt, a 32-byte key, confirmed by recomputing a known admin password from its
+   stored salt and matching the stored value byte for byte. This is what makes committing the
+   seeded database safe. It also removes a technical risk: nothing in those files is encrypted with
+   `crypto.key`, so the fresh `crypto.key` generated on the judge's machine cannot break them.
+5. **Supabase's free plan permits creating Postgres roles** — plain SQL, no plan gate. Limits that
+   do apply: 500 MB database, 5 GB egress, and **projects pause after ~7 days of low activity**.
+6. **Next.js `output: "standalone"` is the supported Docker path**, confirmed in the vendored docs
+   at `frontend/node_modules/next/dist/docs/`.
+7. **A custom Postgres role can sign in through Supabase's session pooler** (26e). Verified with a
+   real connection: `current_user = aisle_demo`, port 5432, at
+   `aws-0-eu-west-3.pooler.supabase.com`, username `aisle_demo.<project-ref>`.
+8. **RLS deny-all applies to every non-owner role.** RLS is on with zero policies on every table.
+   The app works today only because `postgres` **owns** the tables and owners bypass RLS. A new
+   role reads *zero rows everywhere, with no error* — the worst failure shape there is. Resolved by
+   granting `BYPASSRLS`, which PostgreSQL permits only from a superuser or another `BYPASSRLS`
+   holder; `postgres` has `rolbypassrls = true`, so it was allowed.
+
+9. **Port 3000 collides silently, not loudly, and it cost most of a debugging session.**
+   `next dev` binds `:::3000` (IPv6 wildcard); Docker publishes `127.0.0.1:3000` (IPv4). Both
+   binds succeed, no error is printed, and a browser resolving `localhost` tries IPv6 first —
+   so it reaches `next dev`. The box then appears to be running while sign-in fails with
+   `invalid_client`, because the dev server is exchanging its *own* client secret against the
+   box's login server. `[HMR] connected` and `[object Object]` from `ThunderIDClientProvider`
+   are the symptoms; `netstat -ano | findstr :3000` showing two listeners is the proof.
+   Recorded in `deploy/README.md` and `deploy/aisle-box/README.md`.
+
+---
+
+## The design in one paragraph
+
+Six long-running containers plus two one-shot init containers, in one Compose file with project
+name `aisle-box`. **Every container shares a single network namespace**, so the box's internal
+addressing is byte-identical to the developer's machine: login server on `localhost:8090`, API on
+`localhost:8000`, MCP on `localhost:8001`, agent on `localhost:8002`, website on `localhost:3000`.
+Only **3000 and 8090** are published, and only to `127.0.0.1`. The login server starts from a
+**pre-configured database committed to the repo**, so the judge never meets the import wizard and
+signs in as a ready-made `judge` account. Credentials arrive as a separate file dropped next to the
+Compose file.
+
+### Why the shared network namespace
+
+Facts 1 and 2 together mean a conventional service-DNS layout would force one baked-in string to be
+two different addresses at once. Sharing a namespace makes `https://localhost:8090` correct for the
+browser, for the compiled bundle, for server-side code, and for the `iss` claim simultaneously —
+and the TLS hostname then matches, so **certificate verification stays on**.
+
+A dedicated do-nothing **anchor container** (`aisle-net`) owns the namespace rather than the login
+server, so restarting the login server does not tear the network out from under the other five.
+
+**This also means the agent never gets a published port.** `agent/app.py`'s `HOST = "127.0.0.1"`
+stays exactly as written and the stop condition in `docs/AGENT-PLAN.md` is not tripped. **B1 is
+therefore not a blocker for the box** — it stays required before any real hosting.
+
+**Documented alternative if the namespace approach ever misbehaves:** a `socat` TCP forwarder
+inside each app container mapping `127.0.0.1:8090 → thunderid:8090`. Same result, one extra binary
+per image. Not built.
+
+### How certificate trust is done — the thing that closes gap 2 *inside the box*
+
+Three different mechanisms, because the three runtimes differ, and each was chosen for a reason:
+
+| Container | Mechanism | Why not the others |
+|---|---|---|
+| `api`, `mcp` | `scripts/with-thunderid-ca.sh` merges the OS certificate bundle with the login server's certificate into `/tmp`, exports `SSL_CERT_FILE`, then `exec`s the real command | `SSL_CERT_FILE` **replaces** the trust list rather than adding to it. Pointing it straight at the one certificate would leave these containers trusting nothing else on the internet — survivable today, and a trap for the first person to add an outward HTTPS call |
+| `agent` | `THUNDERID_CA_CERT=/certs/server.cert` | The code already has a purpose-built, *scoped* setting for this. It trusts that one certificate for login-server calls only and leaves every other connection alone — which matters here, because this container also calls Google for the AI model |
+| `web` | `NODE_EXTRA_CA_CERTS=/certs/server.cert` | Node **adds** to its existing trust store, so no merging step is needed |
+
+`THUNDERID_VERIFY_TLS` is `"true"` everywhere in the box and `NODE_TLS_REJECT_UNAUTHORIZED` appears
+nowhere in it.
+
+### The credential rule
+
+**No plaintext credential is committed to the public repository.** The hashed login-server database
+is committed (fact 4 — nothing recoverable in it). Everything plaintext — the box's client secrets,
+`THUNDERID_SECRET`, and the database connection string — ships as a **submission supporting file**
+named `aisle.env`. Compose already reads a file called `.env` next to the Compose file, so the
+judge copies `aisle.env` → `deploy/aisle-box/.env` and pastes their Gemini key into its one blank
+line. No mount arguments, no editing beyond that line.
+
+**The one deliberate exception, stated here so this section does not contradict itself.** The
+demo account's password (`judge` / `AisleDemo2026!`) *is* written in the repository, in
+`deploy/aisle-box/README.md`. That is not a leak and not an oversight: it opens nothing except
+a copy of the login server running on the reader's own machine, which they started themselves
+and which holds no data of ours. Publishing it is what removes a setup step for the judge. The
+rule above is about credentials that open something real — the database, and the box's client
+secrets — and those are in `aisle.env` only.
+
+**`AUTH_ENABLED` is not in that file and must never be.** It is hard-wired to `"true"` in
+`docker-compose.yml`. One boolean turns identity off across two services at once (see `CLAUDE.md`),
+so a deployment must not be able to flip it by editing a text file.
+
+---
+
+## Sub-gates
+
+| # | What | Status |
+|---|---|---|
+| 0 | Persist the design into the repo before any code | ✅ `a551815` |
+| 26a | Box skeleton — Compose stack, deployment config without `oauth.dcr.insecure`, first-run seed fix | ✅ `a36ce82` |
+| 26b | Service images — `backend/`, `agent/`, `frontend/` Dockerfiles, `output: "standalone"` | ✅ `1cd3523`, `01f473f` |
+| 26c | Identity baked in — pre-built login-server database, `judge` account, pre-commit leak scan | ✅ `95e03bc` |
+| 26d | Wiring and TLS trust — the four app services join the namespace, certificates mounted | ✅ verified in a browser 2026-08-26 |
+| 26e | Database access for judges — the `aisle_demo` role | ✅ grants verified, password rotated, reached from inside the box |
+| 26f | Judge experience — `deploy/aisle-box/README.md`, `.env.example`, and the written-down fallback | ✅ done; `aisle.env` itself is assembled outside the repo |
+| 26g | Full dry run from a clean checkout, timed | ✅ 2026-08-26 — 63s build, 4s start, whole demo walked in a browser |
+| 26h | Persist the plan — this rewrite, plus `PLAN.md`, `CLAUDE.md`, `deploy/README.md` | ✅ done |
+| 26i | B1 — the agent-server's own token verification (optional, not part of the box) | not started |
+
+### 26g — what the dry run actually proved, 2026-08-26
+
+Walked in a real browser against a box rebuilt from nothing (`down -v`, `--no-cache`):
+
+1. Certificate warning appears exactly as the README describes; accepting it works.
+2. `judge` / `AisleDemo2026!` signs in and lands on the products list — 24 products, live
+   from Supabase through the `aisle_demo` login.
+3. The AI panel took "Add 8 units to Sourdough loaf 800g", resolved it to the right SKU, and
+   **asked for approval before writing**. Confirming moved stock 274 → 282.
+4. **The row is stamped with the judge's own ThunderID id**, `01a03e4b-…`, confirmed against
+   `ENTITY` in the seeded database as `judge@aisle.demo` — not the agent's id and not
+   `system`. That is gates 22–25 working in the box rather than only in tests.
+5. The same change through the ordinary form (−8) put it back to 274, so the dry run left no
+   data behind.
+
+Minor, pre-existing, not a box problem: the Adjust-stock field reports `valuemin="0"
+valuemax="0"` to assistive technology while accepting negative numbers. A frontend
+accessibility nit, unrelated to gate 26.
+
+### 26e — what was actually done, and how to undo it
+
+A dedicated role `aisle_demo` exists on Supabase project `khinbdvubrxqqalejcbp`. The judge never
+types it; it is embedded in the `DATABASE_URL` inside `aisle.env`, the containers read it, and the
+judge only places the file. Through the session pooler the username is `<role>.<project-ref>`.
+
+It holds `BYPASSRLS` (the developer's explicit choice over per-table policies, so future features
+need no policy work), `usage` on `public` and `agent`, full **select/insert/update/delete** on
+`products`, `conversations` and `messages`, `usage, select` on their three id sequences, and
+matching `alter default privileges` so tables added by future Alembic migrations are covered
+automatically without a follow-up grant.
+
+Verified: every positive privilege true, and seven negative checks false — `public.alembic_version`,
+`agent.alembic_version`, `auth.users`, `vault.secrets`, `storage.objects`, create-in-`public`, and
+create-schema. Supabase's security advisors were **byte-identical before and after** (4 INFO
+`rls_enabled_no_policy` lints, no warnings, no errors).
+
+**The developer runs the role's SQL, deliberately — this is more than the working agreement.** If
+the assistant ran `create role … with login password '…'`, that password would be written into a
+tool call and preserved in the session transcript. It is the one credential handed to strangers.
+For the same reason the assistant never reads `deploy/aisle-box/.env`; it mounts it into a
+throwaway container to test it instead.
+
+**After results are back, this removes the whole grant set and touches nothing of the developer's:**
+
+```sql
+drop owned by aisle_demo;   -- drops the grants AND the default-privilege entries
+drop role aisle_demo;
+```
+
+Also **keep the project awake**: the free plan pauses a project after roughly 7 days of low
+activity (fact 5).
+
+### 26f — the fallback, written down and deliberately not built
+
+The developer asked for this to be recorded rather than implemented, and that is the right call.
+
+**What it would be.** A demo mode with `AUTH_ENABLED=false`, so the box runs with no login server
+at all: every request becomes the all-powerful `SystemActor`, the way the project worked before
+gate 24.
+
+**Why it is not built.** `frontend/src/proxy.ts` is deliberately fail-closed and has no bypass.
+Adding one would weaken the single file in this project designed not to have one — to protect
+against a risk that has not happened. It would also mean the box demonstrates a version of Aisle
+whose most-worked-on feature (delegated identity, gates 22–25) is switched off.
+
+**What it would cost.** A second Compose file, a bypass branch in `proxy.ts` plus tests for it, and
+a second dry run. Half a day, most of it in the one file that should not be touched under time
+pressure.
+
+**The trigger that would justify it.** Sign-in failing during the 26g dry run with no time left to
+fix it properly. Nothing less.
+
+---
+
+## Which of the three handed-over gaps the box closes
+
+Stated plainly, because "it runs" is not the same as "it is safe to host".
+
+| # | The gap | Does the box close it? |
+|---|---|---|
+| 1 | Nothing rate-limits a caller who has not signed in | **No.** Still outstanding. The box avoids the consequence by publishing only two ports, both to `127.0.0.1` on the judge's own machine |
+| 2 | Self-signed certificate, with two "don't check the certificate" switches to cope | **Inside the box, yes** — see the trust table above. Both switches are off and both stay off. **Not closed for real hosting**, which needs a genuine certificate |
+| 3 | The agent-server reads a name off a token without checking the seal (B1) | **No.** The box avoids tripping it by never publishing the agent's port and never removing `HOST = "127.0.0.1"` |
+
+Gaps 1 and 3 remain hard prerequisites before any of this is reachable from another machine.
 
 ---
 

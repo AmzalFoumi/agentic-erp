@@ -1,0 +1,26 @@
+# What NOT to copy into the image. See backend/.dockerignore for the reasoning; this
+# folder has the same shape and one extra reason to be careful.
+
+# The developer's virtual environment - wrong operating system, reinstalled anyway.
+.venv/
+venv/
+
+# ⚠️ agent/.env holds the Gemini API key as well as the database password. This folder has
+# its own .gitignore for exactly that reason - two separate safety nets that both have to
+# fail before a key leaks. This is the third.
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+tests/
+scripts/
+
+.vscode/
+.idea/
+Thumbs.db

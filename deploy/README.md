@@ -13,6 +13,57 @@ Docker volume, and no CI/CD wiring. Gate 26 in `docs/PLAN.md` and `docs/AUTH-PLA
 auth workstream; **the actual deploy-to-a-real-environment plan for ThunderID does not exist yet**
 and needs its own gate/decision before this project can be hosted anywhere but localhost.
 
+## ⚠️ There are now two stacks, and they fight over ports
+
+Gate 26 added a second, self-contained stack in `deploy/aisle-box/` — the whole system as one
+runnable box, with its **own** login server. The two are kept apart by their Compose project
+names, so their data can never mix: this one's volumes are `thunderid-local_*`, the box's are
+`aisle-box_*`.
+
+What they *do* share is ports. Both want **8090**, and the box also wants **3000**, which
+`npm run dev` holds. A port can only be held by one program at a time, so stop this one before
+starting the box:
+
+```bash
+docker compose -f deploy/docker-compose.thunderid.yml stop
+```
+
+⚠️ **And stop `npm run dev` too, which is the trap that actually cost time.** Port 3000
+does *not* fail loudly. `next dev` listens on `:::3000` (IPv6) and Docker publishes on
+`127.0.0.1:3000` (IPv4), so **both bind successfully** — and a browser, which tries IPv6
+first, reaches `next dev`. The symptom is a site that looks right and cannot sign in, because
+the dev server is talking to the box's login server with the *developer's* client secret and
+gets `invalid_client`. Measured on 2026-08-26; `[HMR] connected` in the browser console is the
+giveaway. Check with `netstat -ano | findstr :3000` — two lines means two programs.
+
+⚠️ **`stop`, never `down -v`.** `down -v` against *this* file deletes every account,
+application, secret, role and signing key the developer has, with no backup and no tested restore.
+`down -v` is correct only against `deploy/aisle-box/` and other throwaway stacks, where the next
+`up` rebuilds everything from committed files.
+
+## Switching between the two stacks
+
+Whichever one you want, stop the other first. They fight over ports 3000 and 8090, and the
+clash is silent rather than loud (see the warning above).
+
+**Going to the box** — stop dev work first:
+
+```bash
+docker compose -f deploy/docker-compose.thunderid.yml stop   # and Ctrl-C your `npm run dev`
+docker compose -f deploy/aisle-box/docker-compose.yml up -d
+```
+
+**Coming back to dev work** — stop the box first:
+
+```bash
+docker compose -f deploy/aisle-box/docker-compose.yml stop
+docker compose -f deploy/docker-compose.thunderid.yml start
+```
+
+`stop` on the box is enough; `down -v` there is also safe, because everything it holds is
+rebuilt from committed files on the next `up`. **The same is not true of the dev stack** —
+see the warning above and the next section.
+
 ## Where your data lives
 
 Three named Docker volumes hold everything that matters — they are separate from the container,

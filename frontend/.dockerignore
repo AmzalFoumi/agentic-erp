@@ -1,0 +1,24 @@
+# What NOT to copy into the image.
+#
+# node_modules/ is the big one: it is reinstalled inside the image from package-lock.json,
+# and copying the host's version in first would be slow and could smuggle in packages
+# built for the wrong operating system.
+node_modules/
+.next/
+out/
+
+# Real settings, including the login-server client secret and the session key.
+.env
+.env.*
+!.env.example
+
+# Build output and caches that mean nothing inside the image.
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Editor and OS noise.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
