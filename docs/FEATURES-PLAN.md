@@ -140,6 +140,19 @@ new feature has to update in the box", and rebuilding the shipped seed (`prune-c
 for an unknown permission with a valid token carrying **no scope claim at all**, so the symptom is
 the whole application answering 403 to a signed-in user.
 
+⚠️ **The seven places are not filled in identically.** `draft.decide` goes to the human role and
+must never reach the agent's. "The agent cannot approve its own work" is a decision made in code and
+*enforced in configuration* — a careless copy-paste of the full permission list into the agent's
+role would undo it silently, with every test still green.
+
+### One migration per table, RLS inside it
+
+Gates 27 and 28 add one migration each. Row-level security goes **in the create migration**, not in
+a follow-up — the pattern set by `20260730_0838` for `products`. Worth knowing because
+`alembic revision --autogenerate` will not write that line for you: it compares columns against the
+models, and row-level security is not a column. Add the `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`
+by hand after generating, and the matching `DISABLE` in `downgrade()`.
+
 ## What these gates deliberately do not build
 
 - **No `/audit` screen and no `audit_events` table** — decision 4.
