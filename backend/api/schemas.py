@@ -610,6 +610,8 @@ class PurchaseOrderLineRead(BaseModel):
     quantity_ordered: int
     unit_cost: Decimal
     line_total: Decimal
+    quantity_received: int
+    quantity_damaged: int
 
 
 class PurchaseOrderRead(BaseModel):
@@ -644,3 +646,32 @@ class PurchaseOrderCreate(BaseModel):
     supplier_id: int
     lines: list[PurchaseOrderLineCreate] = Field(..., min_length=1)
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class ReceiptLineCreate(BaseModel):
+    product_id: int
+    quantity_received: int = Field(..., ge=0)
+    quantity_damaged: int = Field(..., ge=0)
+    expiry_date: date
+    lot_code: str = Field(..., min_length=1, max_length=64)
+
+
+class PurchaseOrderReceive(BaseModel):
+    lines: list[ReceiptLineCreate] = Field(..., min_length=1)
+
+
+class ReceiptDraftCreate(BaseModel):
+    lines: list[ReceiptLineCreate] = Field(..., min_length=1)
+    reasoning: str = Field(..., min_length=1, max_length=2000)
+
+
+class CreditMemoRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    supplier_id: int
+    purchase_order_id: int
+    reason: str
+    amount: Decimal
+    status: str
+    created_at: datetime

@@ -31,6 +31,8 @@ from api.schemas import (
     PurchaseOrderCreate,
     PurchaseOrderList,
     PurchaseOrderRead,
+    PurchaseOrderReceive,
+    ReceiptDraftCreate,
     ReorderProposal,
     ReorderReportRead,
     SupplierCreate,
@@ -285,3 +287,53 @@ def cancel_order(
     session: DbSession, actor: CurrentActor, order_id: int
 ) -> PurchaseOrderRead:
     return purchasing.cancel_order(session, actor, order_id=order_id)
+
+
+@router.post(
+    "/purchase-orders/{order_id}/receive",
+    response_model=PurchaseOrderRead,
+    responses=_errors(_BAD_REQUEST, _FORBIDDEN, _NOT_FOUND, _UNPROCESSABLE),
+)
+def receive_order(
+    session: DbSession, actor: CurrentActor, order_id: int, body: PurchaseOrderReceive
+) -> PurchaseOrderRead:
+    """Record what arrived. Applies immediately - see gate 30's design for
+    why this door skips the draft queue while the AI door below does not."""
+    from services.purchasing.receiving import ReceiptLineInput
+
+    return purchasing.receive_order(
+        session,
+        actor,
+        client=ClientType.WEB_UI,
+        order_id=order_id,
+        lines=[
+            ReceiptLineInput(
+                product_id=line.product_id,
+                quantity_received=line.quantity_received,
+                quantity_damaged=line.quantity_damaged,
+                expiry_date=line.expiry_date,
+                lot_code=line.lot_code,
+            )
+            for line in body.lines
+        ],
+    )
+
+
+@router.post(
+    "/purchase-orders/{order_id}/receipt-drafts",
+    response_model=DraftRead,
+    status_code=status.HTTP_201_CREATED,
+    responses=_errors(_BAD_REQUEST, _FORBIDDEN, _NOT_FOUND, _UNPROCESSABLE),
+)
+def propose_receipt(
+    session: DbSession, actor: CurrentActor, order_id: int, body: ReceiptDraftCreate
+) -> DraftRead:
+    """Stage what arrived for approval. No lot or credit memo is written yet."""
+    return purchasing.propose_receipt(
+        session,
+        actor,
+        client=ClientType.WEB_UI,
+        order_id=order_id,
+        lines=[line.model_dump(mode="json") for line in body.lines],
+        reasoning=body.reasoning,
+    )
