@@ -74,12 +74,22 @@ resolved AS (
     SELECT p.id AS product_id, p.cost_price, w.lot_code, w.days, w.qty
     FROM wanted w
     JOIN products p ON p.sku = w.sku
-    -- Only carve out a batch the product can actually spare. Without this, a
-    -- product whose stock has since been sold down would end up with a
-    -- negative OPENING lot.
+    -- Only carve out batches the product can actually spare.
+    --
+    -- ⚠️ The check is against the product's TOTAL request, not this one row.
+    -- Two products here ask for more than one batch - Sourdough wants 100
+    -- units across two, Carrots 35 across two - and checking each row against
+    -- the same OPENING lot would let both pass independently when the lot can
+    -- cover either alone but not both. The later UPDATE would then drive
+    -- OPENING negative.
     WHERE EXISTS (
-        SELECT 1 FROM inventory_lots o
-        WHERE o.product_id = p.id AND o.lot_code = 'OPENING' AND o.quantity >= w.qty
+        SELECT 1
+        FROM inventory_lots o
+        WHERE o.product_id = p.id
+          AND o.lot_code = 'OPENING'
+          AND o.quantity >= (
+              SELECT SUM(w2.qty) FROM wanted w2 WHERE w2.sku = w.sku
+          )
     )
     -- Skip anything already created by a previous run.
     AND NOT EXISTS (
@@ -103,7 +113,9 @@ UPDATE inventory_lots o
 SET quantity = o.quantity - t.moved,
     updated_by = 'seed'
 FROM (
-    SELECT product_id, SUM(quantity) AS moved FROM inserted GROUP BY product_id
+    SELECT product_id, SUM(quantity) AS moved
+    FROM inserted
+    GROUP BY product_id
 ) t
 WHERE o.product_id = t.product_id AND o.lot_code = 'OPENING';
 
@@ -113,7 +125,12 @@ WHERE o.product_id = t.product_id AND o.lot_code = 'OPENING';
 -- of place a cached total silently stops matching.
 UPDATE products p
 SET quantity_on_hand = COALESCE(
-    (SELECT SUM(l.quantity) FROM inventory_lots l WHERE l.product_id = p.id), 0
+    (
+        SELECT SUM(l.quantity)
+        FROM inventory_lots l
+        WHERE l.product_id = p.id
+    ),
+    0
 );
 
 COMMIT;
