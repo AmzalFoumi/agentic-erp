@@ -124,17 +124,41 @@ were only two copies to reconcile. One definition means one error message and on
 by the spoilage scan, by the draft handler that applies them, and by the screen that previews them.
 Three inline copies is three chances for the shop's discount policy to disagree with itself.
 
-### State of play
+### State of play — gate 27 code complete 2026-08-27
 
-- **Built and tested:** `core/enums.py`, `core/models.py`'s `ActionDraft`, its migration
-  (`c3f81d5a24b7`), `services/guards.py`, `services/draft_types.py`, `services/drafts.py`.
-  36 tests across `tests/test_drafts.py` and `tests/test_draft_types.py`.
-- **Left to do:** the HTTP routes and schemas; the two MCP tools plus widening the agent's
-  no-approval set in `agent/mcp_client.py`; the `/approvals` screen; and the box tax in the section
-  above.
-- ⚠️ **Gate 27 registers no draft types.** The engine ships empty and gate 28 registers the first
-  real one, so the approval queue is empty until spoilage lands. `test_draft_types.py` pins this, so
-  a type appearing by accident fails a test rather than going unnoticed.
+Every layer is built and tested: `core/enums.py`, `ActionDraft` and its migration
+(`c3f81d5a24b7`, applied to Supabase), `services/guards.py`, `services/draft_types.py`,
+`services/drafts.py`, four HTTP routes, two MCP tools, the agent's `STAGING_ONLY` allowlist, and
+the `/approvals` screen. **132 backend tests and 34 agent tests pass**, all four `lint-imports`
+contracts hold, `tsc` and `eslint` are clean, and the routes were exercised through a real uvicorn
+rather than only the test client.
+
+Two things are **not** done, and neither is code:
+
+1. **The ThunderID side of the three new permissions.** Four of the seven places are updated in the
+   source tree; the resource-server definitions, the roles, and the rebuilt seed are not. See the
+   ⚠️ in `docs/DEPLOY-PLAN.md` — the agent needs its own role before `draft.decide` exists, because
+   the box's `AIsle Full Access` is assigned to the agent as well as the human.
+2. **The browser walkthrough.** ThunderID was not running, and the queue would be empty anyway —
+   see below.
+
+⚠️ **Gate 27 registers no draft types.** The engine ships empty and gate 28 registers the first real
+one, so the approval queue shows its empty state until spoilage lands. `test_draft_types.py` pins
+this, so a type appearing by accident fails a test rather than going unnoticed. It also means the
+first meaningful browser check of `/approvals` belongs to gate 28, not this one.
+
+### The three layers keeping the agent out of its own approvals
+
+Written down together because each one lives somewhere different, and someone changing one will not
+naturally see the other two:
+
+| Layer | Where | Fails how |
+|---|---|---|
+| The permission | `services/drafts.py` requires `draft.decide` on approve and reject | loudly — a test asserts the agent is refused *and* that the handler did not run |
+| The tool surface | `mcp_server/server.py` publishes no approval tool | loudly — `FORBIDDEN_TOOL_NAMES` in `tests/test_mcp_products.py` |
+| The token ceiling | `agent/config.py`'s `thunderid_scopes` omits `draft.decide` | silently — and the ThunderID role behind it fails silently too |
+
+The third is the weak one, which is why it carries the longest comment.
 
 ## Gate 28 — spoilage and markdown
 
