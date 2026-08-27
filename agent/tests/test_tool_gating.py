@@ -51,6 +51,7 @@ def test_read_only_holds_exactly_the_read_tools() -> None:
         "get_product_by_sku",
         "check_spoilage_risk",
         "list_product_lots",
+        "list_pending_drafts",
     }
 
 
@@ -62,7 +63,7 @@ def test_staging_tools_run_without_an_in_conversation_prompt() -> None:
     conversation to confirm "may I write down a suggestion?" would be a prompt
     with no decision behind it. See docs/FEATURES-PLAN.md, decision 1.
     """
-    for name in ("create_action_draft", "list_pending_drafts"):
+    for name in ("create_action_draft", "propose_spoilage_markdown"):
         assert tool_kind(name) == "function", name
 
 
@@ -76,7 +77,6 @@ def test_staging_only_holds_exactly_the_draft_tools() -> None:
     """
     assert STAGING_ONLY == {
         "create_action_draft",
-        "list_pending_drafts",
         # Gate 28. Stages one draft row and moves no price; the manager still
         # sees every line and both money figures before anything happens.
         "propose_spoilage_markdown",

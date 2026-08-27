@@ -94,6 +94,11 @@ READ_ONLY = frozenset(
         # query, and listing lots is a query.
         "check_spoilage_risk",
         "list_product_lots",
+        # Moved here from STAGING_ONLY. It only lists drafts - it writes
+        # nothing - and leaving it next to the tools that DO write made the
+        # comment on STAGING_ONLY factually wrong, which matters more than
+        # usual on a set whose whole job is to say what is safe.
+        "list_pending_drafts",
     }
 )
 
@@ -117,7 +122,6 @@ READ_ONLY = frozenset(
 STAGING_ONLY = frozenset(
     {
         "create_action_draft",
-        "list_pending_drafts",
         # Gate 28. Writes one draft row and moves no price. It clears the
         # bar in the comment above: approving it later is a real decision a
         # manager makes on a screen showing every line and both money
