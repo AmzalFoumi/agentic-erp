@@ -6,6 +6,7 @@ checked by calling functions with numbers, and a failure here names a rule
 rather than a query.
 """
 
+import dataclasses
 from datetime import date
 from decimal import Decimal
 
@@ -133,6 +134,11 @@ def test_nothing_here_reads_the_clock():
 
 
 def test_tiers_cannot_be_edited_at_runtime():
-    """frozen=True, so the shop's policy cannot be changed by accident."""
-    with pytest.raises(Exception):
+    """frozen=True, so the shop's policy cannot be changed by accident.
+
+    The specific exception, not a bare `Exception`: that would also pass if the
+    assignment failed for some unrelated reason, which would leave the test
+    green while the immutability it claims to check had quietly gone away.
+    """
+    with pytest.raises(dataclasses.FrozenInstanceError):
         pricing.MARKDOWN_TIERS[0].discount = Decimal("0.99")  # type: ignore[misc]
