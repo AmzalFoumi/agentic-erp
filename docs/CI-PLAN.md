@@ -131,6 +131,50 @@ rejected for automatic PR checks) — that needs real secrets and takes much lon
 check that would only run once per PR. A full stack boot-test is a manual pre-submission
 rehearsal, not a CI job.
 
+## The other automatic signal: CodeRabbit
+
+Written up 2026-08-27, when the repository got a `.coderabbit.yaml` for the first time.
+CI proves the code still works; CodeRabbit reads the diff and argues with it. Both run on
+every pull request, and neither is a substitute for the other.
+
+**Branch flow, because one setting depends on it.** Work happens on a feature branch, which
+opens a pull request into `dev`; `dev` opens a pull request into `main`. Until 2026-08-27
+CodeRabbit reviewed only pull requests into the **default** branch — so every feature branch
+was silently skipped and had to be started by hand with an `@coderabbitai review` comment.
+`reviews.auto_review.base_branches: ["dev"]` in `.coderabbit.yaml` is what fixed it. The key
+lists branches to review *in addition to* the default branch, so `main` is still covered.
+**If a new long-lived integration branch is ever added, it has to go in that list or it gets
+no reviews and nothing says so.**
+
+**Read `.coderabbit.yaml` before changing it.** Its header carries the one non-obvious fact:
+CodeRabbit does not merge configuration sources by default, so a repository file becomes the
+single source and every key it omits falls through to the vendor's **schema defaults**, not
+to the Organization UI. This account enables roughly sixty linters, the knowledge base and
+the finishing touches in that UI, all of which a normally-written file would have switched
+off. `inheritance: true` is the line that prevents it.
+
+**There is a rate limit, and multi-branch work is exactly what hits it.** The plan allows a
+fixed number of included reviews per hour — observed as **10/hour**, reported in the footer
+of every review ("4 remain after this review"). Opening six pull requests at once, which is
+what parallel branch work tends to produce, spends most of an hour's allowance in a minute.
+Stagger them, or expect later ones to wait.
+
+**The plan is Pro Plus and it is free here, permanently, because the repository is public.**
+Confirmed on the run configuration of every review. It does not depend on a trial, and a
+trial expiring does not change it. It *would* change if the repository were ever made
+private.
+
+**Useful comment commands:** `@coderabbitai configuration` prints the fully resolved settings
+annotated with which layer supplied each value — the fastest way to check the file is doing
+what it looks like it does. `@coderabbitai review` is incremental; `full review` discards
+previous findings and redoes them; `summary` regenerates the description only.
+
+**Two things about its output.** An offer labelled "Coding task started" is a proposal held on
+CodeRabbit's own site — it does not push a branch or a commit, and ignoring it is safe.
+And its findings are a starting point, not a verdict: on PR #37 it reported a same-day
+verification date as being "in the future". **Check each finding against the actual code
+before acting on it**, which is the same rule this project applies to everything else.
+
 ## Deliberately deferred, not forgotten
 
 Marking the CI check as **required** for merge (GitHub branch protection) is not
