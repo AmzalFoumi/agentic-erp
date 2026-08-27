@@ -430,3 +430,189 @@ class MarkdownProposal(BaseModel):
         description="Horizon to scan. Defaults to the discount ladder's own reach.",
     )
     reasoning: str | None = Field(default=None, max_length=2000)
+
+
+# --- purchasing (gate 29) ---------------------------------------------------
+
+
+class SupplierRead(BaseModel):
+    """One supplier."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    contact_email: str | None
+    contact_phone: str | None
+    lead_time_days: int
+    minimum_order_value: Decimal
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class SupplierList(BaseModel):
+    items: list[SupplierRead]
+    total: int
+
+
+class SupplierCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    contact_email: str | None = Field(default=None, max_length=255)
+    contact_phone: str | None = Field(default=None, max_length=50)
+    lead_time_days: int = Field(default=0, ge=0, le=365)
+    minimum_order_value: Decimal = Field(
+        default=Decimal("0.00"), ge=0, max_digits=12, decimal_places=2
+    )
+
+
+class SupplierUpdate(BaseModel):
+    """Every field optional. Omitted means 'leave it alone'.
+
+    The route turns absence into the service's `_UNSET` sentinel using
+    `model_dump(exclude_unset=True)`, so 'clear the email' and 'do not touch
+    the email' stay different requests.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    contact_email: str | None = Field(default=None, max_length=255)
+    contact_phone: str | None = Field(default=None, max_length=50)
+    lead_time_days: int | None = Field(default=None, ge=0, le=365)
+    minimum_order_value: Decimal | None = Field(
+        default=None, ge=0, max_digits=12, decimal_places=2
+    )
+    is_active: bool | None = None
+
+
+class SupplierProductRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    supplier_id: int
+    product_id: int
+    unit_cost: Decimal
+    pack_size: int
+    is_preferred: bool
+
+
+class SupplierProductList(BaseModel):
+    items: list[SupplierProductRead]
+    total: int
+
+
+class SupplierProductCreate(BaseModel):
+    product_id: int
+    unit_cost: Decimal = Field(..., ge=0, max_digits=10, decimal_places=2)
+    pack_size: int = Field(default=1, ge=1)
+    is_preferred: bool = False
+
+
+class SupplierProductUpdate(BaseModel):
+    unit_cost: Decimal | None = Field(
+        default=None, ge=0, max_digits=10, decimal_places=2
+    )
+    pack_size: int | None = Field(default=None, ge=1)
+    is_preferred: bool | None = None
+
+
+class ReorderLineRead(BaseModel):
+    """One product on a proposed order.
+
+    `is_top_up` is False for 'this is low and we are replacing it' and True for
+    'this is not low yet, and it is here to reach the supplier's minimum'. The
+    screen labels them differently; a manager is entitled to know which is
+    which.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    product_id: int
+    sku: str
+    name: str
+    quantity_on_hand: int
+    reorder_level: int
+    quantity: int
+    unit_cost: Decimal
+    pack_size: int
+    line_total: Decimal
+    is_top_up: bool
+
+
+class ReorderBundleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    supplier_id: int
+    supplier_name: str
+    lead_time_days: int
+    minimum_order_value: Decimal
+    bundle_value: Decimal
+    below_minimum: bool
+    shortfall: Decimal
+    lines: list[ReorderLineRead]
+
+
+class UnsourcedProductRead(BaseModel):
+    product_id: int
+    sku: str
+    name: str
+    quantity_on_hand: int
+    reorder_level: int
+
+
+class ReorderReportRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    bundles: list[ReorderBundleRead]
+    unsourced: list[UnsourcedProductRead]
+    total_value: Decimal
+
+
+class ReorderProposal(BaseModel):
+    """Stage one supplier's bundle as an Action Draft."""
+
+    supplier_id: int
+    reasoning: str | None = Field(default=None, max_length=2000)
+
+
+class PurchaseOrderLineRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    product_id: int
+    quantity_ordered: int
+    unit_cost: Decimal
+    line_total: Decimal
+
+
+class PurchaseOrderRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    supplier_id: int
+    status: str
+    expected_date: date | None
+    total_value: Decimal
+    notes: str | None
+    source_draft_id: int | None
+    created_at: datetime
+    created_by: str | None
+    lines: list[PurchaseOrderLineRead]
+
+
+class PurchaseOrderList(BaseModel):
+    items: list[PurchaseOrderRead]
+    total: int
+    limit: int
+    offset: int
+
+
+class PurchaseOrderLineCreate(BaseModel):
+    product_id: int
+    quantity: int = Field(..., gt=0)
+    unit_cost: Decimal = Field(..., ge=0, max_digits=10, decimal_places=2)
+
+
+class PurchaseOrderCreate(BaseModel):
+    supplier_id: int
+    lines: list[PurchaseOrderLineCreate] = Field(..., min_length=1)
+    notes: str | None = Field(default=None, max_length=2000)
