@@ -134,8 +134,10 @@ rehearsal, not a CI job.
 ## The other automatic signal: CodeRabbit
 
 Written up 2026-08-27, when the repository got a `.coderabbit.yaml` for the first time.
-CI proves the code still works; CodeRabbit reads the diff and argues with it. Both run on
-every pull request, and neither is a substitute for the other.
+CI proves the code still works; CodeRabbit reads the diff and argues with it. Neither is a
+substitute for the other, and their coverage is **not** the same: CI runs on every pull request,
+CodeRabbit only on those targeting `dev` or `main`. Why, and what to do about a third branch, is
+the next paragraph.
 
 **Branch flow, because one setting depends on it.** Work happens on a feature branch, which
 opens a pull request into `dev`; `dev` opens a pull request into `main`. Until 2026-08-27

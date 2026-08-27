@@ -192,9 +192,10 @@ requests, or reviews on those pull requests silently do not happen. A new long-l
 branch means editing that file too. See `docs/CI-PLAN.md` for the rest of what runs on a PR.
 
 **Before a feature is finished, check what it owes the demo box.** `deploy/aisle-box/` is a second,
-hand-maintained copy of the configuration, and nothing verifies it automatically. A new permission,
-a new database migration and a new setting each have to be carried into it by hand, and each fails
-*silently* if they are not — a new permission most of all, because ThunderID answers an unknown one
+hand-maintained copy of the configuration, and nothing verifies it automatically. A new permission
+and a new setting each have to be carried into it by hand, and a new database migration has to be
+applied to the shared Supabase database by hand — the box deliberately runs none. Each fails
+*silently* if it is not done — a new permission most of all, because ThunderID answers an unknown one
 with a valid token carrying no permissions rather than an error. The checklist is
 `docs/DEPLOY-PLAN.md`, "What a new feature has to update in the box".
 

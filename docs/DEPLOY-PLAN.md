@@ -4,7 +4,10 @@
 this file is the detail doc for the deployment gate, the way `BACKEND-PLAN.md` is for gates 0–8 and
 `AUTH-PLAN.md` is for gates 22–25.
 
-**Status: in progress on `build/aisle-box`.** Sub-gate table below.
+**Status: in progress on `dev`/`main`, not on a feature branch.** `build/aisle-box` was fully
+merged (PR #35) and is a stale pointer kept only for history; do not check it out. Sub-gate table
+below. `docs/PLAN.md`'s gate-26 row is the root statement of this status — if the two ever
+disagree, that one wins and this line is the one out of date.
 
 **Where this content was before.** Gate 26 was written up inside `AUTH-PLAN.md`, because at the
 time it looked like the last of the login gates. It is not: gates 22–25 are about *who you are*,
@@ -467,6 +470,12 @@ A new setting needs: the service's own `.env.example`, the matching `environment
 container that needs it** (remember `api` and `mcp` are the same image and need it twice), and — if
 a judge has to supply the value — a line in `deploy/aisle-box/.env.example` and in the `aisle.env`
 handed over with the submission.
+
+⚠️ **A `NEXT_PUBLIC_*` setting is the exception, and it fails silently in the usual way.** It is
+compiled into the browser JavaScript at build time, so it belongs in the `web` service's `args:`
+block, **not** `environment:` — an `environment:` entry for one is accepted, changes nothing, and
+leaves the bundle carrying the old value. Changing it also needs `--build`; a restart will not do
+it. Same rule as row 3 of the permission table above, for the same reason.
 
 Two rules that do not bend:
 
