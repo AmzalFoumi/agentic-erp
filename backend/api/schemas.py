@@ -614,6 +614,18 @@ class PurchaseOrderLineRead(BaseModel):
     quantity_damaged: int
 
 
+class CreditMemoRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    supplier_id: int
+    purchase_order_id: int
+    reason: str
+    amount: Decimal
+    status: str
+    created_at: datetime
+
+
 class PurchaseOrderRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -627,6 +639,7 @@ class PurchaseOrderRead(BaseModel):
     created_at: datetime
     created_by: str | None
     lines: list[PurchaseOrderLineRead]
+    credit_memos: list[CreditMemoRead] = []
 
 
 class PurchaseOrderList(BaseModel):
@@ -665,13 +678,3 @@ class ReceiptDraftCreate(BaseModel):
     reasoning: str = Field(..., min_length=1, max_length=2000)
 
 
-class CreditMemoRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    supplier_id: int
-    purchase_order_id: int
-    reason: str
-    amount: Decimal
-    status: str
-    created_at: datetime

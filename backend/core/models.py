@@ -601,6 +601,14 @@ class PurchaseOrder(Base):
     lines: Mapped[list["PurchaseOrderLine"]] = relationship(
         back_populates="order", cascade="all, delete-orphan"
     )
+    # Read-only from the order's side: CreditMemo has no back_populates here
+    # and no ORM-level cascade - a credit memo is record-only (see CreditMemo's
+    # docstring) and must survive independently of anything the order side does.
+    credit_memos: Mapped[list["CreditMemo"]] = relationship(
+        primaryjoin="PurchaseOrder.id == foreign(CreditMemo.purchase_order_id)",
+        viewonly=True,
+        order_by="CreditMemo.id",
+    )
 
     def __repr__(self) -> str:
         return f"PurchaseOrder(id={self.id!r}, status={self.status!r})"

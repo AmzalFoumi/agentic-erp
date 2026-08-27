@@ -151,7 +151,10 @@ def get_order(session: Session, order_id: int) -> PurchaseOrder | None:
     return session.execute(
         select(PurchaseOrder)
         .where(PurchaseOrder.id == order_id)
-        .options(selectinload(PurchaseOrder.lines))
+        .options(
+            selectinload(PurchaseOrder.lines),
+            selectinload(PurchaseOrder.credit_memos),
+        )
     ).scalar_one_or_none()
 
 

@@ -91,6 +91,32 @@ def test_receipt_draft_endpoint_stages_without_applying(client, sent_order_id, p
     assert response.json()["status"] == "pending"
 
 
+def test_order_detail_includes_credit_memos_from_a_short_shipment(client, sent_order_id, product):
+    receive_response = client.post(
+        f"/purchase-orders/{sent_order_id}/receive",
+        json={
+            "lines": [
+                {
+                    "product_id": product.id,
+                    "quantity_received": 7,
+                    "quantity_damaged": 0,
+                    "expiry_date": "2026-09-15",
+                    "lot_code": "DN-API-4",
+                }
+            ]
+        },
+    )
+    assert receive_response.status_code == 200
+
+    detail_response = client.get(f"/purchase-orders/{sent_order_id}")
+    assert detail_response.status_code == 200
+    body = detail_response.json()
+    assert len(body["credit_memos"]) == 1
+    memo = body["credit_memos"][0]
+    assert memo["reason"] == "short_shipped"
+    assert memo["amount"] == "15.00"  # 3 short * 5.00 unit_cost
+
+
 def test_an_unknown_order_is_not_found(client, product):
     response = client.post(
         "/purchase-orders/999999/receive",
