@@ -17,8 +17,8 @@ the result would be an agent acting unsupervised with extra steps.
 
 **The payload is validated twice.** Once here on creation, and again on
 approval, because `approve_draft` accepts an edited payload. Validating only on
-creation would mean the schema guarded the agent and never the browser - and
-the browser is the one place a human can type anything they like.
+creation would mean the schema guarded the proposer and never the editor - and
+an edited payload is where a human can type anything they like.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -167,7 +167,7 @@ def approve_draft(
 
     effective_payload = payload if payload is not None else draft.payload
 
-    # The second validation - the one that guards the browser rather than the
+    # The second validation - the one that guards the editor rather than the
     # agent. Raises before the handler is reached.
     validated = draft_types.validate_payload(draft.draft_type, effective_payload)
     spec = draft_types.spec_for(draft.draft_type)

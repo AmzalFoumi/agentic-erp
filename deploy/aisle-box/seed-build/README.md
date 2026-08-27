@@ -33,10 +33,11 @@ It also means nothing in them is encrypted with `crypto.key`, so the fresh `cryp
 — see below. It **refuses to run** without `box-secrets.json`, rather than skipping the
 client-secret check and still reporting success.
 
-## The three scripts
+## The four scripts
 
 | Script | What it does |
 |---|---|
+| `rebuild-seed.sh` | The entry point. Runs the three below in order, around the two steps that need a browser. See `deploy/SEED-REBUILD.md` |
 | `prune-config.py` | Turns the developer's export into `aisle-config.yml`: removes personal data and development leftovers, replaces the developer's user with a `judge` placeholder |
 | `build-seed.py` | Creates the judge account and imports `aisle-config.yml` into a running throwaway box |
 | `scan-seed.py` | Refuses to let anything publishable-unsafe reach the committed `.db` files |

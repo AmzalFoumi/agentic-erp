@@ -404,7 +404,7 @@ def adjust_stock(
     exists. Consider what enforcing it in the adapters instead would mean: the
     check written twice, in `api/routes/products.py` and in
     `mcp_server/server.py`, and the day someone fixes an off-by-one in one of
-    them, the AI agent and the web UI disagree about how much rice there is.
+    them, two adapters disagree about how much rice there is.
 
     `reason` is accepted and currently discarded. That is intentional and
     slightly uncomfortable: there is nowhere to put it until

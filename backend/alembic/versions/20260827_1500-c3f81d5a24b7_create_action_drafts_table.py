@@ -89,8 +89,18 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
 
-    # Both indexed because the approval queue's only real query is "the pending
-    # ones, newest first", and that is a query a human is sitting waiting on.
+    # One index per column that gets FILTERED on, which is what these two are
+    # for - not the ordering.
+    #
+    #   status      every queue view starts "the pending ones".
+    #   draft_type  reporting and the per-type views the UI may grow.
+    #
+    # ⚠️ Neither index helps ORDER BY created_at, because neither contains that
+    # column; the queue's "newest first" is sorted after the filter. That is
+    # fine and deliberate - the pending queue is small by construction, since
+    # it is a list of things a human is about to read. If it ever stops being
+    # small, the fix is a composite (status, created_at) index, not a comment
+    # claiming these two already do that job.
     op.create_index(
         op.f("ix_action_drafts_draft_type"), "action_drafts", ["draft_type"]
     )

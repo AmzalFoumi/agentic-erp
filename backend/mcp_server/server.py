@@ -678,9 +678,14 @@ def list_pending_drafts(limit: int = 20) -> list[dict[str, Any]]:
     Use this to check whether something you proposed has been decided yet, or
     to avoid proposing the same thing twice in one conversation.
 
-    A proposal that no longer appears here has been approved, rejected, or has
-    passed its deadline. This tool does not say which - read the individual
-    draft if you need to know.
+    A proposal that no longer appears here has been approved or rejected. This
+    tool does not say which - read the individual draft if you need to know.
+
+    ⚠️ A proposal that has passed its deadline DOES still appear here, with
+    `is_expired` set to true. It is still pending, because nothing expires it
+    automatically - no scheduled job exists. Check `is_expired` rather than
+    assuming everything listed is still actionable; an expired proposal can no
+    longer be approved and should be proposed again if it still matters.
 
     Args:
         limit: How many to return, newest first.

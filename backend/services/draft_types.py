@@ -7,7 +7,7 @@ it had the draft payload carry "target service function names and arguments".
 That reads as flexible and is a remote-code-execution shape: if the executor
 resolves a function from a string held in a database row, then anyone who can
 write a row - the agent, a bug, a stolen token, a manager editing a payload in
-the browser - can call anything in this codebase with anything.
+an adapter - can call anything in this codebase with anything.
 
 So a draft names a **type**, and a type is looked up in a registry that only
 this application's own source code can add to. A type nobody registered does
@@ -125,7 +125,7 @@ def validate_payload(draft_type: str, payload: dict) -> BaseModel:
     one**: once when the draft is created, and again when it is approved,
     because `approve_draft` lets a manager edit the payload in between.
     Validating only on the way in would mean the schema guarded the agent and
-    never the browser - and the browser is the one place a human can type
+    never an edited payload - and an edited payload is where a human can type
     anything at all.
 
     Pydantic's own ValidationError is caught and re-raised as ours. Letting it

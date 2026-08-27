@@ -14,9 +14,8 @@ the system was wrong for a month.
 ### FEFO: first-expiring, first-out
 
 When stock is removed, it comes off the lot that expires soonest. That is what
-a shop actually does, and it is why the rule lives here rather than in a
-screen: the website and the AI agent must never disagree about which carton
-left the building.
+a shop actually does, and it is why the rule lives here rather than in an
+adapter: no two callers may disagree about which carton left the building.
 
 Lots with no expiry date are consumed **last**, after every dated lot. They are
 the "was already on the shelf before we tracked this" stock created by the
