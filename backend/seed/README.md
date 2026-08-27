@@ -60,3 +60,23 @@ Three things about it are deliberate and easy to get wrong if it is ever rewritt
 
 The `2026-08-27-products-snapshot.sql` in this folder remains the "before" copy of the
 catalogue, taken before any of this.
+
+## 2026-08-27-suppliers.sql
+
+Gives the shop five suppliers and a price list, so gate 29's reorder bundler has something to
+group and price against. Run it **after** migration `276428c7f1dd` (`create purchasing tables`).
+
+It touches only the two tables that migration created — `suppliers` and `supplier_products` —
+and nothing in `products` or `inventory_lots`.
+
+Two things about the data are deliberate:
+
+- **Two products (Milk, Cheddar) are linked to two suppliers each**, at different prices, one
+  marked preferred. Without a real tie to break, the bundler's "preferred wins even when dearer"
+  rule is never exercised by the demo data.
+- **Prime Meats & Poultry's minimum order value is set higher than what its one low product
+  reaches alone**, so its bundle needs the top-up pass — a demo where every bundle clears its
+  minimum on the first pass never shows the branch that pass exists for.
+
+Idempotent, same as the file above: every insert is guarded on the supplier name, or the
+(supplier, product) pair, not already existing.

@@ -176,7 +176,7 @@ def approve_draft(
     # record the manager who took responsibility - not the agent that proposed
     # it. This single argument is what makes the queue an accountability
     # mechanism rather than a delay.
-    spec.handler(session, actor, client, validated)
+    spec.handler(session, actor, client, validated, draft)
 
     draft.payload = effective_payload
     draft.status = DraftStatus.EXECUTED

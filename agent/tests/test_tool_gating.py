@@ -52,6 +52,8 @@ def test_read_only_holds_exactly_the_read_tools() -> None:
         "check_spoilage_risk",
         "list_product_lots",
         "list_pending_drafts",
+        "suggest_reorder_bundles",
+        "list_purchase_orders",
     }
 
 
@@ -80,6 +82,9 @@ def test_staging_only_holds_exactly_the_draft_tools() -> None:
         # Gate 28. Stages one draft row and moves no price; the manager still
         # sees every line and both money figures before anything happens.
         "propose_spoilage_markdown",
+        # Gate 29. Stages one draft row and places no order; the manager still
+        # sees every line, the supplier's minimum, and the cost before send.
+        "propose_reorder_order",
     }
 
 

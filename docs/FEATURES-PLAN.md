@@ -106,6 +106,13 @@ The split is by *what the code is*, not by which feature asked for it — a mark
 reorder calculation are both pricing arithmetic and belong together, even though they arrive two
 gates apart.
 
+⚠️ **Amended 2026-08-27, by gate 29.** That last sentence turned out wrong once the reorder
+arithmetic was actually written. The rule it was protecting is real — a business number should have
+one definition — but there is no discount ladder in "how many packs to order", so there was nothing
+for a shared module to protect against duplicating. Gate 29's arithmetic lives in
+`services/purchasing/quantities.py` instead, and still imports `services.pricing.to_money` for
+rounding, which is the part of the original rule that mattered. See gate 29's section below.
+
 | File | Owns | Deliberately does not |
 |---|---|---|
 | `core/enums.py` | the vocabularies both adapters and the database must agree on | know anything about drafts specifically |
@@ -298,11 +305,136 @@ than the one being fixed.
 ⚠️ **This stops being acceptable the moment a second human user exists** — the same condition that
 expired the auth deferral in `PLAN.md`. Do it before then, not after.
 
+## Gate 29 — reorder and the MOQ bundler
+
+**`suppliers` and `supplier_products`.** Who the shop buys from, and which supplier stocks which
+product at what price, in what pack size, with which one preferred. `supplier_products` is
+SQLAlchemy's **association-object** pattern — a mapped class on the link table, with relationships
+from both sides to it — because the price and pack size are the reason the row exists, not
+incidental columns on a bare many-to-many. The `secondary=` shortcut is deliberately not defined
+alongside it: the 2.0 docs warn that combining the two writes `NULL` into the extra columns unless
+the shortcut carries `viewonly=True`, and not defining it at all avoids the trap outright.
+
+**`purchase_orders` and `purchase_order_lines`.** An order against one supplier, in `draft` /
+`sent` / `partially_received` / `received` / `cancelled` — the last two states declared now and
+reachable only from gate 30, because a state machine with holes in it is harder to read than one
+whose later states are written down and unused. `quantity_received` and `quantity_damaged` on the
+line are gate 30 fields, created now because a second migration later would have to be applied by
+hand to Supabase **and** carried into the demo box by hand — the same reasoning as decision 4.
+
+### The bundler, in four steps
+
+`services/purchasing/reorder.py::scan_reorder` is a **read**. It changes nothing and stages nothing.
+
+1. For each product `Product.needs_reorder` flags, choose one supplier: preferred first, then
+   cheapest, then lowest supplier id. The third tiebreak looks pointless and is not — without a
+   total order, two suppliers at the same price could swap places between two reads of the same
+   data, and the approval screen would contradict itself between refreshes, with real money on it.
+2. Order up to twice the reorder level (`REORDER_TARGET_MULTIPLIER = 2`), rounded **up** to whole
+   packs — rounding down can produce an order that still leaves the product below its reorder
+   level, which is an order that did not solve the problem it was raised for.
+3. Group the chosen lines by supplier and price the group.
+4. If a group is under that supplier's `minimum_order_value`, add packs of that supplier's other
+   products — the ones closest to going low, not the cheapest — one pack at a time until it clears.
+   If it still cannot clear, the bundle is returned flagged (`below_minimum: true`, with the
+   shortfall), never proposed as if it were fine. Approving an under-minimum order and then seeing a
+   delivery charge is the software misleading the manager.
+
+**The `reorder_level = 0` hole.** `reorder_level` defaults to 0, and `needs_reorder` is
+`quantity_on_hand <= reorder_level` — so a product with no stock and no configured level *is*
+flagged low, and the naive target (`0 × 2 = 0`) would order none of it. The bundler would then
+report a product as needing reordering and propose buying zero, which looks like the feature not
+working at all. The rule: when nothing is on the shelf, order one pack regardless of what
+`reorder_level` says. Pinned by name in `test_purchasing_quantities.py`, alongside the companion
+test that stops the rule becoming "always order one pack" — it only fires when the shelf is
+genuinely empty.
+
+**`propose_reorder` stages, never places.** It scans, picks one supplier's bundle, and writes one
+`ActionDraft` row carrying `SUPPLIER_REORDER`. Approving it creates a purchase order in `draft`
+status — **not `sent`** — because a person still has to press send, which is the last point at
+which anyone can look at the whole order before it counts as placed with a supplier.
+`expected_date` in the payload is indicative only; `send_order` recomputes it as
+`today + supplier.lead_time_days` at the moment the order is actually placed, because the lead time
+counts from then — a draft approved on Friday and sent on Monday must not claim Friday's arrival
+date.
+
+**The caveat, recorded rather than hidden.** The bundler reads `quantity_on_hand` and does not look
+at expiry. A product can appear on a reorder bundle *and* on the spoilage report at the same time —
+technically consistent (low stock and about-to-expire stock are independent facts), but it can read
+oddly on screen next to each other. Not solved here.
+
+### The `DraftHandler` contract change
+
+Writing this gate surfaced a defect in gate 27's draft contract: a handler never received the draft
+it came from, so it had no way to record `PurchaseOrder.source_draft_id`. The id **cannot** travel
+in the payload — the payload is editable by the approving manager, so an id inside it is a number a
+browser can set, and provenance you can forge is not provenance. `DraftHandler` gained a fifth
+argument, `ActionDraft`, threaded through `drafts.py`'s call site and every handler, including gate
+28's `_apply_markdown`, which takes it and ignores it — a markdown changes prices on `products`,
+which has no `source_draft_id` column to write to.
+
+### State of play — gate 29 code complete 2026-08-27
+
+Migration `276428c7f1dd` (`create_purchasing_tables`) is **applied to Supabase**: all four tables
+exist with RLS enabled, verified by query afterwards rather than assumed.
+
+| Layer | What landed |
+|---|---|
+| `core/enums.py` | `PurchaseOrderStatus` |
+| `core/models.py` | `Supplier`, `SupplierProduct`, `PurchaseOrder`, `PurchaseOrderLine` |
+| `services/purchasing/` | The first **package** under `services/`, not a flat module — `quantities.py`, `_repository.py`, `suppliers.py`, `catalog.py`, `reorder.py`, `orders.py`, `drafts.py` (registers `SUPPLIER_REORDER`), each with an explicit `__all__` contract in `__init__.py` |
+| `api/routes/purchasing.py` | Suppliers CRUD-minus-delete, the catalogue, the reorder report, propose, and the order state machine's HTTP surface |
+| `mcp_server/server.py` | `suggest_reorder_bundles`, `propose_reorder_order`, `list_purchase_orders` — **no create-order, send, or cancel tool exists at all** |
+| `backend/seed/2026-08-27-suppliers.sql` | Five suppliers, fourteen price-list links — two products carry two supplier offers each at different prices, one preferred, and one supplier's minimum is set deliberately high, so the demo data exercises the tiebreak and the top-up branch rather than only the easy path |
+| `frontend/src/app/suppliers/`, `frontend/src/app/purchasing/` | Supplier list/detail/price-list screens, the bundle cards (labelling top-up lines and stating `below_minimum` in words), and the order list/detail screens with Send/Cancel |
+
+Seed data was run and the bundler verified directly against it: Dairy Direct clears its minimum
+outright with the preferred-milk tiebreak firing, Fresh Farms and Prime Meats & Poultry both needed
+a top-up to clear their minimums (Prime Meats: chicken breast alone ₨28,800, short of its ₨60,000
+minimum; with an egg top-up, ₨60,290). All three designed scenarios confirmed working against real
+data, not only against the test suite.
+
+**Why this is a package when its siblings are flat modules.** It is the shape the rest of
+`services/` is intended to move to — see "Documented follow-up" below. Proving the shape on new code
+first is the cheap way to find out whether it is right before applying it to code that already
+works.
+
+### Documented follow-up: repackaging the older flat modules
+
+`products.py` (487 lines), `spoilage.py` (421 lines) and `lots.py` (295 lines) are candidates to
+become packages in the same shape as `services/purchasing/`, for the same reason: each has grown
+several distinct responsibilities living in one file. Not done as part of gate 29 — it moves
+roughly 40 import sites and needs the `import-linter` contracts in `backend/pyproject.toml` edited,
+two days before the submission deadline. Trigger: the next non-trivial change to any of the three
+files, or 2026-08-29, whichever comes first.
+
+80 backend tests were added this gate (271 total), all four `lint-imports` contracts hold, and the
+agent's pinned tool-gating set (34 tests) passes with the three new tools correctly split — two in
+`READ_ONLY`, one in `STAGING_ONLY`, none anywhere the agent could create, send, or cancel an order.
+`tsc`, `eslint` and `next build` are all clean on the two new screens.
+
+**What is left, and none of it is business logic:**
+
+1. ⚠️ **`purchasing.read` and `purchasing.write` do not exist on the login server.** Until they are
+   created, a real token cannot carry them, and the feature 403s for a signed-in user — the same
+   silent-failure mode gate 28's `lot.read`/`lot.write` carries. Batched with those two for after
+   gate 30, to avoid a seed rebuild per gate.
+2. The browser walkthrough is blocked by the same permissions gap — `/suppliers` and `/purchasing`
+   redirect the same way `/products` does for a session without them.
+3. The demo box seed, still deferred until all features stop changing. See `deploy/SEED-REBUILD.md`.
+
+**`purchasing.write` is deliberately NOT given to the agent.** Placing an order commits the shop's
+money. The agent proposes; only a human's approval, checked by `purchasing.write` inside
+`create_order`, turns a proposal into a `draft`-status order — and only a human pressing Send, a
+second and separate check, turns that into a placed one. `agent/mcp_client.py` requests
+`purchasing.read` only, via `READ_ONLY`; `propose_reorder_order` sits in `STAGING_ONLY`, which
+writes a queued suggestion and nothing operational.
+
 ## Permissions these gates add
 
-Five for gates 27–28. Each one costs seven edits plus a seed rebuild, so the set is kept deliberately
-small — `draft.decide` covers both approving and rejecting, because the security difference between
-them is negligible and the maintenance difference is not.
+Seven for gates 27–29. Each one costs seven edits plus a seed rebuild, so the set is kept
+deliberately small — `draft.decide` covers both approving and rejecting, because the security
+difference between them is negligible and the maintenance difference is not.
 
 | Permission | Held by | For |
 |---|---|---|
@@ -311,6 +443,8 @@ them is negligible and the maintenance difference is not.
 | `draft.decide` | human **only** | approve or reject — see decision 1 |
 | `lot.read` | human, agent | expiry and spoilage views |
 | `lot.write` | human, agent | receive stock into a lot |
+| `purchasing.read` | human, agent | suppliers, price lists, the reorder report, orders |
+| `purchasing.write` | human **only** | create/edit suppliers and links, place and send/cancel orders — see gate 29's note above |
 
 ⚠️ Adding any of these means changing **all seven** places listed in `docs/DEPLOY-PLAN.md`, "What a
 new feature has to update in the box", and rebuilding the shipped seed (`prune-config.py` →
@@ -330,6 +464,14 @@ a follow-up — the pattern set by `20260730_0838` for `products`. Worth knowing
 `alembic revision --autogenerate` will not write that line for you: it compares columns against the
 models, and row-level security is not a column. Add the `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`
 by hand after generating, and the matching `DISABLE` in `downgrade()`.
+
+⚠️ **Amended 2026-08-27, by gate 29.** "One migration per table" is right when tables are
+independent, which `action_drafts` and `inventory_lots` were. Gate 29's four tables carry foreign
+keys to each other — `supplier_products` to both `suppliers` and `products`, `purchase_order_lines`
+to `purchase_orders` — so applying them as four separate migrations would let the database sit in a
+state where some of those keys have nothing to point at. One migration, `276428c7f1dd`, creates all
+four together. RLS still goes in the create migration, and still has to be added by hand for every
+table it touches.
 
 ## What these gates deliberately do not build
 

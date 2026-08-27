@@ -144,7 +144,7 @@ def handler_calls():
     """
     calls: list[tuple] = []
 
-    def handler(session, actor, client, payload):
+    def handler(session, actor, client, payload, draft):
         calls.append((actor.id, client, payload.product_id))
 
     draft_types.register("TEST_MARK", schema=_MarkPayload, handler=handler)

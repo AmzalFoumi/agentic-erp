@@ -47,6 +47,7 @@ from sqlalchemy.orm import Session
 from core.actor import Actor
 from core.enums import ClientType
 from core.exceptions import ValidationError
+from core.models import ActionDraft
 
 # What a handler is.
 #
@@ -54,10 +55,15 @@ from core.exceptions import ValidationError
 # handler never has to ask whether a field is present or what type it is - that
 # question was settled before it was called.
 #
+# It also receives the draft it came from, so a handler can record provenance
+# on the rows it writes. That id deliberately does NOT travel in the payload:
+# the payload is editable by the approving manager, so an id inside it is a
+# number a browser can set, and provenance you can forge is not provenance.
+#
 # It returns None. A handler's effect is the rows it writes; the draft row
 # itself is updated by services/drafts.py, not by the handler. A return value
 # would only invite callers to start depending on one.
-DraftHandler = Callable[[Session, Actor, ClientType, BaseModel], None]
+DraftHandler = Callable[[Session, Actor, ClientType, BaseModel, ActionDraft], None]
 
 
 @dataclass(frozen=True)
