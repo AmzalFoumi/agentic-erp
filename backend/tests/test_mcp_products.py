@@ -62,6 +62,10 @@ EXPECTED_TOOLS = {
     "suggest_reorder_bundles",
     "propose_reorder_order",
     "list_purchase_orders",
+    # Gate 30, added the same way and for the same reason. One stages a
+    # delivery receipt draft; there is still no tool that approves,
+    # receives, or records credit - see FORBIDDEN_TOOL_NAMES below.
+    "propose_delivery_receipt",
 }
 
 # Tools that would let the agent decide its own proposals. None of these exist,

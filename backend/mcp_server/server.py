@@ -937,6 +937,50 @@ def propose_reorder_order(supplier_id: int, reasoning: str) -> dict[str, Any]:
 
 @mcp.tool()
 @translated
+def propose_delivery_receipt(
+    order_id: int, lines: list[dict[str, Any]], reasoning: str
+) -> dict[str, Any]:
+    """Stage what arrived for a sent purchase order as a proposal for a human to approve.
+
+    Call this after the dock worker (or whoever is telling you) describes
+    what showed up. Turn their words into the structured `lines` this tool
+    needs - do not guess a missing number.
+
+    Args:
+        order_id: The purchase order this delivery is against. It must be
+            in 'sent' status.
+        lines: One entry per product that arrived, each a dict with:
+            - product_id (int)
+            - quantity_received (int): good units that arrived, not
+              counting anything damaged
+            - quantity_damaged (int): units that arrived broken/crushed/
+              otherwise unsellable
+            - expiry_date (str, "YYYY-MM-DD"): **required.** If the person
+              describing the delivery did not mention an expiry or
+              best-before date, ask them for one before calling this tool -
+              never invent one.
+            - lot_code: the delivery note number or any code identifying
+              this specific delivery, e.g. "DN-4417"
+        reasoning: Your own summary of what was said, in plain words, for
+            the approving manager to read.
+
+    This creates a proposal only. Nothing is added to stock and no credit
+    is recorded until a human approves it in the approvals queue.
+    """
+    with get_session() as session:
+        draft = purchasing_service.propose_receipt(
+            session,
+            _actor(),
+            client=ClientType.MCP_AGENT,
+            order_id=order_id,
+            lines=lines,
+            reasoning=reasoning,
+        )
+        return _describe_draft(draft)
+
+
+@mcp.tool()
+@translated
 def list_purchase_orders(
     status: str | None = None, limit: int = 20
 ) -> dict[str, Any]:
