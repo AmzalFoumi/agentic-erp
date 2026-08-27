@@ -33,8 +33,13 @@ not numeric. Nothing had to be declared twice.
 from fastapi import APIRouter, Query, status
 
 from api.deps import CurrentActor, DbSession
+from api.responses import BAD_REQUEST as _BAD_REQUEST
+from api.responses import CONFLICT as _CONFLICT
+from api.responses import FORBIDDEN as _FORBIDDEN
+from api.responses import NOT_FOUND as _NOT_FOUND
+from api.responses import UNPROCESSABLE as _UNPROCESSABLE
+from api.responses import error_responses
 from api.schemas import (
-    ErrorResponse,
     ProductCreate,
     ProductList,
     ProductRead,
@@ -65,39 +70,24 @@ router = APIRouter(prefix="/products", tags=["products"])
 
 
 def _errors(*codes: int) -> dict[int | str, dict]:
-    """Build a `responses=` mapping for the given status codes.
+    """`error_responses` with this resource's own 404 and 409 wording.
 
-    Every error this API emits has the same envelope, so the schema is always
-    `ErrorResponse` and only the set of codes differs per route.
+    The generic builder lives in api/responses.py. It moved there at gate 27:
+    this helper was right while there was one router, and gates 27-30 add five
+    more - at which point five copies of the same status-code dictionary is
+    five places for the same 403 to be described differently.
 
-    Declaring 422 here deliberately **overrides** the `HTTPValidationError`
-    entry FastAPI adds by itself. That default describes the shape FastAPI
-    would return if nothing intervened, and something does: the handler in
-    api/errors.py reshapes every 422 into this envelope. Leaving the default in
-    place would document a response the API never actually sends.
+    What stays here is the wording that is genuinely about products. "No such
+    product" and "That SKU is already taken" are better sentences than the
+    generic ones, and flattening them would make the generated docs worse.
     """
-    descriptions = {
-        status.HTTP_400_BAD_REQUEST: "A business rule was broken.",
-        status.HTTP_403_FORBIDDEN: "The actor lacks the required permission.",
-        status.HTTP_404_NOT_FOUND: "No such product.",
-        status.HTTP_409_CONFLICT: "That SKU is already taken.",
-        status.HTTP_422_UNPROCESSABLE_CONTENT: (
-            "The request body does not match the schema. Carries `fields`."
-        ),
-    }
-    return {
-        code: {"model": ErrorResponse, "description": descriptions[code]}
-        for code in codes
-    }
-
-
-# Any route can refuse on permissions, because every service call begins with
-# `actor.can(...)`.
-_FORBIDDEN = status.HTTP_403_FORBIDDEN
-_NOT_FOUND = status.HTTP_404_NOT_FOUND
-_CONFLICT = status.HTTP_409_CONFLICT
-_BAD_REQUEST = status.HTTP_400_BAD_REQUEST
-_UNPROCESSABLE = status.HTTP_422_UNPROCESSABLE_CONTENT
+    return error_responses(
+        *codes,
+        descriptions={
+            _NOT_FOUND: "No such product.",
+            _CONFLICT: "That SKU is already taken.",
+        },
+    )
 
 
 @router.get(

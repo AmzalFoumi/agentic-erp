@@ -193,6 +193,75 @@ class ProductList(BaseModel):
     )
 
 
+
+# --------------------------------------------------------------------------
+# Action drafts (gate 27)
+# --------------------------------------------------------------------------
+
+
+class DraftRead(BaseModel):
+    """What every draft endpoint returns.
+
+    `cost_at_risk` and `projected_recovery` are `Decimal`, which Pydantic
+    serialises to a JSON **string** - the same decision ProductRead makes for
+    prices, and for the same reason set out at the top of this file.
+
+    `payload` is typed `dict` and not something stricter, deliberately. Three
+    different proposal shapes share the draft table, and which one applies is
+    decided by `draft_type` through the registry in services/draft_types.py.
+    Declaring a union here would mean restating every payload schema in the
+    API layer and keeping the two in step forever - the drift this project
+    avoids everywhere else. The frontend narrows on `draft_type`, exactly as
+    the backend does.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    draft_type: str
+    status: str
+    payload: dict
+    reasoning: str = Field(
+        description="The proposer's own explanation, for the human deciding."
+    )
+    cost_at_risk: Decimal | None
+    projected_recovery: Decimal | None
+    expires_at: datetime | None
+    is_expired: bool = Field(
+        description="True when expires_at has passed. Computed, never stored."
+    )
+    created_at: datetime
+    created_by: str
+    created_via: str = Field(description="Which door proposed this: web_ui or mcp_agent.")
+    decided_by: str | None
+    decided_at: datetime | None
+    decided_via: str | None
+
+
+class DraftList(BaseModel):
+    """A page of drafts plus the size of the whole match. Mirrors ProductList."""
+
+    items: list[DraftRead]
+    total: int = Field(
+        description="Total matching the status filter, ignoring limit/offset.",
+    )
+
+
+class DraftApproval(BaseModel):
+    """The body of POST /drafts/{id}/approve.
+
+    `payload` is optional and replaces the stored one when present - the inline
+    adjuster, for a manager who agrees with the proposal but wants 30% rather
+    than 50%. Absent means "approve exactly what was proposed".
+
+    Whatever arrives here is re-validated against the draft type's own schema
+    before anything runs. This model deliberately does not attempt that itself:
+    it cannot, because the right schema depends on the draft's type, which is
+    in the database and not in this request.
+    """
+
+    payload: dict | None = None
+
 # Every value the `error` field can take. Written out as a Literal rather than
 # `str` so the generated TypeScript is a union type and a `switch` over it can
 # be checked for exhaustiveness by the compiler - the frontend then cannot
