@@ -134,10 +134,13 @@ rehearsal, not a CI job.
 ## The other automatic signal: CodeRabbit
 
 Written up 2026-08-27, when the repository got a `.coderabbit.yaml` for the first time.
-CI proves the code still works; CodeRabbit reads the diff and argues with it. Neither is a
-substitute for the other, and their coverage is **not** the same: CI runs on every pull request,
-CodeRabbit only on those targeting `dev` or `main`. Why, and what to do about a third branch, is
-the next paragraph.
+CI runs the backend and agent suites and both `lint-imports` contracts; CodeRabbit reads the diff
+and argues with it. Neither is a substitute for the other, and neither is as broad as it sounds.
+CI proves the tested code still passes its tests — not that the frontend works, which has no tests
+yet, and not that the box runs, since `docker-build.yml` only builds the images and never starts
+one. Their triggers differ too: `ci.yml` runs on every pull request, `docker-build.yml` only on
+pull requests into `main`, and CodeRabbit only on those targeting `dev` or `main`. Why that last
+one, and what to do about a third branch, is the next paragraph.
 
 **Branch flow, because one setting depends on it.** Work happens on a feature branch, which
 opens a pull request into `dev`; `dev` opens a pull request into `main`. Until 2026-08-27

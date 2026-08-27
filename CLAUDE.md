@@ -194,9 +194,11 @@ branch means editing that file too. See `docs/CI-PLAN.md` for the rest of what r
 **Before a feature is finished, check what it owes the demo box.** `deploy/aisle-box/` is a second,
 hand-maintained copy of the configuration, and nothing verifies it automatically. A new permission
 and a new setting each have to be carried into it by hand, and a new database migration has to be
-applied to the shared Supabase database by hand — the box deliberately runs none. Each fails
-*silently* if it is not done — a new permission most of all, because ThunderID answers an unknown one
-with a valid token carrying no permissions rather than an error. The checklist is
+applied to the shared Supabase database by hand — the box deliberately runs none. A missed
+permission or setting fails **silently**; a missed migration is the one that does announce itself,
+as a query failing on a column that is not there. The silent pair is the dangerous pair, and a
+permission most of all, because ThunderID answers an unknown one with a valid token carrying no
+permissions rather than an error. The checklist is
 `docs/DEPLOY-PLAN.md`, "What a new feature has to update in the box".
 
 When picking up new work: check `docs/PLAN.md`'s progress table for the current gate, and follow the
