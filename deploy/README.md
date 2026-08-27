@@ -174,3 +174,6 @@ pass fails, the most common cause is step 1 not actually running yet, not a deep
 - `docs/AUTH-PLAN.md` — the auth workstream (gates 22–26), provider decision, DCR/loopback
   coupling. As of 2026-08-25 this shutdown/restart flow and the deployment gap above are not yet
   folded into that doc — this README is the interim record.
+- `deploy/SEED-REBUILD.md` — how to copy this stack's identity configuration into the demo
+  box, for a reader with no prior context. Read it before changing a permission or role: the
+  box ships a pre-made copy of the login-server database, and nothing updates it automatically.

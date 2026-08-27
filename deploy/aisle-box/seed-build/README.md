@@ -43,6 +43,11 @@ client-secret check and still reporting success.
 
 ## Rebuilding the seed, start to finish
 
+> **If you have no prior context, read `deploy/SEED-REBUILD.md` instead.** It covers the same
+> process from the beginning — including exporting from the dev login server, which happens
+> before any script here runs — and `rebuild-seed.sh` in this folder automates the mechanical
+> parts of it. The steps below are the same thing in shorthand, kept for quick reference.
+
 ```bash
 # 1. Regenerate the configuration from the developer's export.
 python deploy/aisle-box/seed-build/prune-config.py
