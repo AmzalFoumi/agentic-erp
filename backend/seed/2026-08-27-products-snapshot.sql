@@ -20,7 +20,13 @@
 -- defaults, and restoring a snapshot is a new event, not a re-enactment of the
 -- original one. created_by / updated_by ARE included, because they record who
 -- made the row and that fact does not change on restore. The three values seen
--- there are 'api', 'mcp' and one real ThunderID subject id from gate 24.
+-- there are 'api', 'mcp' and 'seed-user'.
+--
+-- ⚠️ 'seed-user' is a FIXTURE, and replaces a real ThunderID subject id that
+-- was originally captured here. This repository is public, and a subject id is
+-- a stable identifier for a real person - it belongs in the database, not in a
+-- file anyone can read. Any future snapshot taken from live data must be
+-- scrubbed the same way before it is committed.
 --
 -- Money is written unquoted (250.00, not '250.00') because these columns are
 -- Numeric(10,2). Note this is the opposite of how the API serialises money -
@@ -44,7 +50,7 @@ BEGIN;
 INSERT INTO public.products
     (id, sku, name, category, unit, cost_price, sell_price, quantity_on_hand, reorder_level, created_by, updated_by)
 VALUES
-    (139, '1234-2345', 'Sourdough 800g',         'Breads',             'piece',   250.00,  400.00,  274,  25, 'api', '01a03e4b-8c43-79b8-a2a1-c9ccf73e9f57'),
+    (139, '1234-2345', 'Sourdough 800g',         'Breads',             'piece',   250.00,  400.00,  274,  25, 'api', 'seed-user'),
     (140, '2001-1001', 'Basmati Rice 5kg',       'Grains',             'bag',    1850.00, 2400.00,   60,  20, 'api', 'api'),
     (141, '2001-1002', 'Red Rice 5kg',           'Grains',             'bag',    1200.00, 1650.00,    8,  20, 'api', 'api'),
     (142, '2001-1003', 'Wheat Flour 1kg',        'Grains',             'pack',    220.00,  310.00,  390,  40, 'api', 'mcp'),
