@@ -29,3 +29,8 @@ returning a bare `409` as an integer. It stays a rule you keep in your head.
 # ⚠️ The import is unused by name on purpose. Do not "clean it up" - the flake8
 # noqa below says so to the linter, and this comment says so to you.
 from services import spoilage  # noqa: F401,E402
+
+# Gate 29. Same reason as spoilage above: the draft type registers as a side
+# effect of this import, and drafts.approve_draft refuses an unknown type - so
+# without this the feature would look broken rather than absent.
+from services.purchasing import drafts as _purchasing_drafts  # noqa: F401,E402

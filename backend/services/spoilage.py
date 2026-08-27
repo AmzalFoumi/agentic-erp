@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session
 from core.actor import Actor
 from core.enums import ClientType
 from core.exceptions import ValidationError
-from core.models import InventoryLot, Product
+from core.models import ActionDraft, InventoryLot, Product
 from services import draft_types, drafts, lots, pricing
 from services.guards import require_permission
 
@@ -369,6 +369,7 @@ def _apply_markdown(
     actor: Actor,
     client: ClientType,
     payload: BaseModel,
+    draft: ActionDraft,
 ) -> None:
     """Move the prices. Called by `drafts.approve_draft`, never directly.
 
@@ -384,6 +385,11 @@ def _apply_markdown(
     when proposed, because the payload may have been edited in between. The
     lot could have sold out, or been consumed, or belong to another product
     entirely.
+
+    `draft` is unused here. A markdown changes prices on `products`, which
+    carries no source_draft_id column - there is nowhere to record it. The
+    parameter is part of the handler contract because gate 29's purchase
+    orders and gate 30's received lots both do have somewhere to put it.
     """
     require_permission(actor, "product.update")
 

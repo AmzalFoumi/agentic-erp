@@ -139,9 +139,10 @@ def test_gate_27_ships_with_no_real_draft_types_registered():
     would notice a draft type appearing by accident through some import.
 
     Gate 28 registered BATCH_PRICE_MARKDOWN (services/spoilage.py, imported by
-    services/__init__.py). TEST_NOOP is this file's own fixture and exists
-    nowhere in production code.
+    services/__init__.py). Gate 29 added SUPPLIER_REORDER the same way
+    (services/purchasing/drafts.py). TEST_NOOP is this file's own fixture and
+    exists nowhere in production code.
     """
     assert draft_types.registered_types() == frozenset(
-        {"TEST_NOOP", "BATCH_PRICE_MARKDOWN"}
+        {"TEST_NOOP", "BATCH_PRICE_MARKDOWN", "SUPPLIER_REORDER"}
     )

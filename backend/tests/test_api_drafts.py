@@ -34,7 +34,7 @@ def handler_calls():
     draft_types.register(
         "TEST_MARK",
         schema=_MarkPayload,
-        handler=lambda session, actor, client, payload: calls.append(
+        handler=lambda session, actor, client, payload, draft: calls.append(
             payload.product_id
         ),
     )
