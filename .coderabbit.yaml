@@ -45,7 +45,17 @@ reviews:
         concepts - no HTTPException, no Request, no status codes, no fastapi/starlette/mcp/
         uvicorn/httpx imports. This is the project's one architectural rule and it is
         enforced mechanically by import-linter. Flag any violation as high severity.
-        backend/core/ holds to the same restriction and additionally must not import jwt.
+
+    # ⚠️ backend/core/ NEEDS ITS OWN ENTRY. The rule below used to be one sentence at the
+    # end of the services block above - where it was never loaded, because that block's
+    # glob only matches backend/services/. A rule written under a path it does not match
+    # is a rule that does not exist. Raised by CodeRabbit on PR #37.
+    - path: "backend/core/**"
+      instructions: |
+        The same architectural boundary as backend/services/: never import from api/ or
+        mcp_server/, and no web concepts. backend/core/ additionally must not import jwt -
+        parsing a token is the adapter's job, settled in gate 24. Enforced mechanically by
+        import-linter. Flag any violation as high severity.
 
     - path: "deploy/aisle-box/**"
       instructions: |
