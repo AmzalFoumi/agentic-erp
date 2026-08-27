@@ -54,6 +54,25 @@ def test_a_partial_update_leaves_other_fields_alone(client):
     assert updated.json()["contact_email"] == "keep@me.com"
 
 
+def test_an_explicit_null_name_is_rejected(client):
+    """Omitting a field means 'leave it alone'; sending null used to mean 500."""
+    created = client.post("/suppliers", json={"name": "Nullable Ltd"}).json()
+
+    response = client.patch(f"/suppliers/{created['id']}", json={"name": None})
+    assert response.status_code == 422
+
+
+def test_an_explicit_null_contact_email_still_clears_it(client):
+    """The contact fields are the ones null is genuinely for."""
+    created = client.post(
+        "/suppliers", json={"name": "Clearable Ltd", "contact_email": "a@b.com"}
+    ).json()
+
+    response = client.patch(f"/suppliers/{created['id']}", json={"contact_email": None})
+    assert response.status_code == 200
+    assert response.json()["contact_email"] is None
+
+
 def test_the_reorder_report_is_reachable(client):
     response = client.get("/purchasing/reorder-suggestions")
     assert response.status_code == 200

@@ -28,7 +28,11 @@ export function ClickableRow({
       tabIndex={0}
       onClick={() => router.push(href)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") router.push(href);
+        // `currentTarget` is the row; `target` is whatever actually had focus.
+        // Without this check, Enter on the nested Deactivate button would
+        // deactivate the supplier *and* navigate away from the list. A click
+        // on that button is already stopped by the button itself.
+        if (e.key === "Enter" && e.target === e.currentTarget) router.push(href);
       }}
       className="h-row cursor-pointer"
     >

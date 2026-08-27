@@ -67,7 +67,8 @@ class PurchaseOrderStatus(str, Enum):
     received           - complete (gate 30)
     cancelled          - abandoned from draft or sent. Terminal
 
-    The last three are declared now and only reachable in gate 30. A state
+    `partially_received` and `received` are declared now and only reachable in
+    gate 30; `cancelled` is reachable already, from either state. A state
     machine with holes in it is harder to read than one whose later states are
     written down and unused.
 

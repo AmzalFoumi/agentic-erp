@@ -38,7 +38,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # --------------------------------------------------------------------------
 # Input
@@ -466,6 +466,22 @@ class SupplierCreate(BaseModel):
     )
 
 
+def _reject_explicit_nulls(data: object, fields: tuple[str, ...]) -> object:
+    """Refuse `{"field": null}` for fields the column cannot hold null in.
+
+    `exclude_unset=True` makes an *omitted* field mean 'leave it alone', but it
+    cannot tell that apart from a field explicitly sent as null - both patch
+    schemas below would otherwise forward `None` into a non-nullable column,
+    or into a `.strip()` that has nothing to strip. Only the contact fields
+    are genuinely clearable, so only they keep null.
+    """
+    if isinstance(data, dict):
+        for field in fields:
+            if field in data and data[field] is None:
+                raise ValueError(f"{field} cannot be null. Omit it to leave it alone.")
+    return data
+
+
 class SupplierUpdate(BaseModel):
     """Every field optional. Omitted means 'leave it alone'.
 
@@ -473,6 +489,13 @@ class SupplierUpdate(BaseModel):
     `model_dump(exclude_unset=True)`, so 'clear the email' and 'do not touch
     the email' stay different requests.
     """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_nulls(cls, data: object) -> object:
+        return _reject_explicit_nulls(
+            data, ("name", "lead_time_days", "minimum_order_value", "is_active")
+        )
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     contact_email: str | None = Field(default=None, max_length=255)
@@ -508,6 +531,11 @@ class SupplierProductCreate(BaseModel):
 
 
 class SupplierProductUpdate(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def _no_nulls(cls, data: object) -> object:
+        return _reject_explicit_nulls(data, ("unit_cost", "pack_size", "is_preferred"))
+
     unit_cost: Decimal | None = Field(
         default=None, ge=0, max_digits=10, decimal_places=2
     )

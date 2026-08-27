@@ -139,6 +139,8 @@ def create_order(
     supplier = repo.get_supplier(session, supplier_id)
     if supplier is None:
         raise NotFoundError(f"Supplier {supplier_id} does not exist.")
+    if not supplier.is_active:
+        raise ValidationError(f"Supplier {supplier_id} is no longer active.")
 
     seen: set[int] = set()
     for line in lines:
@@ -209,6 +211,11 @@ def send_order(
     supplier = repo.get_supplier(session, order.supplier_id)
     if supplier is None:  # pragma: no cover - the FK makes this unreachable
         raise NotFoundError(f"Supplier {order.supplier_id} does not exist.")
+    # Checked again here, not only in `create_order`: deactivation is how a
+    # supplier is retired, and a draft raised before that happened must not
+    # still be placeable afterwards. Cancelling it stays legal.
+    if not supplier.is_active:
+        raise ValidationError(f"Supplier {order.supplier_id} is no longer active.")
 
     order.status = PurchaseOrderStatus.SENT.value
     order.expected_date = today + timedelta(days=supplier.lead_time_days)

@@ -1,4 +1,8 @@
-/** Skeleton at roughly the real height, so the page does not jump. */
+/**
+ * Approximate placeholder for the supplier list. It cannot hold the exact
+ * final height - that varies with how many suppliers come back - so it only
+ * reduces the jump, it does not remove it.
+ */
 export default function SuppliersLoading() {
   return (
     <div>

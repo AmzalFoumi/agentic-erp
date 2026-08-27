@@ -143,6 +143,24 @@ def test_ordering_from_an_unknown_supplier_raises(session, unique_sku):
         )
 
 
+def test_ordering_from_a_deactivated_supplier_is_refused(session, unique_sku):
+    """Deactivation is how a supplier is retired - it has to actually stop work."""
+    supplier, product, _ = _an_order(session, unique_sku)
+    suppliers.update_supplier(session, WRITER, supplier_id=supplier.id, is_active=False)
+    with pytest.raises(ValidationError):
+        orders.create_order(
+            session,
+            WRITER,
+            client=ClientType.WEB_UI,
+            supplier_id=supplier.id,
+            lines=[
+                orders.OrderLineInput(
+                    product_id=product.id, quantity=1, unit_cost=Decimal("1.00")
+                )
+            ],
+        )
+
+
 # --- transitions -----------------------------------------------------------
 
 
@@ -170,6 +188,22 @@ def test_an_order_cannot_be_sent_twice(session, unique_sku):
     orders.send_order(session, WRITER, order_id=order.id, today=TODAY)
     with pytest.raises(ValidationError):
         orders.send_order(session, WRITER, order_id=order.id, today=TODAY)
+
+
+def test_a_draft_cannot_be_sent_after_its_supplier_is_deactivated(session, unique_sku):
+    """The draft may predate the deactivation. Placing it must still be refused."""
+    supplier, _, order = _an_order(session, unique_sku)
+    suppliers.update_supplier(session, WRITER, supplier_id=supplier.id, is_active=False)
+    with pytest.raises(ValidationError):
+        orders.send_order(session, WRITER, order_id=order.id, today=TODAY)
+
+
+def test_a_draft_for_a_deactivated_supplier_can_still_be_cancelled(session, unique_sku):
+    """Refusing to *send* must not strand the order with no way out."""
+    supplier, _, order = _an_order(session, unique_sku)
+    suppliers.update_supplier(session, WRITER, supplier_id=supplier.id, is_active=False)
+    cancelled = orders.cancel_order(session, WRITER, order_id=order.id)
+    assert cancelled.status == PurchaseOrderStatus.CANCELLED.value
 
 
 def test_a_draft_can_be_cancelled(session, unique_sku):
