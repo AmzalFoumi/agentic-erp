@@ -55,3 +55,29 @@ class DraftStatus(str, Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     EXECUTED = "executed"
+
+
+class PurchaseOrderStatus(str, Enum):
+    """Where a purchase order is in its life.
+
+    draft              - being built. Lines may still be changed
+    sent               - placed with the supplier. Lines are now frozen,
+                         because gate 30 compares what arrives against them
+    partially_received - some lines short or still outstanding (gate 30)
+    received           - complete (gate 30)
+    cancelled          - abandoned from draft or sent. Terminal
+
+    The last three are declared now and only reachable in gate 30. A state
+    machine with holes in it is harder to read than one whose later states are
+    written down and unused.
+
+    These five values, not the external spec's DRAFT/APPROVED/DISPATCHED/
+    FULFILLED - see docs/FEATURES-PLAN.md, row 7. "Partially received" is
+    exactly what a dock discrepancy produces, and gate 30 is built on it.
+    """
+
+    DRAFT = "draft"
+    SENT = "sent"
+    PARTIALLY_RECEIVED = "partially_received"
+    RECEIVED = "received"
+    CANCELLED = "cancelled"

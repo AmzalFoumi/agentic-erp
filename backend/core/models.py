@@ -24,13 +24,23 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
-from core.enums import DraftStatus
+from core.enums import DraftStatus, PurchaseOrderStatus
 
 
 class Product(Base):
@@ -422,4 +432,224 @@ class InventoryLot(Base):
             f"InventoryLot(id={self.id!r}, product_id={self.product_id!r}, "
             f"lot_code={self.lot_code!r}, expiry={self.expiry_date!r}, "
             f"qty={self.quantity!r})"
+        )
+
+
+class Supplier(Base):
+    """Who we buy from.
+
+    `minimum_order_value` is the field this whole gate exists for: below it a
+    supplier adds a delivery charge or refuses to ship, which is what turns
+    "these four things are low" into a bundling problem worth solving.
+
+    There is no delete. `is_active = False` is how a supplier leaves, so order
+    history keeps a name rather than an orphaned id.
+    """
+
+    __tablename__ = "suppliers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    contact_email: Mapped[str | None] = mapped_column(String(255), default=None)
+    contact_phone: Mapped[str | None] = mapped_column(String(50), default=None)
+
+    # Days from placing the order to the stock arriving. Turns "we are low on
+    # rice" into "order rice by Thursday".
+    lead_time_days: Mapped[int] = mapped_column(default=0)
+
+    # Numeric(12,2) rather than (10,2): this is a whole-order figure, not a
+    # unit price, and 10,2 caps at 99,999,999.99 - an ordinary weekly order in
+    # VND.
+    minimum_order_value: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0.00")
+    )
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    updated_by: Mapped[str | None] = mapped_column(String(128), default=None)
+
+    products: Mapped[list["SupplierProduct"]] = relationship(
+        back_populates="supplier", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"Supplier(id={self.id!r}, name={self.name!r})"
+
+
+class SupplierProduct(Base):
+    """Which supplier stocks which product, at what price, in what pack size.
+
+    ⚠️ This is SQLAlchemy's **association object** pattern: a class mapped to
+    the link table, with relationships from both sides to it. The `secondary=`
+    many-to-many shortcut is deliberately NOT defined anywhere.
+
+    The 2.0 docs (checked 2026-08-27) warn that combining `secondary=` with an
+    association object writes NULL into the extra columns unless the shortcut
+    carries `viewonly=True`. Not defining it at all avoids the trap outright,
+    and nothing here wants to hop from supplier to product without seeing the
+    price - the price is the reason the row exists.
+    """
+
+    __tablename__ = "supplier_products"
+    __table_args__ = (
+        UniqueConstraint("supplier_id", "product_id", name="uq_supplier_product"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    supplier_id: Mapped[int] = mapped_column(
+        ForeignKey("suppliers.id", ondelete="CASCADE"), index=True
+    )
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), index=True
+    )
+
+    # What THIS supplier charges. The same product often has two prices.
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+
+    # You buy milk in cases of 12, not units of 7. Ignoring this is how a
+    # system proposes an order a supplier cannot fill.
+    pack_size: Mapped[int] = mapped_column(default=1)
+
+    # First tiebreak when two suppliers stock the same product.
+    is_preferred: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    updated_by: Mapped[str | None] = mapped_column(String(128), default=None)
+
+    supplier: Mapped["Supplier"] = relationship(back_populates="products")
+    product: Mapped["Product"] = relationship()
+
+    def __repr__(self) -> str:
+        return (
+            f"SupplierProduct(supplier_id={self.supplier_id!r}, "
+            f"product_id={self.product_id!r}, unit_cost={self.unit_cost!r})"
+        )
+
+
+class PurchaseOrder(Base):
+    """An order placed with one supplier.
+
+    `total_value` is a maintained summary of the lines, exactly like
+    `Product.quantity_on_hand` is a summary of the lots. It has ONE write path:
+    `services/purchasing/orders.py::_recalculate_total`. A summary with two
+    write paths drifts, and a drifted total is invisible until someone adds the
+    invoice up by hand.
+
+    Lines are frozen once `status` leaves `draft`, because gate 30 compares
+    what arrives against what was ordered. An editable sent order makes the
+    discrepancy figure meaningless.
+    """
+
+    __tablename__ = "purchase_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # RESTRICT, not CASCADE: deleting a supplier must never silently delete
+    # order history. (Nothing deletes suppliers today; this is the backstop
+    # for the day something tries.)
+    supplier_id: Mapped[int] = mapped_column(
+        ForeignKey("suppliers.id", ondelete="RESTRICT"), index=True
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(32), default=PurchaseOrderStatus.DRAFT.value, index=True
+    )
+
+    # Set by send_order as today + the supplier's lead time. Nullable because a
+    # draft has not been placed yet, so nothing can be promised about arrival.
+    expected_date: Mapped[date | None] = mapped_column(Date, default=None)
+
+    total_value: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), default=Decimal("0.00")
+    )
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+
+    # No ForeignKey, deliberately - the same choice as InventoryLot. A draft is
+    # provenance, not a parent: the order must survive its draft being cleared
+    # out, and a hard FK would either block that or cascade the order away.
+    source_draft_id: Mapped[int | None] = mapped_column(default=None)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    updated_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    created_via: Mapped[str | None] = mapped_column(String(32), default=None)
+
+    supplier: Mapped["Supplier"] = relationship()
+    lines: Mapped[list["PurchaseOrderLine"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"PurchaseOrder(id={self.id!r}, status={self.status!r})"
+
+
+class PurchaseOrderLine(Base):
+    """One product on one order.
+
+    `unit_cost` is frozen at order time, the same reason `InventoryLot`
+    freezes its cost: when the supplier raises their price next month, this
+    line still records what was actually agreed.
+    """
+
+    __tablename__ = "purchase_order_lines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    purchase_order_id: Mapped[int] = mapped_column(
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"), index=True
+    )
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="RESTRICT"), index=True
+    )
+
+    quantity_ordered: Mapped[int] = mapped_column()
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+
+    # ⚠️ GATE 30 FIELDS. Written now, unused until then, and this comment is
+    # why: adding a column later costs a second migration applied by hand to
+    # Supabase AND carried into deploy/aisle-box by hand. They are free while
+    # the table is being created. Same reasoning as FEATURES-PLAN.md decision 4.
+    quantity_received: Mapped[int] = mapped_column(default=0)
+    quantity_damaged: Mapped[int] = mapped_column(default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    updated_by: Mapped[str | None] = mapped_column(String(128), default=None)
+
+    order: Mapped["PurchaseOrder"] = relationship(back_populates="lines")
+    product: Mapped["Product"] = relationship()
+
+    @property
+    def line_total(self) -> Decimal:
+        """What this line costs. Computed, never stored - it is two columns
+        multiplied together, and storing it would be a third thing to keep in
+        step with them."""
+        return self.unit_cost * self.quantity_ordered
+
+    def __repr__(self) -> str:
+        return (
+            f"PurchaseOrderLine(order={self.purchase_order_id!r}, "
+            f"product={self.product_id!r}, qty={self.quantity_ordered!r})"
         )
