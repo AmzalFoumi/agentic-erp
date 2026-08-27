@@ -274,6 +274,30 @@ rungs, with the day-9 and day-14 batches correctly excluded.
 person witnesses. An agent that could invent stock could invent a spoilage problem and then propose
 the solution to it. `agent/config.py` requests `lot.read` only.
 
+### Known and deliberately deferred: concurrent decisions are not serialised
+
+Found by review on 2026-08-27, judged real, and **left in place on purpose** — recorded here so it
+is a decision rather than an oversight.
+
+Two transactions can both pass a check before either commits:
+
+| Where | What could happen |
+|---|---|
+| `drafts.approve_draft` | Both pass `_require_actionable()`, so one draft's handler runs twice |
+| `lots.consume` | Both read the same lots and consume the last unit |
+| `lots.receive_lot` / `adjust_stock` | Both recalculate and write a partial sum, or create two correction lots |
+
+The fix is a `SELECT … FOR UPDATE` on the product (and on the draft) held until commit.
+
+**Why it is not being done now.** It needs two people acting on the same product within the same
+moment; this system has one user and a demo on 2026-08-29. The change touches every write path in
+`lots.py` and `products.py`, which is the largest possible blast radius for the smallest observable
+gain before a deadline — and a lock taken in the wrong order is a deadlock, which is a worse failure
+than the one being fixed.
+
+⚠️ **This stops being acceptable the moment a second human user exists** — the same condition that
+expired the auth deferral in `PLAN.md`. Do it before then, not after.
+
 ## Permissions these gates add
 
 Five for gates 27–28. Each one costs seven edits plus a seed rebuild, so the set is kept deliberately
