@@ -41,6 +41,7 @@ from services.purchasing.orders import (
     send_order,
 )
 from services.purchasing.drafts import SUPPLIER_REORDER, propose_reorder
+from services.purchasing.receiving import receive_order
 from services.purchasing.reorder import (
     ReorderBundle,
     ReorderLine,
@@ -69,6 +70,7 @@ __all__ = [
     "list_supplier_products",
     "list_suppliers",
     "propose_reorder",
+    "receive_order",
     "scan_reorder",
     "send_order",
     "update_link",

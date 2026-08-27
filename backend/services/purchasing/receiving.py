@@ -1,0 +1,200 @@
+"""Receiving a sent purchase order: the shared core both doors call.
+
+### The one rule this module exists to enforce
+
+Damaged units never become stock. Only `quantity_received - quantity_damaged`
+units become an InventoryLot; damaged units are a number on a credit memo
+only. This is checked in exactly one place, `_apply_receipt`, so the two
+public doors below - a human typing a form, or a manager approving the AI's
+parse of what the dock worker said - can never disagree about it.
+
+### Reuses services.lots.receive_lot rather than writing stock twice
+
+`receive_lot` already does the "write a lot, recalculate quantity_on_hand"
+work correctly (gate 28). Writing a second lot-creation path here would be
+exactly the drift `docs/FEATURES-PLAN.md` decision 3 exists to prevent.
+
+### Received is capped at ordered
+
+Overshipment is out of scope for gate 30 - see the design spec's
+"Alternatives considered". A line asking for more than was ordered is
+refused before anything is written, not silently truncated.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy.orm import Session
+
+from core.actor import Actor
+from core.enums import ClientType, CreditMemoReason, PurchaseOrderStatus
+from core.exceptions import ValidationError
+from core.models import CreditMemo, PurchaseOrder
+from services import lots
+from services.guards import require_permission
+from services.purchasing.orders import _get_or_raise
+
+
+@dataclass(frozen=True)
+class ReceiptLineInput:
+    """What arrived for one line on the order.
+
+    Frozen, and deliberately not the ORM model - a caller describing a
+    receipt should not be handing us half-built database rows, the same
+    reasoning as orders.OrderLineInput.
+    """
+
+    product_id: int
+    quantity_received: int
+    quantity_damaged: int
+    expiry_date: date
+    lot_code: str
+
+
+def _find_line(order: PurchaseOrder, product_id: int):
+    for line in order.lines:
+        if line.product_id == product_id:
+            return line
+    raise ValidationError(
+        f"Product {product_id} is not on purchase order {order.id}."
+    )
+
+
+def _apply_receipt(
+    session: Session,
+    actor: Actor,
+    *,
+    client: ClientType,
+    order: PurchaseOrder,
+    lines: list[ReceiptLineInput],
+    source_draft_id: int | None = None,
+) -> PurchaseOrder:
+    """Do the actual work of receiving. Not exported - both public doors below
+    call this after their own checks.
+
+    No commit: like every gate 29 core function, the caller (`receive_order`
+    directly, or `drafts.approve_draft` via the DELIVERY_RECEIPT handler)
+    owns the transaction.
+    """
+    if order.status != PurchaseOrderStatus.SENT.value:
+        raise ValidationError(
+            f"A purchase order that is {order.status!r} cannot be received."
+        )
+
+    if not lines:
+        raise ValidationError("A receipt must have at least one line.")
+
+    seen: set[int] = set()
+    fully_received = True
+
+    for receipt_line in lines:
+        if receipt_line.product_id in seen:
+            raise ValidationError(
+                f"Product {receipt_line.product_id} appears on this receipt "
+                "more than once."
+            )
+        seen.add(receipt_line.product_id)
+
+        if receipt_line.quantity_received < 0 or receipt_line.quantity_damaged < 0:
+            raise ValidationError("Received and damaged quantities cannot be negative.")
+
+        order_line = _find_line(order, receipt_line.product_id)
+        total_accounted = receipt_line.quantity_received + receipt_line.quantity_damaged
+        if total_accounted > order_line.quantity_ordered:
+            raise ValidationError(
+                f"Product {receipt_line.product_id}: received "
+                f"({receipt_line.quantity_received}) plus damaged "
+                f"({receipt_line.quantity_damaged}) exceeds the "
+                f"{order_line.quantity_ordered} ordered."
+            )
+
+        # `quantity_received` is already the count of good units - it does not
+        # include `quantity_damaged`. The two are separate counts that both
+        # come out of the same ordered quantity, which is exactly what
+        # `total_accounted` above checked.
+        good_units = receipt_line.quantity_received
+
+        order_line.quantity_received = receipt_line.quantity_received
+        order_line.quantity_damaged = receipt_line.quantity_damaged
+        order_line.updated_by = actor.id
+
+        if good_units > 0:
+            lots.receive_lot(
+                session,
+                actor,
+                client=client,
+                product_id=receipt_line.product_id,
+                lot_code=receipt_line.lot_code,
+                quantity=good_units,
+                cost_price=order_line.unit_cost,
+                expiry_date=receipt_line.expiry_date,
+                source_draft_id=source_draft_id,
+            )
+
+        shortfall = order_line.quantity_ordered - total_accounted
+        if shortfall > 0:
+            session.add(
+                CreditMemo(
+                    supplier_id=order.supplier_id,
+                    purchase_order_id=order.id,
+                    reason=CreditMemoReason.SHORT_SHIPPED.value,
+                    amount=Decimal(shortfall) * order_line.unit_cost,
+                    created_by=actor.id,
+                    created_via=client.value,
+                    source_draft_id=source_draft_id,
+                )
+            )
+            fully_received = False
+
+        if receipt_line.quantity_damaged > 0:
+            session.add(
+                CreditMemo(
+                    supplier_id=order.supplier_id,
+                    purchase_order_id=order.id,
+                    reason=CreditMemoReason.DAMAGED.value,
+                    amount=Decimal(receipt_line.quantity_damaged) * order_line.unit_cost,
+                    created_by=actor.id,
+                    created_via=client.value,
+                    source_draft_id=source_draft_id,
+                )
+            )
+            fully_received = False
+
+        if total_accounted < order_line.quantity_ordered:
+            fully_received = False
+
+    order.status = (
+        PurchaseOrderStatus.RECEIVED.value
+        if fully_received
+        else PurchaseOrderStatus.PARTIALLY_RECEIVED.value
+    )
+    order.updated_by = actor.id
+
+    return order
+
+
+def receive_order(
+    session: Session,
+    actor: Actor,
+    *,
+    client: ClientType,
+    order_id: int,
+    lines: list[ReceiptLineInput],
+) -> PurchaseOrder:
+    """The plain-form door. Applies immediately - a human typing these numbers
+    already is the review, so this does not go through the draft queue.
+
+    Requires `purchasing.write`, same permission `send_order`/`cancel_order`
+    already check - receiving is one more state transition on the same order.
+    """
+    require_permission(actor, "purchasing.write")
+
+    order = _get_or_raise(session, order_id)
+    _apply_receipt(session, actor, client=client, order=order, lines=lines)
+
+    session.commit()
+    session.refresh(order)
+    return order
