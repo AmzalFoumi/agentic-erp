@@ -44,6 +44,28 @@ EXPECTED_TOOLS = {
     "create_product",
     "update_product",
     "adjust_stock",
+    # Gate 27. Added here deliberately after this test failed, which is the
+    # behaviour it exists for - a tool appearing without anyone deciding it
+    # should is exactly what a hand-written set catches and a derived one
+    # would not.
+    "create_action_draft",
+    "list_pending_drafts",
+}
+
+# Tools that would let the agent decide its own proposals. None of these exist,
+# and this set is asserted to stay empty below.
+#
+# The permission set already stops it - the agent holds `draft.create` and never
+# `draft.decide` - so this is the second of two independent mechanisms. It is
+# written as a test rather than a comment because "add an approve tool for
+# symmetry" is a reasonable-looking change, and the reason it is wrong lives in
+# docs/FEATURES-PLAN.md rather than anywhere near the code someone would edit.
+FORBIDDEN_TOOL_NAMES = {
+    "approve_action_draft",
+    "approve_draft",
+    "reject_action_draft",
+    "reject_draft",
+    "decide_action_draft",
 }
 
 
@@ -117,6 +139,19 @@ def test_every_tool_is_registered_with_a_description_and_schema():
 
     # Spot-check that the parameters are the real ones rather than *args-shaped.
     assert "product_id" in tools["get_product"].input_schema["properties"]
+
+
+def test_the_agent_is_offered_no_way_to_decide_a_draft():
+    """Gate 27's security property, asserted at the protocol surface.
+
+    A tool that does not exist cannot be called even by a token that would be
+    allowed to, so this is a second line of defence behind the permission set.
+    Both matter: the permission is configuration and lives in seven places
+    outside this repository, and a wrong copy of it fails silently.
+    """
+    tools = {t.name for t in anyio.run(mcp_server.mcp.list_tools)}
+
+    assert tools.isdisjoint(FORBIDDEN_TOOL_NAMES)
 
 
 def test_create_then_read_back_over_the_protocol(call, unique_sku):

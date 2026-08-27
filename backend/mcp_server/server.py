@@ -60,10 +60,12 @@ from mcp.server.auth.settings import AuthSettings
 from core.actor import Actor, SystemActor, TokenActor
 from core.config import settings
 from core.database import get_session
+from core.enums import ClientType, DraftStatus
 from core.exceptions import AuthenticationError, ValidationError
-from core.models import Product
+from core.models import ActionDraft, Product
 from mcp_server.auth import ThunderIDTokenVerifier
 from mcp_server.errors import translated
+from services import drafts as draft_service
 from services import products as product_service
 
 # The server object. The name is what a client displays when listing what is
@@ -495,6 +497,149 @@ def adjust_stock(product_id: int, delta: int, reason: str | None = None) -> dict
             )
         )
 
+# --------------------------------------------------------------------------
+# Action drafts (gate 27)
+# --------------------------------------------------------------------------
+#
+# Note what is NOT here: there is no approve tool, and there will not be one.
+# The agent holds `draft.create` and never `draft.decide`, and the absence of
+# the tool is the second layer of that - a tool that does not exist cannot be
+# called even by a token that would have been allowed to. Two independent
+# mechanisms, because "the agent cannot approve its own work" is the security
+# property this whole feature exists to create.
+
+
+def _describe_draft(draft: ActionDraft) -> dict[str, Any]:
+    """Turn an ActionDraft into a plain dict the protocol can send.
+
+    Same job as `_describe` above, same two reasons - a SQLAlchemy object is
+    not serialisable and holds a live session link, and choosing the fields by
+    hand means an added column is a decision rather than a leak.
+
+    Money becomes a string, as everywhere else. `None` stays `None` rather than
+    becoming "0.00", because "this proposal has no financial dimension" and
+    "nothing is at stake" are different facts, and a model reading the second
+    when the first is true would report a confident zero.
+    """
+    return {
+        "id": draft.id,
+        "draft_type": draft.draft_type,
+        "status": draft.status,
+        "payload": draft.payload,
+        "reasoning": draft.reasoning,
+        "cost_at_risk": (
+            str(draft.cost_at_risk) if draft.cost_at_risk is not None else None
+        ),
+        "projected_recovery": (
+            str(draft.projected_recovery)
+            if draft.projected_recovery is not None
+            else None
+        ),
+        "expires_at": draft.expires_at.isoformat() if draft.expires_at else None,
+        # Computed on the model and shipped as an answer, not as inputs - the
+        # same call `needs_reorder` represents. A model asked to work out
+        # whether a timestamp has passed will sometimes get it wrong, and there
+        # is no reason to make it try.
+        "is_expired": draft.is_expired,
+        "created_by": draft.created_by,
+        "created_via": draft.created_via,
+        "decided_by": draft.decided_by,
+        "decided_via": draft.decided_via,
+    }
+
+
+@mcp.tool()
+@translated
+def create_action_draft(
+    draft_type: str,
+    payload: dict[str, Any],
+    reasoning: str,
+    cost_at_risk: str | None = None,
+    projected_recovery: str | None = None,
+) -> dict[str, Any]:
+    """Propose a change for a human to approve. Nothing happens until they do.
+
+    Use this for anything that affects many items at once or involves money:
+    marking down a batch of stock that is about to expire, raising a purchase
+    order, issuing a supplier credit. Your proposal goes into the manager's
+    approval queue with your reasoning attached, and a human decides whether it
+    runs.
+
+    You cannot approve your own proposal and there is no tool that would let
+    you. Write a clear `reasoning`: it is the only thing the manager has to
+    judge by, and a proposal they cannot understand is one they will reject.
+
+    For a single small change to one product - correcting one stock count,
+    editing one product's details - use the specific tool for it instead. This
+    is for proposals big enough that someone should look at the whole thing
+    before it happens.
+
+    Args:
+        draft_type: The kind of proposal. Must be one this system recognises;
+            an unknown kind is refused rather than stored.
+        payload: The proposal's details. The required shape depends on
+            draft_type, and is checked now and again when the human approves.
+        reasoning: Plain-English explanation of why you are proposing this.
+        cost_at_risk: Money currently at risk, as a decimal string like
+            "40000.50". Omit when the proposal has no financial dimension -
+            do not send "0" to mean "not applicable".
+        projected_recovery: Money this proposal would recover, same format.
+
+    Returns:
+        The staged proposal, including the id a human will see in the queue.
+
+    Raises:
+        An error if the draft type is unknown, the payload does not match that
+        type's required shape, or the reasoning is empty.
+    """
+    with get_session() as session:
+        return _describe_draft(
+            draft_service.create_draft(
+                session,
+                _actor(),
+                client=ClientType.MCP_AGENT,
+                draft_type=draft_type,
+                payload=payload,
+                reasoning=reasoning,
+                cost_at_risk=(
+                    _price(cost_at_risk, "cost_at_risk")
+                    if cost_at_risk is not None
+                    else None
+                ),
+                projected_recovery=(
+                    _price(projected_recovery, "projected_recovery")
+                    if projected_recovery is not None
+                    else None
+                ),
+            )
+        )
+
+
+@mcp.tool()
+@translated
+def list_pending_drafts(limit: int = 20) -> list[dict[str, Any]]:
+    """List proposals still waiting for a human decision.
+
+    Use this to check whether something you proposed has been decided yet, or
+    to avoid proposing the same thing twice in one conversation.
+
+    A proposal that no longer appears here has been approved, rejected, or has
+    passed its deadline. This tool does not say which - read the individual
+    draft if you need to know.
+
+    Args:
+        limit: How many to return, newest first.
+
+    Returns:
+        The pending proposals, newest first.
+    """
+    with get_session() as session:
+        return [
+            _describe_draft(draft)
+            for draft in draft_service.list_drafts(
+                session, _actor(), status=DraftStatus.PENDING, limit=limit
+            )
+        ]
 
 def main(argv: list[str] | None = None) -> None:
     """Run the server on one of its two transports.
