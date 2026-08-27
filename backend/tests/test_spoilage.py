@@ -364,3 +364,33 @@ def test_two_lots_of_one_product_are_priced_at_the_deepest_discount(
     )
     session.refresh(product)
     assert product.sell_price == Decimal("120.00")
+
+
+def test_an_edited_payload_cannot_price_one_product_twice(session, actor, unique_sku):
+    """The same last-wins bug as `_lines_for`, but arriving from the screen.
+
+    A generated payload can never contain a duplicate. An edited one can, and
+    the handler applies lines in order - so the last entry would silently set
+    the price while the manager reads the first one on screen.
+    """
+    product, lot = _product_with_lot(session, actor, unique_sku, days=1)
+    draft = spoilage.propose_markdown(
+        session, actor, client=ClientType.WEB_UI, today=TODAY
+    )
+    before = product.sell_price
+
+    # A bare ValidationError, not a matched message: `validate_payload`
+    # deliberately reports "N problem(s)" without naming them, the same way
+    # gate 24's auth failures refuse to explain themselves. What matters here
+    # is that it is refused and no price moves.
+    with pytest.raises(ValidationError):
+        drafts.approve_draft(
+            session, actor, client=ClientType.WEB_UI, draft_id=draft.id,
+            payload={"lines": [
+                {"lot_id": lot.id, "product_id": product.id, "new_price": "3.00"},
+                {"lot_id": lot.id, "product_id": product.id, "new_price": "1.00"},
+            ]},
+        )
+
+    session.refresh(product)
+    assert product.sell_price == before

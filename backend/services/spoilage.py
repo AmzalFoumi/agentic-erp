@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from core.actor import Actor
@@ -136,6 +136,35 @@ class MarkdownPayload(BaseModel):
     """
 
     lines: list[MarkdownLine] = Field(min_length=1)
+
+    @field_validator("lines")
+    @classmethod
+    def _one_line_per_product(cls, lines: list[MarkdownLine]) -> list[MarkdownLine]:
+        """Refuse a payload that prices the same product twice.
+
+        ⚠️ `_lines_for()` already collapses to one line per product, so a
+        generated payload can never trip this. An **edited** one can, and that
+        is the whole point: the handler applies lines in order, so a duplicate
+        would let the last entry silently decide the price while the manager
+        reads the first one on screen.
+
+        The same class of bug already bit once, between the scan and the
+        payload. Catching it in the schema means it is refused before any
+        price moves, rather than depending on the handler looping carefully.
+        """
+        seen: set[int] = set()
+        duplicated: list[int] = []
+        for line in lines:
+            if line.product_id in seen:
+                duplicated.append(line.product_id)
+            seen.add(line.product_id)
+
+        if duplicated:
+            raise ValueError(
+                "A product may only appear once; a shelf has one price. "
+                f"Duplicated: {sorted(set(duplicated))}."
+            )
+        return lines
 
 
 # --------------------------------------------------------------------------
