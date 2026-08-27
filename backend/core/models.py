@@ -40,7 +40,12 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
-from core.enums import DraftStatus, PurchaseOrderStatus
+from core.enums import (
+    CreditMemoReason,
+    CreditMemoStatus,
+    DraftStatus,
+    PurchaseOrderStatus,
+)
 
 
 class Product(Base):
@@ -652,4 +657,48 @@ class PurchaseOrderLine(Base):
         return (
             f"PurchaseOrderLine(order={self.purchase_order_id!r}, "
             f"product={self.product_id!r}, qty={self.quantity_ordered!r})"
+        )
+
+
+class CreditMemo(Base):
+    """The supplier owes the shop money: a receipt came in short or damaged.
+
+    Record-only for gate 30 - see the design spec's "Alternatives
+    considered". Nothing else in the system reads this table yet; it exists
+    so a manager can see who owes what. `supplier_id` is denormalized off
+    the order so a supplier-wide credit list needs no join.
+    """
+
+    __tablename__ = "credit_memos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    supplier_id: Mapped[int] = mapped_column(
+        ForeignKey("suppliers.id", ondelete="RESTRICT"), index=True
+    )
+    purchase_order_id: Mapped[int] = mapped_column(
+        ForeignKey("purchase_orders.id", ondelete="RESTRICT"), index=True
+    )
+
+    reason: Mapped[str] = mapped_column(String(32))
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    status: Mapped[str] = mapped_column(
+        String(16), default=CreditMemoStatus.OPEN.value
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by: Mapped[str] = mapped_column(String(128))
+    updated_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    created_via: Mapped[str] = mapped_column(String(16), default="system")
+    source_draft_id: Mapped[int | None] = mapped_column(default=None)
+
+    def __repr__(self) -> str:
+        return (
+            f"CreditMemo(id={self.id!r}, supplier_id={self.supplier_id!r}, "
+            f"reason={self.reason!r}, amount={self.amount!r})"
         )
