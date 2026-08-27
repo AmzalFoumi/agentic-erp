@@ -342,6 +342,189 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/suppliers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Suppliers */
+        get: operations["list_suppliers_suppliers_get"];
+        put?: never;
+        /** Create Supplier */
+        post: operations["create_supplier_suppliers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/suppliers/{supplier_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Supplier */
+        get: operations["get_supplier_suppliers__supplier_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Supplier */
+        patch: operations["update_supplier_suppliers__supplier_id__patch"];
+        trace?: never;
+    };
+    "/suppliers/{supplier_id}/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Supplier Products */
+        get: operations["list_supplier_products_suppliers__supplier_id__products_get"];
+        put?: never;
+        /** Link Product */
+        post: operations["link_product_suppliers__supplier_id__products_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/supplier-products/{link_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Link */
+        patch: operations["update_link_supplier_products__link_id__patch"];
+        trace?: never;
+    };
+    "/purchasing/reorder-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reorder Suggestions
+         * @description What to buy today. Reads only - nothing is written or proposed.
+         */
+        get: operations["reorder_suggestions_purchasing_reorder_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchasing/reorder-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Reorder
+         * @description Stage one supplier's bundle for approval. No order is created.
+         */
+        post: operations["propose_reorder_purchasing_reorder_drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchase-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Orders */
+        get: operations["list_orders_purchase_orders_get"];
+        put?: never;
+        /** Create Order */
+        post: operations["create_order_purchase_orders_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchase-orders/{order_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Order */
+        get: operations["get_order_purchase_orders__order_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchase-orders/{order_id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Order
+         * @description Place the order. `date.today()` is read here, never in the service.
+         */
+        post: operations["send_order_purchase_orders__order_id__send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchase-orders/{order_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Order */
+        post: operations["cancel_order_purchase_orders__order_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -770,6 +953,143 @@ export interface components {
             /** Reorder Level */
             reorder_level?: number | null;
         };
+        /** PurchaseOrderCreate */
+        PurchaseOrderCreate: {
+            /** Supplier Id */
+            supplier_id: number;
+            /** Lines */
+            lines: components["schemas"]["PurchaseOrderLineCreate"][];
+            /** Notes */
+            notes?: string | null;
+        };
+        /** PurchaseOrderLineCreate */
+        PurchaseOrderLineCreate: {
+            /** Product Id */
+            product_id: number;
+            /** Quantity */
+            quantity: number;
+            /** Unit Cost */
+            unit_cost: number | string;
+        };
+        /** PurchaseOrderLineRead */
+        PurchaseOrderLineRead: {
+            /** Id */
+            id: number;
+            /** Product Id */
+            product_id: number;
+            /** Quantity Ordered */
+            quantity_ordered: number;
+            /** Unit Cost */
+            unit_cost: string;
+            /** Line Total */
+            line_total: string;
+        };
+        /** PurchaseOrderList */
+        PurchaseOrderList: {
+            /** Items */
+            items: components["schemas"]["PurchaseOrderRead"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** PurchaseOrderRead */
+        PurchaseOrderRead: {
+            /** Id */
+            id: number;
+            /** Supplier Id */
+            supplier_id: number;
+            /** Status */
+            status: string;
+            /** Expected Date */
+            expected_date: string | null;
+            /** Total Value */
+            total_value: string;
+            /** Notes */
+            notes: string | null;
+            /** Source Draft Id */
+            source_draft_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Lines */
+            lines: components["schemas"]["PurchaseOrderLineRead"][];
+        };
+        /** ReorderBundleRead */
+        ReorderBundleRead: {
+            /** Supplier Id */
+            supplier_id: number;
+            /** Supplier Name */
+            supplier_name: string;
+            /** Lead Time Days */
+            lead_time_days: number;
+            /** Minimum Order Value */
+            minimum_order_value: string;
+            /** Bundle Value */
+            bundle_value: string;
+            /** Below Minimum */
+            below_minimum: boolean;
+            /** Shortfall */
+            shortfall: string;
+            /** Lines */
+            lines: components["schemas"]["ReorderLineRead"][];
+        };
+        /**
+         * ReorderLineRead
+         * @description One product on a proposed order.
+         *
+         *     `is_top_up` is False for 'this is low and we are replacing it' and True for
+         *     'this is not low yet, and it is here to reach the supplier's minimum'. The
+         *     screen labels them differently; a manager is entitled to know which is
+         *     which.
+         */
+        ReorderLineRead: {
+            /** Product Id */
+            product_id: number;
+            /** Sku */
+            sku: string;
+            /** Name */
+            name: string;
+            /** Quantity On Hand */
+            quantity_on_hand: number;
+            /** Reorder Level */
+            reorder_level: number;
+            /** Quantity */
+            quantity: number;
+            /** Unit Cost */
+            unit_cost: string;
+            /** Pack Size */
+            pack_size: number;
+            /** Line Total */
+            line_total: string;
+            /** Is Top Up */
+            is_top_up: boolean;
+        };
+        /**
+         * ReorderProposal
+         * @description Stage one supplier's bundle as an Action Draft.
+         */
+        ReorderProposal: {
+            /** Supplier Id */
+            supplier_id: number;
+            /** Reasoning */
+            reasoning?: string | null;
+        };
+        /** ReorderReportRead */
+        ReorderReportRead: {
+            /** Bundles */
+            bundles: components["schemas"]["ReorderBundleRead"][];
+            /** Unsourced */
+            unsourced: components["schemas"]["UnsourcedProductRead"][];
+            /** Total Value */
+            total_value: string;
+        };
         /**
          * SpoilageItemRead
          * @description One at-risk lot, with the markdown that would apply to it.
@@ -853,6 +1173,145 @@ export interface components {
             delta: number;
             /** Reason */
             reason?: string | null;
+        };
+        /** SupplierCreate */
+        SupplierCreate: {
+            /** Name */
+            name: string;
+            /** Contact Email */
+            contact_email?: string | null;
+            /** Contact Phone */
+            contact_phone?: string | null;
+            /**
+             * Lead Time Days
+             * @default 0
+             */
+            lead_time_days: number;
+            /**
+             * Minimum Order Value
+             * @default 0.00
+             */
+            minimum_order_value: number | string;
+        };
+        /** SupplierList */
+        SupplierList: {
+            /** Items */
+            items: components["schemas"]["SupplierRead"][];
+            /** Total */
+            total: number;
+        };
+        /** SupplierProductCreate */
+        SupplierProductCreate: {
+            /** Product Id */
+            product_id: number;
+            /** Unit Cost */
+            unit_cost: number | string;
+            /**
+             * Pack Size
+             * @default 1
+             */
+            pack_size: number;
+            /**
+             * Is Preferred
+             * @default false
+             */
+            is_preferred: boolean;
+        };
+        /** SupplierProductList */
+        SupplierProductList: {
+            /** Items */
+            items: components["schemas"]["SupplierProductRead"][];
+            /** Total */
+            total: number;
+        };
+        /** SupplierProductRead */
+        SupplierProductRead: {
+            /** Id */
+            id: number;
+            /** Supplier Id */
+            supplier_id: number;
+            /** Product Id */
+            product_id: number;
+            /** Unit Cost */
+            unit_cost: string;
+            /** Pack Size */
+            pack_size: number;
+            /** Is Preferred */
+            is_preferred: boolean;
+        };
+        /** SupplierProductUpdate */
+        SupplierProductUpdate: {
+            /** Unit Cost */
+            unit_cost?: number | string | null;
+            /** Pack Size */
+            pack_size?: number | null;
+            /** Is Preferred */
+            is_preferred?: boolean | null;
+        };
+        /**
+         * SupplierRead
+         * @description One supplier.
+         */
+        SupplierRead: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Contact Email */
+            contact_email: string | null;
+            /** Contact Phone */
+            contact_phone: string | null;
+            /** Lead Time Days */
+            lead_time_days: number;
+            /** Minimum Order Value */
+            minimum_order_value: string;
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * SupplierUpdate
+         * @description Every field optional. Omitted means 'leave it alone'.
+         *
+         *     The route turns absence into the service's `_UNSET` sentinel using
+         *     `model_dump(exclude_unset=True)`, so 'clear the email' and 'do not touch
+         *     the email' stay different requests.
+         */
+        SupplierUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Contact Email */
+            contact_email?: string | null;
+            /** Contact Phone */
+            contact_phone?: string | null;
+            /** Lead Time Days */
+            lead_time_days?: number | null;
+            /** Minimum Order Value */
+            minimum_order_value?: number | string | null;
+            /** Is Active */
+            is_active?: boolean | null;
+        };
+        /** UnsourcedProductRead */
+        UnsourcedProductRead: {
+            /** Product Id */
+            product_id: number;
+            /** Sku */
+            sku: string;
+            /** Name */
+            name: string;
+            /** Quantity On Hand */
+            quantity_on_hand: number;
+            /** Reorder Level */
+            reorder_level: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -1600,6 +2059,783 @@ export interface operations {
                 };
             };
             /** @description No such product. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_suppliers_suppliers_get: {
+        parameters: {
+            query?: {
+                active_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierList"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_supplier_suppliers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description That would violate a uniqueness rule. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_supplier_suppliers__supplier_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                supplier_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierRead"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_supplier_suppliers__supplier_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                supplier_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description That would violate a uniqueness rule. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_supplier_products_suppliers__supplier_id__products_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                supplier_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierProductList"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    link_product_suppliers__supplier_id__products_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                supplier_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierProductCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierProductRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description That would violate a uniqueness rule. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_link_supplier_products__link_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                link_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierProductUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierProductRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reorder_suggestions_purchasing_reorder_suggestions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReorderReportRead"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    propose_reorder_purchasing_reorder_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReorderProposal"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_orders_purchase_orders_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                supplier_id?: number | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderList"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_order_purchase_orders_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchaseOrderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_order_purchase_orders__order_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    send_order_purchase_orders__order_id__send_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_order_purchase_orders__order_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
             404: {
                 headers: {
                     [name: string]: unknown;
