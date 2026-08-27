@@ -441,6 +441,28 @@ where a search finds them. Number 6 additionally requires **rebuilding the shipp
 `prune-config.py`, then `build-seed.py`, then `scan-seed.py` — or the committed `.db` files still
 carry the old permission list regardless of what the YAML says.
 
+⚠️ **The seven places are not always filled in identically, and the box's role layout hides that.**
+Found on 2026-08-27 while carrying gate 27's permissions in. `AIsle Full Access` is assigned to
+**both** the judge user *and* the agent:
+
+```yaml
+assignments:
+  - id: __JUDGE_USER_ID__
+    type: user
+  - id: 01a038f2-baa4-7a5a-a21c-b87124977fb8
+    type: agent
+```
+
+So one role serves two very different principals, and every permission added to it is added to
+both. That was harmless while every permission was one the agent legitimately holds. It stops being
+harmless the moment a feature has a permission that is **deliberately human-only** — gate 27's
+`draft.decide` is the first, and gates 29–30 will add more.
+
+A permission that must not reach the agent needs the agent moved to its own role first. Putting it
+in `AIsle Full Access` grants it to the agent, silently, with every test in the repository still
+green — because the tests prove the *code* refuses an actor without the permission, and this hands
+the agent the permission.
+
 ⚠️ **The `.db` files are the artefact, not `aisle-config.yml`.** The YAML is an input to a build
 step. Editing it alone changes nothing about what a judge runs.
 

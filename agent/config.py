@@ -237,7 +237,17 @@ class Settings(BaseSettings):
     # vocabulary `services/` uses. It is a ceiling, not a grant: ThunderID
     # returns the intersection of this, the user's own permissions, and the
     # agent's role - and it narrows silently rather than erroring.
-    thunderid_scopes: str = "product.read product.create product.update stock.adjust"
+    #
+    # ⚠️ **`draft.decide` is absent and must stay absent.** The agent may
+    # propose a change (`draft.create`) and read the queue (`draft.read`); only
+    # a human may approve or reject one. That is the security property gate 27
+    # exists to create, and this line is the first of three independent places
+    # it is enforced: the MCP server publishes no approval tool, the agent's
+    # ThunderID role does not carry the permission, and this ceiling does not
+    # ask for it. Adding it here would not by itself grant anything - the
+    # intersection would still exclude it - but it would remove one layer and
+    # make the other two look accidental. See docs/FEATURES-PLAN.md.
+    thunderid_scopes: str = "product.read product.create product.update stock.adjust draft.read draft.create"
 
     # ⚠️ LOCAL ONLY, and the better half of a bad choice. ThunderID's
     # development certificate is self-signed, so an ordinary HTTPS call to the

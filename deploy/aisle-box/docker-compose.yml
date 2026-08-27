@@ -295,7 +295,7 @@ services:
       args:
         NEXT_PUBLIC_THUNDERID_BASE_URL: https://localhost:8090
         NEXT_PUBLIC_THUNDERID_CLIENT_ID: ${THUNDERID_GATE_CLIENT_ID:-vAf_zSFT1qj4733Xy3jgQw}
-        NEXT_PUBLIC_THUNDERID_SCOPES: openid product.read product.create product.update stock.adjust
+        NEXT_PUBLIC_THUNDERID_SCOPES: openid product.read product.create product.update stock.adjust draft.read draft.create draft.decide
     restart: unless-stopped
     network_mode: "service:aisle-net"
     environment:

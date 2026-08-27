@@ -8,11 +8,18 @@ import { cn } from "@/lib/utils";
 const links = [
   { href: "/products", label: "Products" },
   { href: "/products/new", label: "New product" },
+  { href: "/approvals", label: "Approvals" },
 ];
 
 /**
- * Exactly two destinations, deliberately — see the capability inventory in
+ * Three destinations, deliberately — see the capability inventory in
  * docs/FRONTEND-PLAN.md. No dashboard, no reports, no settings.
+ *
+ * "Approvals" arrived with gate 27 and is the one screen that is not about
+ * products: it is where changes the assistant has proposed wait for a human.
+ * It earns top-level placement because a proposal nobody notices is a proposal
+ * that expires, and the queue is the only thing standing between the agent and
+ * an unsupervised write.
  */
 export function Nav() {
   const pathname = usePathname();
