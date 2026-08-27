@@ -99,6 +99,43 @@ time would mean the schema only ever guarded the agent, never the browser.
 **Endpoints:** list drafts (filterable by status), get one, approve, reject.
 **MCP tools:** create a draft, list pending drafts. No approve tool exists at all.
 
+### How the code is laid out, and why it is split this way
+
+One responsibility per file, so that gates 28–30 add modules rather than growing existing ones.
+The split is by *what the code is*, not by which feature asked for it — a markdown calculation and a
+reorder calculation are both pricing arithmetic and belong together, even though they arrive two
+gates apart.
+
+| File | Owns | Deliberately does not |
+|---|---|---|
+| `core/enums.py` | the vocabularies both adapters and the database must agree on | know anything about drafts specifically |
+| `core/models.py` | the table shape | contain any rule beyond "is this expired" |
+| `services/guards.py` | `require_permission` — the check every service makes first | know which permissions exist |
+| `services/draft_types.py` | the closed registry: type → schema → handler | know what any particular type means |
+| `services/drafts.py` | the queue's lifecycle — propose, decide, read | know what a markdown or a purchase order is |
+| `services/pricing.py` *(gate 28)* | discount tiers, cost at risk, projected recovery — the money arithmetic | touch the database or check permissions |
+
+`services/guards.py` is an extraction, not a new idea. `_require` was a private four-line helper
+copied into `products.py` and then `drafts.py`, with a comment in the first saying a third copy
+should be extracted. Gates 28–30 add five more services, so it was pulled out at gate 27 while there
+were only two copies to reconcile. One definition means one error message and one place to change it.
+
+**Arithmetic lives in its own module and is imported, never inlined.** The markdown tiers are needed
+by the spoilage scan, by the draft handler that applies them, and by the screen that previews them.
+Three inline copies is three chances for the shop's discount policy to disagree with itself.
+
+### State of play
+
+- **Built and tested:** `core/enums.py`, `core/models.py`'s `ActionDraft`, its migration
+  (`c3f81d5a24b7`), `services/guards.py`, `services/draft_types.py`, `services/drafts.py`.
+  36 tests across `tests/test_drafts.py` and `tests/test_draft_types.py`.
+- **Left to do:** the HTTP routes and schemas; the two MCP tools plus widening the agent's
+  no-approval set in `agent/mcp_client.py`; the `/approvals` screen; and the box tax in the section
+  above.
+- ⚠️ **Gate 27 registers no draft types.** The engine ships empty and gate 28 registers the first
+  real one, so the approval queue is empty until spoilage lands. `test_draft_types.py` pins this, so
+  a type appearing by accident fails a test rather than going unnoticed.
+
 ## Gate 28 — spoilage and markdown
 
 **`inventory_lots`:** `product_id`, `lot_code`, `expiry_date`, `quantity`, `cost_price`, provenance.

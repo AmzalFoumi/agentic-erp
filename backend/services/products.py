@@ -12,10 +12,17 @@ established here and every future service function follows them:
      silently wrong if two arguments swap; `sku=..., name=...` is neither.
      There is no positional-argument-shaped bug in this file by construction.
 
-  3. Writes call `actor.can(...)` first and raise `PermissionDeniedError`.
-     Nothing is actually gated today - SystemActor returns True for everything -
-     but the call sites exist, so switching on a real auth provider later
-     touches core/actor.py and the two adapters, and nothing in here.
+  3. Every read and write calls `require_permission(actor, ...)` first, from
+     services/guards.py. That helper used to be a private `_require` in this
+     file, with a comment saying a third copy should be extracted; gates 27-30
+     add five more services, so it was extracted at gate 27. One definition
+     means one error message, and one place to change if the check ever grows
+     a second clause.
+
+     The bet this convention represented has since paid out: gate 24 replaced
+     SystemActor with a real TokenActor whose `can()` is set membership over a
+     verified token's scopes, and **not one line of this file changed**,
+     because the call sites already existed.
 
   4. Writes stamp `created_by` / `updated_by` from `actor.id`.
 
@@ -52,27 +59,12 @@ from core.actor import Actor
 from core.exceptions import (
     DuplicateError,
     NotFoundError,
-    PermissionDeniedError,
     ValidationError,
 )
 from core.models import Product
+from services.guards import require_permission
 
 # --- helpers ---------------------------------------------------------------
-
-
-def _require(actor: Actor, permission: str) -> None:
-    """Raise PermissionDeniedError unless `actor` holds `permission`.
-
-    A leading underscore marks this as internal to the module - Python's
-    convention where TypeScript would use `private` or simply not export.
-
-    Factored out so the permission check reads as one line at the top of each
-    write, and so the error message has one definition rather than five.
-    """
-    if not actor.can(permission):
-        raise PermissionDeniedError(
-            f"Actor {actor.id!r} is not allowed to perform {permission!r}."
-        )
 
 
 def _normalise_sku(sku: str) -> str:
@@ -139,7 +131,7 @@ def list_products(
     is either a bug or an agent that misread its own tool description, and
     either way the answer is the same.
     """
-    _require(actor, "product.read")
+    require_permission(actor, "product.read")
 
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
@@ -174,7 +166,7 @@ def count_products(
     would just be `len(rows)`, which the caller already has. The whole reason
     this exists is to describe the set the window is cut from.
     """
-    _require(actor, "product.read")
+    require_permission(actor, "product.read")
 
     # `select(func.count()).select_from(Product)` rather than
     # `select(func.count(Product.id))` so the predicate in `_search_filter`
@@ -193,7 +185,7 @@ def get_product(session: Session, actor: Actor, *, product_id: int) -> Product:
     `session.get()` is the fast path for primary-key lookup: it checks the
     session's identity map first and only hits the database on a miss.
     """
-    _require(actor, "product.read")
+    require_permission(actor, "product.read")
 
     product = session.get(Product, product_id)
     if product is None:
@@ -207,7 +199,7 @@ def get_product_by_sku(session: Session, actor: Actor, *, sku: str) -> Product:
     Exists because the SKU is what a human - or an agent parroting a human -
     actually has. Nobody reads an autoincrement id off a shelf label.
     """
-    _require(actor, "product.read")
+    require_permission(actor, "product.read")
 
     normalised = _normalise_sku(sku)
     stmt = select(Product).where(Product.sku == normalised)
@@ -250,7 +242,7 @@ def create_product(
     it as DuplicateError. Not doing it yet because untested error paths that
     fire once a year are their own kind of bug.
     """
-    _require(actor, "product.create")
+    require_permission(actor, "product.create")
 
     normalised = _normalise_sku(sku)
 
@@ -320,7 +312,7 @@ def update_product(
     `quantity_on_hand` is not editable here: stock moves through `adjust_stock`
     so the reason for the change stays attached to it.
     """
-    _require(actor, "product.update")
+    require_permission(actor, "product.update")
 
     product = get_product(session, actor, product_id=product_id)
 
@@ -383,7 +375,7 @@ def adjust_stock(
     the ledger lands, this function starts recording what it is already being
     told, and no call site changes.
     """
-    _require(actor, "stock.adjust")
+    require_permission(actor, "stock.adjust")
 
     if delta == 0:
         raise ValidationError("Stock adjustment cannot be zero.")

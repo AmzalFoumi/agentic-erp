@@ -20,14 +20,17 @@ nullability is expressed once, in a place your type checker also reads, instead
 of twice in two syntaxes that can disagree.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import DateTime, Numeric, String, func
+from sqlalchemy import DateTime, Numeric, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
+from core.enums import DraftStatus
 
 
 class Product(Base):
@@ -179,3 +182,131 @@ class Product(Base):
 
     def __repr__(self) -> str:
         return f"Product(id={self.id!r}, sku={self.sku!r}, name={self.name!r})"
+
+
+class ActionDraft(Base):
+    """A proposed change, waiting for a human to approve it.
+
+    The AI agent does not change prices, raise purchase orders or issue
+    supplier credits. It writes down what it *wants* to do, with its reasoning
+    and the money at stake, and a manager reads it and presses a button. See
+    docs/FEATURES-PLAN.md, decision 1, for why this coexists with gate 19's
+    in-conversation approval rather than replacing it: small single-item writes
+    are confirmed in the chat, multi-item and financial ones come here.
+
+    **`draft_type` is a name from a closed list, never a function.** The
+    registry in `services/draft_types.py` maps it to one Pydantic schema and
+    one hand-written handler. That is the whole security design of this gate.
+    The feature set was specified with the payload carrying "target service
+    function names and arguments"; resolving a function from a string held in a
+    database row means anyone who can write a row can call anything with
+    anything, so a row names a *type* and an unregistered type simply cannot
+    run.
+    """
+
+    __tablename__ = "action_drafts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Not a Postgres ENUM type. A database enum needs a migration to add a
+    # value, and gates 28-30 each add one; a checked string keeps that a
+    # one-line change in Python. Nothing is lost, because the real gate is the
+    # registry lookup, not the column type - an unknown string is refused
+    # before it reaches the database on the way in, and before it reaches a
+    # handler on the way out.
+    draft_type: Mapped[str] = mapped_column(String(64), index=True)
+
+    # Indexed because the approval queue's only query is "show me the pending
+    # ones", and that is the query a human waits on.
+    status: Mapped[str] = mapped_column(
+        String(16), default=DraftStatus.PENDING, index=True
+    )
+
+    # JSONB rather than JSON: Postgres stores it decomposed instead of as text,
+    # so it can be indexed and queried rather than only round-tripped. The
+    # shape is decided per draft_type by that type's schema, deliberately not
+    # by this column - three different proposal shapes share this one table,
+    # which is the point of having a generic staging engine at all.
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+    # The agent's own words, for the human reading the card. `Text` rather than
+    # `String(n)` because a model writing a summary should not hit a length
+    # limit and get silently truncated mid-sentence - and this string is the
+    # only thing the approver has to judge by.
+    reasoning: Mapped[str] = mapped_column(Text)
+
+    # --- the two money figures --------------------------------------------
+    #
+    # Two columns rather than one net figure, on purpose. "We saved 12,000" and
+    # "we were about to lose 40,000 and recovered 12,000" are different
+    # sentences to a manager, and a single number cannot tell them apart.
+    #
+    # Numeric(10, 2) for the reason spelled out on Product.cost_price: money in
+    # a float drifts, and a till that does not balance is the bug you get.
+    # Nullable because not every draft type has a financial dimension, and NULL
+    # says "not applicable" where 0.00 would say "nothing at stake".
+    cost_at_risk: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    projected_recovery: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2), default=None
+    )
+
+    # NULL means "never expires". See DraftStatus for why this is a timestamp
+    # compared on read rather than a status somebody has to write.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+
+    # --- provenance --------------------------------------------------------
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Not nullable, unlike Product.created_by. A product row can predate anyone
+    # knowing who made it; a draft cannot - it is created by exactly one call
+    # that always has an actor, and a proposal with no proposer is not a thing
+    # a human should be asked to approve.
+    created_by: Mapped[str] = mapped_column(String(128))
+    created_via: Mapped[str] = mapped_column(String(16))
+
+    # NULL until somebody decides. `decided_via` records which door the
+    # DECISION came through, which is usually not the door the proposal came
+    # through - the agent proposes over MCP, a human approves in the browser,
+    # and that difference is the entire feature.
+    decided_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    decided_via: Mapped[str | None] = mapped_column(String(16), default=None)
+
+    @property
+    def is_expired(self) -> bool:
+        """True when this draft's deadline has passed.
+
+        A plain `@property`, not a `hybrid_property` like `needs_reorder`
+        above. The difference is deliberate: a hybrid also compiles to SQL, so
+        the database can filter on it, which `needs_reorder` genuinely needs
+        because the product list would otherwise load every row to find the low
+        ones. Expiry does not need that - the pending queue is small by
+        construction, since it is a list of things a human is about to read.
+        Writing this as a hybrid would mean maintaining the rule twice, in
+        Python and in SQL, for no benefit.
+
+        `datetime.now(timezone.utc)` rather than `datetime.now()`: the column
+        is TIMESTAMPTZ, so the value loaded back is timezone-aware, and Python
+        raises TypeError when an aware and a naive datetime are compared. The
+        naive version would pass every test on a UTC machine and fail on this
+        developer's.
+        """
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) >= self.expires_at
+
+    def __repr__(self) -> str:
+        return (
+            f"ActionDraft(id={self.id!r}, type={self.draft_type!r}, "
+            f"status={self.status!r})"
+        )
