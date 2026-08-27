@@ -158,11 +158,14 @@ to the Organization UI. This account enables roughly sixty linters, the knowledg
 the finishing touches in that UI, all of which a normally-written file would have switched
 off. `inheritance: true` is the line that prevents it.
 
-**There is a rate limit, and multi-branch work is exactly what hits it.** The plan allows a
-fixed number of included reviews per hour — observed as **10/hour**, reported in the footer
-of every review ("4 remain after this review"). Opening six pull requests at once, which is
-what parallel branch work tends to produce, spends most of an hour's allowance in a minute.
-Stagger them, or expect later ones to wait.
+**There is a rate limit, and multi-branch work is exactly what hits it.** Included reviews are
+capped per hour and every review's footer reports what is left ("4 remain after this review").
+**10/hour is what this account was observed at on 2026-08-27, not a documented constant** — the
+allowance rolls, and CodeRabbit varies it by account and plan, so do not plan against that number.
+Ask `@coderabbitai rate limit` for the real current figure; that command reports the remaining
+allowance **without spending a review**. The behaviour to plan around is the shape, not the number:
+opening six pull requests at once, which is what parallel branch work tends to produce, spends most
+of an hour's allowance in a minute. Stagger them, or expect later ones to wait.
 
 **The plan is Pro Plus and it is free here, permanently, because the repository is public.**
 Confirmed on the run configuration of every review. It does not depend on a trial, and a
@@ -172,10 +175,20 @@ private.
 **Useful comment commands:** `@coderabbitai configuration` prints the fully resolved settings
 annotated with which layer supplied each value — the fastest way to check the file is doing
 what it looks like it does. `@coderabbitai review` is incremental; `full review` discards
-previous findings and redoes them; `summary` regenerates the description only.
+previous findings and redoes them; `@coderabbitai rate limit` reports the remaining review
+allowance and costs nothing.
+
+⚠️ **`summary` is not one of them.** It is a *placeholder you type into the pull request
+description*, which CodeRabbit then replaces in place with its own high-level summary — not a
+comment command that regenerates anything. An earlier draft of this section listed it as a command;
+that was wrong, and checking `docs.coderabbit.ai/reference/review-commands` is what caught it.
 
 **Two things about its output.** An offer labelled "Coding task started" is a proposal held on
-CodeRabbit's own site — it does not push a branch or a commit, and ignoring it is safe.
+CodeRabbit's own site — it does not push a branch or a commit, and ignoring *the offer* is safe.
+⚠️ **Do not generalise that to autofix.** `@coderabbitai autofix` is a real command and it
+**commits straight to the branch the pull request is on**; `@coderabbitai autofix stacked pr` opens
+a stacked pull request instead. So the notification is inert, but a command someone typed is not —
+check `git log` and the branch list before concluding nothing was written.
 And its findings are a starting point, not a verdict: on PR #37 it reported a same-day
 verification date as being "in the future". **Check each finding against the actual code
 before acting on it**, which is the same rule this project applies to everything else.
