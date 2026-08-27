@@ -255,6 +255,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inventory/spoilage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Spoilage Report
+         * @description What is about to expire, and what marking it down would recover.
+         *
+         *     Read-only. Stages nothing and changes no price - the numbers here are a
+         *     preview of what `POST /inventory/spoilage/propose` would put in front of a
+         *     human for approval.
+         *
+         *     The two money totals are returned separately and must stay that way. One is
+         *     money already spent, the other is a forecast.
+         */
+        get: operations["get_spoilage_report_inventory_spoilage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory/spoilage/propose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Markdown
+         * @description Stage a markdown as a draft for a human to approve. **No price moves.**
+         *
+         *     Returns the created draft, which then appears in `/approvals` alongside
+         *     anything the AI agent proposed. Approving it there is what actually changes
+         *     prices, and that needs `draft.decide` - which the agent does not hold.
+         *
+         *     A 400 means there was nothing expiring within the horizon, so there was
+         *     nothing to propose. That is a refusal rather than an empty draft, because a
+         *     queue whose value is "everything here needs a decision" must not fill with
+         *     items that need none.
+         */
+        post: operations["propose_markdown_inventory_spoilage_propose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory/products/{product_id}/lots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lots
+         * @description A product's lots, soonest expiry first, undated last.
+         *
+         *     That ordering is the same one stock is consumed in, and it is defined once
+         *     in `services/lots.py` so two views of the same lots cannot disagree.
+         */
+        get: operations["list_lots_inventory_products__product_id__lots_get"];
+        put?: never;
+        /**
+         * Receive Lot
+         * @description Book a delivery in as a new lot, and update the product's stock total.
+         *
+         *     The total is not sent by the caller and never could be: it is recalculated
+         *     from the lots themselves, in one place, so the summary cannot drift from
+         *     the rows it summarises.
+         */
+        post: operations["receive_lot_inventory_products__product_id__lots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -435,6 +522,89 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * LotList
+         * @description A product's lots. No pagination: a product has a handful, not thousands.
+         */
+        LotList: {
+            /** Items */
+            items: components["schemas"]["LotRead"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * LotRead
+         * @description One delivery of one product.
+         *
+         *     `expiry_date` is `date | None`, and the None is meaningful rather than
+         *     missing data: it means "we do not know when this goes off", which is the
+         *     honest state for stock that predates expiry tracking. The spoilage scan
+         *     skips those lots, so a client showing "-" here is showing the truth.
+         */
+        LotRead: {
+            /** Id */
+            id: number;
+            /** Product Id */
+            product_id: number;
+            /** Lot Code */
+            lot_code: string;
+            /** Expiry Date */
+            expiry_date: string | null;
+            /** Quantity */
+            quantity: number;
+            /** Cost Price */
+            cost_price: string;
+            /** Is Expired */
+            is_expired: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Created Via */
+            created_via: string;
+            /** Source Draft Id */
+            source_draft_id: number | null;
+        };
+        /**
+         * LotReceive
+         * @description Book a delivery in.
+         *
+         *     `cost_price` is optional because the person receiving a delivery often does
+         *     not have the invoice yet. Omitted, the service copies the product's current
+         *     cost price - see `services/lots.receive_lot`, which then freezes it on the
+         *     lot so a later price rise cannot rewrite history.
+         */
+        LotReceive: {
+            /** Lot Code */
+            lot_code: string;
+            /** Quantity */
+            quantity: number;
+            /** Expiry Date */
+            expiry_date?: string | null;
+            /** Cost Price */
+            cost_price?: number | string | null;
+        };
+        /**
+         * MarkdownProposal
+         * @description Ask the server to stage a markdown draft for the current spoilage.
+         *
+         *     Deliberately tiny. The client does NOT send prices or lot ids - it says
+         *     "propose something for stock expiring within N days" and the server scans,
+         *     prices and stages. A client that sent the lines would be doing business
+         *     logic, and two clients would eventually disagree about the discount.
+         */
+        MarkdownProposal: {
+            /**
+             * Within Days
+             * @description Horizon to scan. Defaults to the discount ladder's own reach.
+             */
+            within_days?: number | null;
+            /** Reasoning */
+            reasoning?: string | null;
+        };
+        /**
          * ProductCreate
          * @description The body of POST /products.
          *
@@ -599,6 +769,72 @@ export interface components {
             sell_price?: number | string | null;
             /** Reorder Level */
             reorder_level?: number | null;
+        };
+        /**
+         * SpoilageItemRead
+         * @description One at-risk lot, with the markdown that would apply to it.
+         *
+         *     Built from a frozen dataclass rather than an ORM row - nothing here is
+         *     stored, it is computed on demand. `from_attributes=True` reads a dataclass
+         *     just as happily as a SQLAlchemy model.
+         */
+        SpoilageItemRead: {
+            /** Lot Id */
+            lot_id: number;
+            /** Product Id */
+            product_id: number;
+            /** Sku */
+            sku: string;
+            /** Product Name */
+            product_name: string;
+            /** Lot Code */
+            lot_code: string;
+            /**
+             * Expiry Date
+             * Format: date
+             */
+            expiry_date: string;
+            /** Days Remaining */
+            days_remaining: number;
+            /** Quantity */
+            quantity: number;
+            /** Current Price */
+            current_price: string;
+            /** Proposed Price */
+            proposed_price: string;
+            /** Discount Percent */
+            discount_percent: number;
+            /** Tier Label */
+            tier_label: string;
+            /** Cost At Risk */
+            cost_at_risk: string;
+            /** Projected Recovery */
+            projected_recovery: string;
+        };
+        /**
+         * SpoilageReportRead
+         * @description The whole scan.
+         *
+         *     ⚠️ Two money totals, deliberately never netted into one. `total_cost_at_risk`
+         *     is money already spent; `total_projected_recovery` is a forecast that
+         *     depends on shoppers actually buying. A single "you save X" figure would
+         *     present a guess with the confidence of a fact, so the API does not offer
+         *     one and no client should compute it.
+         */
+        SpoilageReportRead: {
+            /** Items */
+            items: components["schemas"]["SpoilageItemRead"][];
+            /** Total Cost At Risk */
+            total_cost_at_risk: string;
+            /** Total Projected Recovery */
+            total_projected_recovery: string;
+            /**
+             * Scanned On
+             * Format: date
+             */
+            scanned_on: string;
+            /** Within Days */
+            within_days: number;
         };
         /**
          * StockAdjustment
@@ -1158,6 +1394,212 @@ export interface operations {
                 };
             };
             /** @description No such action draft. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_spoilage_report_inventory_spoilage_get: {
+        parameters: {
+            query?: {
+                /** @description Scan horizon in days. Defaults to the discount ladder's reach. */
+                within_days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpoilageReportRead"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    propose_markdown_inventory_spoilage_propose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkdownProposal"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_lots_inventory_products__product_id__lots_get: {
+        parameters: {
+            query?: {
+                /** @description Include lots already consumed to zero. History, not stock. */
+                include_empty?: boolean;
+            };
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotList"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such product. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    receive_lot_inventory_products__product_id__lots_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LotReceive"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such product. */
             404: {
                 headers: {
                     [name: string]: unknown;

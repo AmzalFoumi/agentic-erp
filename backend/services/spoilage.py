@@ -256,16 +256,7 @@ def propose_markdown(
             f"Nothing expires within {within_days} day(s), so there is nothing to mark down."
         )
 
-    payload = MarkdownPayload(
-        lines=[
-            MarkdownLine(
-                lot_id=item.lot_id,
-                product_id=item.product_id,
-                new_price=item.proposed_price,
-            )
-            for item in report.items
-        ]
-    )
+    payload = MarkdownPayload(lines=_lines_for(report))
 
     return drafts.create_draft(
         session,
@@ -281,6 +272,44 @@ def propose_markdown(
         cost_at_risk=report.total_cost_at_risk,
         projected_recovery=report.total_projected_recovery,
     )
+
+
+def _lines_for(report: SpoilageReport) -> list[MarkdownLine]:
+    """One price change per PRODUCT, at the deepest discount any of its lots earns.
+
+    ⚠️ This function exists because of a mismatch that is easy to miss: the
+    report has one row per **lot**, but `sell_price` lives on the **product**.
+    A shelf has one price label, so two lots of the same bread - one expiring
+    today at 70% off, one tomorrow at 50% - cannot carry different prices.
+
+    Without this, the payload would hold two lines for the same product and the
+    handler would apply them in order, so the LAST one would win. The report is
+    ordered soonest-expiry-first, which means the last line is the *least*
+    urgent - the 70%-off bread would end up marked down only 50%, quietly, and
+    the most urgent stock would be the least discounted.
+
+    The deepest discount is the right answer rather than an arbitrary
+    tie-break: stock is sold soonest-expiry-first, so the next carton off the
+    shelf is the one from the most urgent lot. Pricing for that lot prices what
+    the customer is actually about to buy.
+
+    `lot_id` names the lot that justified the price, which is what the approval
+    screen shows the manager and what `_apply_markdown` re-checks.
+    """
+    best: dict[int, SpoilageItem] = {}
+    for item in report.items:
+        current = best.get(item.product_id)
+        if current is None or item.proposed_price < current.proposed_price:
+            best[item.product_id] = item
+
+    return [
+        MarkdownLine(
+            lot_id=item.lot_id,
+            product_id=item.product_id,
+            new_price=item.proposed_price,
+        )
+        for item in best.values()
+    ]
 
 
 def _default_reasoning(report: SpoilageReport) -> str:

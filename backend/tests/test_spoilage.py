@@ -313,3 +313,54 @@ def test_the_draft_type_is_registered_by_importing_the_service_package():
     from services import draft_types
 
     assert spoilage.BATCH_PRICE_MARKDOWN in draft_types.registered_types()
+
+
+# --- two lots, one shelf price ---------------------------------------------
+
+
+def test_two_lots_of_one_product_are_priced_at_the_deepest_discount(
+    session, actor, unique_sku
+):
+    """A shelf has one price label, so two lots cannot carry two prices.
+
+    ⚠️ The failure this pins is silent and backwards. The report is ordered
+    soonest-expiry-first, so without deduplication the payload would carry two
+    lines for one product and the handler would apply them in order - the LAST
+    one winning. The last line is the *least* urgent, so bread expiring today
+    would end up discounted 50% instead of 70%, and the most urgent stock in
+    the shop would be the least marked down.
+    """
+    product = products.create_product(
+        session, actor, sku=unique_sku, name="Sourdough",
+        cost_price=Decimal("1.00"), sell_price=Decimal("400.00"),
+    )
+    # Expiring today -> 70% off -> 120.00
+    lots.receive_lot(
+        session, actor, client=ClientType.WEB_UI, product_id=product.id,
+        lot_code="TODAY", quantity=40, expiry_date=TODAY,
+    )
+    # Expiring tomorrow -> 50% off -> 200.00
+    lots.receive_lot(
+        session, actor, client=ClientType.WEB_UI, product_id=product.id,
+        lot_code="TOMORROW", quantity=60, expiry_date=TODAY + timedelta(days=1),
+    )
+
+    report = spoilage.scan_spoilage(session, actor, today=TODAY)
+    # The REPORT still shows both lots - a manager wants to see the whole
+    # picture, and the two lots have genuinely different amounts at risk.
+    assert len(_mine(report, product.id)) == 2
+
+    draft = spoilage.propose_markdown(
+        session, actor, client=ClientType.WEB_UI, today=TODAY
+    )
+    lines = [
+        line for line in draft.payload["lines"] if line["product_id"] == product.id
+    ]
+    assert len(lines) == 1, "one product must get one price change"
+    assert Decimal(lines[0]["new_price"]) == Decimal("120.00")
+
+    drafts.approve_draft(
+        session, actor, client=ClientType.WEB_UI, draft_id=draft.id
+    )
+    session.refresh(product)
+    assert product.sell_price == Decimal("120.00")

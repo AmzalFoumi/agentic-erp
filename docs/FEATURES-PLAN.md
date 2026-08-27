@@ -213,6 +213,67 @@ setting silently takes its **default** inside the demo box, because the box decl
 recovered margin and changes nothing. `propose_markdown()` stages a draft. No price moves until a
 human approves at `/approvals`.
 
+### State of play — gate 28 code complete 2026-08-27
+
+Migration `d5b93a17c204` is **applied to Supabase**: `inventory_lots` exists with RLS enabled, and
+the backfill created 22 opening lots for the 22 products that had stock. Verified afterwards by
+query, not assumed — no product's `quantity_on_hand` disagrees with the sum of its lots.
+
+| Layer | What landed |
+|---|---|
+| `core/models.py` | `InventoryLot` — product, lot code, expiry date, quantity, frozen cost price, provenance |
+| `services/pricing.py` | The discount ladder and the two money figures. **Pure functions** — no session, no actor, no clock |
+| `services/lots.py` | `receive_lot`, `consume` (soonest-expiry-first), `list_lots`, `expiring_lots`, and `recalculate_on_hand` |
+| `services/spoilage.py` | `scan_spoilage` (reads), `propose_markdown` (stages), `_apply_markdown` (runs on approval only). Registers `BATCH_PRICE_MARKDOWN` |
+| `api/routes/inventory.py` | `GET /inventory/spoilage`, `POST /inventory/spoilage/propose`, and lot list/receive |
+| `mcp_server/server.py` | `check_spoilage_risk`, `propose_spoilage_markdown`, `list_product_lots` — **no tool applies a markdown** |
+| `frontend/src/app/inventory/spoilage/` | The screen, its server action, and a "Expiring soon" nav entry above Approvals |
+
+**One real bug was found and fixed while building this**, and it is worth knowing because the same
+mistake is available again in gates 29–30. `create_product` still assigned `quantity_on_hand`
+directly, so a new product claimed stock that no lot backed; the next adjustment recalculated from
+lots and appeared to *lose* the opening stock. Opening stock now becomes an undated `OPENING` lot,
+exactly like the migration's backfill. Caught by an existing test, not a new one.
+
+`test_lots.py` now carries a **source-level guard**: it greps `services/` and fails if
+`quantity_on_hand` is assigned anywhere except `lots.py`. No runtime test can catch a second write
+path, because the bug is another correct-looking assignment somewhere else.
+
+**A second real bug surfaced when the seeded data was scanned**, and it is the kind that would
+never have shown up in a unit test written from the design. The report has one row per **lot**, but
+`sell_price` lives on the **product** — a shelf has one price label. Sourdough had two lots, one
+expiring today (70% off) and one tomorrow (50% off), so the payload carried two lines for the same
+product and the handler applied them in order. The report is ordered soonest-expiry-first, so the
+**last** line won — the least urgent one. The bread expiring today would have been marked down 50%
+instead of 70%, silently.
+
+`_lines_for()` now collapses to one line per product at the **deepest** discount, which is also the
+correct answer rather than an arbitrary tie-break: stock sells soonest-expiry-first, so the next
+carton off the shelf is the one from the most urgent lot. The report still shows both lots, because
+a manager wants the whole picture. Pinned by
+`test_two_lots_of_one_product_are_priced_at_the_deepest_discount`.
+
+**The catalogue now has dated lots.** `backend/seed/2026-08-27-dated-lots.sql` carves 14 dated
+batches out of the products' `OPENING` lots — **splitting rather than deleting**, so product ids
+survive and every total is unchanged. Dates are `CURRENT_DATE + n`, never literal, so the data does
+not go stale before the demo. Idempotent. A real scan returns 12 items across all three discount
+rungs, with the day-9 and day-14 batches correctly excluded.
+
+**What is left, and none of it is business logic:**
+
+1. ⚠️ **`lot.read` and `lot.write` do not exist on the login server.** Until they are created, a
+   real token cannot carry them, and every spoilage screen and tool answers 403 for a signed-in
+   user. Tests pass regardless — they build actors directly. This is the silent-failure mode the
+   whole permissions table below warns about.
+2. `frontend/src/lib/api/schema.d.ts` needs regenerating (`npm run api:types` against a running
+   uvicorn). It is build output, committed but never hand-edited.
+3. The browser walkthrough — now finally meaningful, because `/approvals` has something to show.
+4. The demo box seed, still deferred until all features stop changing. See `deploy/SEED-REBUILD.md`.
+
+**`lot.write` is deliberately NOT given to the agent.** Receiving a delivery is a physical event a
+person witnesses. An agent that could invent stock could invent a spoilage problem and then propose
+the solution to it. `agent/config.py` requests `lot.read` only.
+
 ## Permissions these gates add
 
 Five for gates 27–28. Each one costs seven edits plus a seed rebuild, so the set is kept deliberately

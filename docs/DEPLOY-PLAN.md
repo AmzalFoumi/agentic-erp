@@ -458,6 +458,20 @@ both. That was harmless while every permission was one the agent legitimately ho
 harmless the moment a feature has a permission that is **deliberately human-only** — gate 27's
 `draft.decide` is the first, and gates 29–30 will add more.
 
+**Gate 28 added a second, for a different reason.** `lot.write` books a delivery in, and the
+agent deliberately does not hold it: receiving stock is a physical event a person witnesses, and
+an agent that could invent stock could invent a spoilage problem and then propose the solution
+to it. `lot.read` it does hold. So the running total of permissions the box's seed must
+reproduce is:
+
+| Permission | Human role | Agent role |
+|---|---|---|
+| `draft.read`, `draft.create` | yes | yes |
+| `draft.decide` | yes | **no** |
+| `lot.read` | yes | yes |
+| `lot.write` | yes | **no** |
+
+
 A permission that must not reach the agent needs the agent moved to its own role first. Putting it
 in `AIsle Full Access` grants it to the agent, silently, with every test in the repository still
 green — because the tests prove the *code* refuses an actor without the permission, and this hands

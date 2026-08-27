@@ -41,3 +41,22 @@ shown in `2026-08-27-products-snapshot.sql`:
   not advance the counter that hands out new ones, so skipping this makes the
   very next insert fail on a duplicate primary key — some distance away from
   the cause, which makes it a nasty one to debug.
+
+## 2026-08-27-dated-lots.sql
+
+Gives the perishable products realistic delivery batches with expiry dates, so the spoilage
+feature has something to find. Run it **after** migration `d5b93a17c204`.
+
+Three things about it are deliberate and easy to get wrong if it is ever rewritten:
+
+- **It splits, it does not delete.** Each dated batch is carved out of the same product's
+  `OPENING` lot, so product ids survive and every product's total is unchanged. Nothing is
+  destroyed, so nothing has to be restored.
+- **Dates are `CURRENT_DATE + n`, never literal.** A fixed date is correct on the day it is
+  written and wrong every day after — by demo day it would be a shop full of stock that
+  expired last week.
+- **It is idempotent.** Every insert is guarded on the lot code not already existing for
+  that product, so re-running changes nothing.
+
+The `2026-08-27-products-snapshot.sql` in this folder remains the "before" copy of the
+catalogue, taken before any of this.

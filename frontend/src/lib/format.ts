@@ -36,3 +36,42 @@ export function formatDateTime(iso: string): string {
     hour12: false,
   }).format(new Date(iso));
 }
+
+/**
+ * "2026-08-29" -> "29 Aug 2026". A calendar day, with no time and no zone
+ * conversion.
+ *
+ * Deliberately NOT `formatDateTime`, and deliberately not `new Date(iso)`
+ * either. An expiry date is a calendar day, not an instant: `new Date(
+ * "2026-08-29")` is parsed as midnight **UTC**, which in Asia/Colombo is
+ * 05:30 on the 29th — but in any zone behind UTC it renders as the 28th. A
+ * carton that expires tomorrow showing as expiring today is the kind of bug
+ * that only appears for some users, in some timezones, some of the time.
+ *
+ * So the string is split, never parsed.
+ */
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+export function formatDate(iso: string): string {
+  const [year, month, day] = iso.split("-");
+  const name = MONTHS[Number(month) - 1] ?? month;
+  return `${Number(day)} ${name} ${year}`;
+}
+
+/**
+ * "in 2 days", "tomorrow", "today", "3 days ago".
+ *
+ * Takes the day count the *server* calculated rather than working it out from
+ * the browser's clock. Two clients in two timezones must not disagree about
+ * whether stock expires today, and the server is the only one that can settle
+ * that.
+ */
+export function formatDaysRemaining(days: number): string {
+  if (days < 0) return `${Math.abs(days)} day${days === -1 ? "" : "s"} ago`;
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  return `in ${days} days`;
+}
