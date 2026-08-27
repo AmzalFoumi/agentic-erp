@@ -72,7 +72,7 @@ def list_drafts(
 @router.get(
     "/{draft_id}",
     response_model=DraftRead,
-    responses=_draft_errors(_FORBIDDEN, _NOT_FOUND),
+    responses=_draft_errors(_FORBIDDEN, _NOT_FOUND, _UNPROCESSABLE),
 )
 def get_draft(draft_id: int, session: DbSession, actor: CurrentActor):
     """One action draft, including its full payload and reasoning."""
@@ -113,7 +113,7 @@ def approve_draft(
 @router.post(
     "/{draft_id}/reject",
     response_model=DraftRead,
-    responses=_draft_errors(_BAD_REQUEST, _FORBIDDEN, _NOT_FOUND),
+    responses=_draft_errors(_BAD_REQUEST, _FORBIDDEN, _NOT_FOUND, _UNPROCESSABLE),
 )
 def reject_draft(draft_id: int, session: DbSession, actor: CurrentActor):
     """Reject a draft. Terminal, and runs nothing.
