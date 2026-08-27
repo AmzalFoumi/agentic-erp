@@ -155,6 +155,56 @@ def test_received_quantity_above_ordered_is_rejected(session, sent_order, produc
         )
 
 
+def test_all_units_damaged_produces_no_lot_and_one_damage_credit(
+    session, sent_order, product, monkeypatch
+):
+    from services import lots
+
+    calls = []
+    original_receive_lot = lots.receive_lot
+
+    def spy_receive_lot(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original_receive_lot(*args, **kwargs)
+
+    monkeypatch.setattr(lots, "receive_lot", spy_receive_lot)
+
+    result = receive_order(
+        session,
+        SystemActor(),
+        client=ClientType.WEB_UI,
+        order_id=sent_order.id,
+        lines=[
+            ReceiptLineInput(
+                product_id=product.id,
+                quantity_received=0,
+                quantity_damaged=50,
+                expiry_date=date(2026, 9, 10),
+                lot_code="DN-TEST-6",
+            )
+        ],
+    )
+    assert result.status == PurchaseOrderStatus.PARTIALLY_RECEIVED.value
+    line = result.lines[0]
+    assert line.quantity_received == 0
+    assert line.quantity_damaged == 50
+
+    assert calls == []  # no lot created when there are zero good units
+
+    from core.models import CreditMemo
+    from sqlalchemy import select
+
+    memos = session.execute(
+        select(CreditMemo).where(CreditMemo.purchase_order_id == result.id)
+    ).scalars().all()
+    assert len(memos) == 1
+    assert memos[0].reason == CreditMemoReason.DAMAGED.value
+    assert memos[0].amount == Decimal(50) * Decimal("2.00")
+
+    session.refresh(product)
+    assert product.quantity_on_hand == 0  # nothing became stock
+
+
 def test_receiving_requires_purchasing_write(session, sent_order, product):
     class NoPermActor:
         id = "no-perms"
