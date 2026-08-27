@@ -69,6 +69,7 @@ from mcp_server.errors import translated
 from services import drafts as draft_service
 from services import lots as lot_service
 from services import products as product_service
+from services import purchasing as purchasing_service
 from services import spoilage as spoilage_service
 
 # The server object. The name is what a client displays when listing what is
@@ -603,6 +604,64 @@ def _describe_draft(draft: ActionDraft) -> dict[str, Any]:
     }
 
 
+def _describe_reorder(report: Any) -> dict[str, Any]:
+    """A reorder report, flattened for a model. Same shape as `_describe_spoilage`."""
+    return {
+        "total_value": str(report.total_value),
+        "bundles": [
+            {
+                "supplier_id": bundle.supplier_id,
+                "supplier_name": bundle.supplier_name,
+                "lead_time_days": bundle.lead_time_days,
+                "minimum_order_value": str(bundle.minimum_order_value),
+                "bundle_value": str(bundle.bundle_value),
+                "below_minimum": bundle.below_minimum,
+                "shortfall": str(bundle.shortfall),
+                "lines": [
+                    {
+                        "product_id": line.product_id,
+                        "sku": line.sku,
+                        "name": line.name,
+                        "quantity_on_hand": line.quantity_on_hand,
+                        "reorder_level": line.reorder_level,
+                        "quantity": line.quantity,
+                        "unit_cost": str(line.unit_cost),
+                        "pack_size": line.pack_size,
+                        "line_total": str(line.line_total),
+                        "is_top_up": line.is_top_up,
+                    }
+                    for line in bundle.lines
+                ],
+            }
+            for bundle in report.bundles
+        ],
+        "unsourced": [dict(item) for item in report.unsourced],
+    }
+
+
+def _describe_order(order: Any) -> dict[str, Any]:
+    """A purchase order, flattened for a model."""
+    return {
+        "id": order.id,
+        "supplier_id": order.supplier_id,
+        "status": order.status,
+        "expected_date": order.expected_date.isoformat() if order.expected_date else None,
+        "total_value": str(order.total_value),
+        "notes": order.notes,
+        "source_draft_id": order.source_draft_id,
+        "created_by": order.created_by,
+        "lines": [
+            {
+                "product_id": line.product_id,
+                "quantity_ordered": line.quantity_ordered,
+                "unit_cost": str(line.unit_cost),
+                "line_total": str(line.line_total),
+            }
+            for line in order.lines
+        ],
+    }
+
+
 @mcp.tool()
 @translated
 def create_action_draft(
@@ -811,6 +870,100 @@ def list_product_lots(product_id: int) -> list[dict[str, Any]]:
                 session, _actor(), product_id=product_id
             )
         ]
+
+
+@mcp.tool()
+@translated
+def suggest_reorder_bundles() -> dict[str, Any]:
+    """Work out what to buy today, grouped by supplier.
+
+    Read-only: this looks and changes nothing. Use it freely while working out
+    what to recommend.
+
+    Each bundle is one supplier's proposed order. Two things in it matter when
+    you explain it to a person:
+
+    - `is_top_up` on a line. False means the product is at or below its reorder
+      level and the order is replacing it. True means the product is not low
+      yet and is on the order only because the supplier has a minimum order
+      value the rest of the lines did not reach. Say which is which; do not
+      present a top-up as something that ran out.
+    - `below_minimum`. True means the order is still under the supplier's
+      minimum and there is nothing else to add. Tell the person plainly - it
+      usually means a delivery charge.
+
+    `unsourced` lists low products no active supplier stocks. They cannot be
+    ordered by anyone. Mention them; do not quietly leave them out.
+
+    Returns:
+        The supplier bundles, the unsourced products, and the total value.
+    """
+    with get_session() as session:
+        report = purchasing_service.scan_reorder(session, _actor())
+        return _describe_reorder(report)
+
+
+@mcp.tool()
+@translated
+def propose_reorder_order(supplier_id: int, reasoning: str) -> dict[str, Any]:
+    """Propose one supplier's order for a manager to approve.
+
+    This writes a proposal into the approvals queue and **places no order**.
+    Nothing is bought until a human opens the approvals screen, reads the
+    whole thing, optionally edits it, and approves.
+
+    Call `suggest_reorder_bundles` first and propose a supplier that actually
+    appears there. Proposing for a supplier with nothing low is refused.
+
+    Args:
+        supplier_id: Which supplier's bundle to propose.
+        reasoning: Your own explanation, in your own words, of why this order
+            is worth placing. A manager reads this to decide. Say what is low,
+            what was added to reach the minimum, and when it would arrive.
+
+    Returns:
+        The staged proposal, including its id.
+    """
+    with get_session() as session:
+        draft = purchasing_service.propose_reorder(
+            session,
+            _actor(),
+            client=ClientType.MCP_AGENT,
+            supplier_id=supplier_id,
+            reasoning=reasoning,
+        )
+        return _describe_draft(draft)
+
+
+@mcp.tool()
+@translated
+def list_purchase_orders(
+    status: str | None = None, limit: int = 20
+) -> dict[str, Any]:
+    """List purchase orders, newest first.
+
+    Read-only. Statuses are: draft (raised, not placed), sent (placed with the
+    supplier), partially_received, received, cancelled.
+
+    An order created by approving your proposal starts as `draft` - a person
+    still presses send. If someone asks whether their order went out, `sent` is
+    the answer they mean.
+
+    Args:
+        status: Filter to one status. Leave it out for all of them.
+        limit: How many to return. Defaults to 20.
+
+    Returns:
+        The orders and how many matched.
+    """
+    with get_session() as session:
+        orders, total = purchasing_service.list_orders(
+            session, _actor(), status=status, limit=limit
+        )
+        return {
+            "orders": [_describe_order(order) for order in orders],
+            "total": total,
+        }
 
 
 def main(argv: list[str] | None = None) -> None:

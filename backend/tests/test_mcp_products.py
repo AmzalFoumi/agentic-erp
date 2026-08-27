@@ -56,6 +56,12 @@ EXPECTED_TOOLS = {
     "check_spoilage_risk",
     "propose_spoilage_markdown",
     "list_product_lots",
+    # Gate 29, added the same way and for the same reason. Two read, one
+    # stages a draft; there is still no tool that creates, sends, or cancels
+    # an order - see FORBIDDEN_TOOL_NAMES below.
+    "suggest_reorder_bundles",
+    "propose_reorder_order",
+    "list_purchase_orders",
 }
 
 # Tools that would let the agent decide its own proposals. None of these exist,
@@ -139,8 +145,14 @@ def test_every_tool_is_registered_with_a_description_and_schema():
 
     assert set(tools) == EXPECTED_TOOLS
 
+    # suggest_reorder_bundles takes no arguments at all - it just scans - so
+    # it is the one tool this assumption does not hold for.
+    expected_no_parameters = {"suggest_reorder_bundles"}
+
     for name, tool in tools.items():
         assert tool.description, f"{name} lost its docstring"
+        if name in expected_no_parameters:
+            continue
         assert tool.input_schema.get("properties"), f"{name} lost its parameters"
 
     # Spot-check that the parameters are the real ones rather than *args-shaped.

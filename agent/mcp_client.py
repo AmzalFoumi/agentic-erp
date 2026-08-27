@@ -99,6 +99,10 @@ READ_ONLY = frozenset(
         # comment on STAGING_ONLY factually wrong, which matters more than
         # usual on a set whose whole job is to say what is safe.
         "list_pending_drafts",
+        # Gate 29. Both are queries: a reorder scan works out what to buy and
+        # writes nothing, and listing orders reads rows.
+        "suggest_reorder_bundles",
+        "list_purchase_orders",
     }
 )
 
@@ -127,6 +131,11 @@ STAGING_ONLY = frozenset(
         # manager makes on a screen showing every line and both money
         # figures.
         "propose_spoilage_markdown",
+        # Gate 29. Writes one draft row and places no order. It clears the bar
+        # in the comment above: approving it later is a real decision a
+        # manager makes on a screen showing every line, the supplier's
+        # minimum, and what the order would cost.
+        "propose_reorder_order",
     }
 )
 
