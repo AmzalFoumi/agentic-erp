@@ -64,56 +64,52 @@ docker compose -f deploy/docker-compose.thunderid.yml start
 rebuilt from committed files on the next `up`. **The same is not true of the dev stack** —
 see the warning above and the next section.
 
-## ⚠️ Restarting the dev stack rotates its passwords and keys
+## Restarting either stack does NOT rotate passwords or keys
 
-**The symptom, so you recognise it:** you stop the login server on Friday, start it on Monday,
-and everything answers `401`. Nothing is broken and nothing is misconfigured — the credentials
-simply are not the same ones any more.
+Worth stating positively, because the opposite was true once and the fear outlived the fix.
 
-**Why.** `deploy/docker-compose.thunderid.yml` includes a one-shot container, `thunderid-setup`,
-that runs `setup.sh` and then exits. `setup.sh` does **not** check whether it has run before. Every
-time it runs it issues a **new admin password** and regenerates the **TLS certificate**, the **JWT
-signing keys** and the **Direct Auth Secret** — even though the named volumes survived untouched.
+**The danger is real in principle.** The vendor's `setup.sh` has no memory: every run mints a new
+administrator password and **new JWT signing keys**, which instantly invalidates every token already
+issued and signs out everyone. Registrations are untouched — they live in the database volume — but
+nothing signed by the old key verifies again.
 
-What that costs, concretely:
+**It bit this project once**, on 2026-08-16, when a `depends_on` dragged the one-shot setup container
+into every `up`. Both stacks are now guarded, by two different mechanisms. Verified 2026-08-27 by
+reading the compose files and `docker compose config --services`; no live `up` was run against the
+dev stack to test it, deliberately.
 
-- **Any admin password you wrote down is stale.** Read the new one out of the `thunderid-setup`
-  container's logs.
-- **Every access token already issued stops verifying**, because the key that signed it is gone.
-  Anything holding a token — a browser session, a saved `curl`, a running agent — gets `401`.
-- **Your registrations survive.** Resource servers, applications, agents and roles live in the
-  `thunderid-db` volume, which `setup.sh` never touches. You do not have to set them up again.
-
-Observed 2026-08-16 → 2026-08-17.
-
-### What actually triggers it
-
-This is the part worth internalising, because two commands that sound identical are not:
-
-| Command | Re-runs `setup.sh`? | Effect |
+| Stack | Guard | Result of a repeat `up -d` |
 |---|---|---|
-| `docker compose ... start` | **No** | Restarts the existing containers. Credentials survive. |
-| `docker compose ... up -d` | **Yes** | Recreates the one-shot container, so setup runs again. |
-| Docker Desktop's ▶ button | **Yes** | It issues `up`, not `start`. |
+| `docker-compose.thunderid.yml` (dev) | `thunderid-setup` and `thunderid-db-init` are behind `profiles: ["init"]`, and `thunderid` has **no** `depends_on` on them | They are not started at all. Only `thunderid` comes up. |
+| `aisle-box/docker-compose.yml` (box) | No profiles, so both one-shots *are* created — but `seed.sh` and `setup-once.sh` each check a **marker file** on the database volume (`.aisle-seeded`, `.aisle-setup-done`) | They start, print "already done — skipping", and exit 0. |
 
-This is why "Coming back to dev work" above says `start` and not `up -d` — that is not a stylistic
-choice, it is the whole difference. ⚠️ **Starting the stack from the Docker Desktop GUI does the
-unsafe one**, so prefer the command line for this stack.
+Check it yourself without starting anything:
 
-### When you have to use `up -d` anyway
+```bash
+docker compose -f deploy/docker-compose.thunderid.yml config --services
+# -> thunderid, and nothing else
+```
 
-Changing `deploy/thunderid-deployment.yaml` needs `up -d` — a plain `start` will not apply an edited
-config. So a config change and a credential rotation come as a pair here; there is no way to get one
-without the other. Plan for it: make the change, then re-read the admin password from the
-`thunderid-setup` logs and sign in again.
+**So `up -d`, `start`, and Docker Desktop's ▶ button are all safe on both stacks**, and `up -d` is
+the correct everyday command for the dev server — as its own compose file says.
 
-### The advice that follows from all this
+### What would still rotate the keys
 
-**While you are working a gate, leave the dev stack running** rather than stopping it between
-sessions. `stop`/`start` is safe, but the fewer full recreations the fewer surprise sign-outs.
+Three things, all of which take deliberate action:
 
-None of this applies to `deploy/aisle-box/`. That stack is *meant* to be rebuilt from committed
-files, and its judge account is seeded rather than generated, so its password is stable.
+1. **`down -v`.** It destroys the volumes, and the markers live on the database volume precisely so
+   that seeding and setup can never get out of step. Next `up` regenerates everything. ⚠️ Against
+   the **dev** stack this also destroys every account, role and client secret you have, with no
+   backup — see the warning further up. Against the box it is harmless and expected.
+2. **Running the init profile again by hand** on the dev stack. `thunderid-db-init` refuses with a
+   message and exit code 1 rather than reseeding, so this fails safely.
+3. **Deleting a marker file, or removing the `profiles:` keys.** Both guards are one line each.
+   If you ever edit those services, this is what you are protecting.
+
+### If you do get signed out anyway
+
+Read the new administrator password from the `thunderid-setup` container's logs — it is printed
+there and nowhere else. Then sign in again. Your registrations survived.
 
 ## Where your data lives
 
