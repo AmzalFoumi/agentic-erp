@@ -135,12 +135,44 @@ rather than only the test client.
 
 Two things are **not** done, and neither is code:
 
-1. **The ThunderID side of the three new permissions.** Four of the seven places are updated in the
-   source tree; the resource-server definitions, the roles, and the rebuilt seed are not. See the
-   ⚠️ in `docs/DEPLOY-PLAN.md` — the agent needs its own role before `draft.decide` exists, because
-   the box's `AIsle Full Access` is assigned to the agent as well as the human.
-2. **The browser walkthrough.** ThunderID was not running, and the queue would be empty anyway —
-   see below.
+1. **The demo box's ThunderID seed.** The developer's own ThunderID is fully configured (see
+   below); the box's committed `.db` files are not. That is a separate job needing a throwaway
+   Docker stack.
+2. **The browser walkthrough.** The queue would be empty anyway — gate 27 registers no draft types,
+   so the first meaningful check of `/approvals` belongs to gate 28.
+
+### ThunderID: what was done on 2026-08-27, and what is left
+
+**Done on the developer's own instance** (`deploy/docker-compose.thunderid.yml`), through the
+Console, and verified afterwards by querying the Console's own REST API rather than by reading the
+screen back:
+
+| # | Change |
+|---|---|
+| 1 | `Agentic ERP API` resource server gains a `Draft` resource with actions `Read`, `Create`, **`Decide`** |
+| 2 | `Agentic ERP MCP` resource server gains a `Draft` resource with `Read` and `Create` — **and deliberately no `Decide`** |
+| 3 | New role **`AIsle Agent Access`**: product/stock on both servers, plus `draft.read` and `draft.create`. No `draft.decide` |
+| 4 | The `AIsle Agent` agent moved onto that role |
+| 5 | The agent **removed** from `AIsle Full Access`, which is now human-only |
+| 6 | `AIsle Full Access` gains `draft.read`, `draft.create` and `draft.decide` |
+
+Steps 3–5 were done **before** step 6 on purpose, so there was never a moment when the agent held
+`draft.decide`.
+
+**Why the MCP resource server has no `Decide` action at all.** It is not an oversight and should not
+be "fixed". Approving happens only over the web API, so a `decide` permission on the MCP audience
+would be a permission nothing can legitimately use — and one more thing that could be granted by
+mistake. A permission that does not exist cannot be handed out.
+
+**What is left, and it is only the box:**
+
+- Rebuild `deploy/aisle-box/thunderid-seed/*.db` — export from the dev instance, then
+  `prune-config.py` → `build-seed.py` → `scan-seed.py`. `aisle-config.yml` is **generated**, so
+  editing it by hand achieves nothing; the `.db` files are the artefact a judge actually runs.
+- The box's seed must reproduce the **same role split**. Its `AIsle Full Access` is assigned to both
+  the judge user and the agent, which is exactly the trap recorded in `docs/DEPLOY-PLAN.md`.
+- `frontend/.env.local` on this machine is already updated (it is gitignored, so it is not carried
+  by any commit).
 
 ⚠️ **Gate 27 registers no draft types.** The engine ships empty and gate 28 registers the first real
 one, so the approval queue shows its empty state until spoilage lands. `test_draft_types.py` pins
