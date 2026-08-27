@@ -34,7 +34,7 @@ string it arrives intact, and the frontend formats it or parses it with a
 decimal library. Do not "fix" this by casting to float.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -307,3 +307,126 @@ class ErrorResponse(BaseModel):
         default=None,
         description="Field name -> message. Present on 422 only.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Inventory lots and spoilage - gate 28
+# ---------------------------------------------------------------------------
+
+
+class LotRead(BaseModel):
+    """One delivery of one product.
+
+    `expiry_date` is `date | None`, and the None is meaningful rather than
+    missing data: it means "we do not know when this goes off", which is the
+    honest state for stock that predates expiry tracking. The spoilage scan
+    skips those lots, so a client showing "-" here is showing the truth.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    product_id: int
+    lot_code: str
+    expiry_date: date | None
+    quantity: int
+    cost_price: Decimal
+
+    # Computed on the model, not stored. Included so a client never has to do
+    # date arithmetic against its own clock - which would disagree with the
+    # server's for anyone in another timezone.
+    is_expired: bool
+
+    created_at: datetime
+    created_by: str
+    created_via: str
+    source_draft_id: int | None
+
+
+class LotList(BaseModel):
+    """A product's lots. No pagination: a product has a handful, not thousands."""
+
+    items: list[LotRead]
+    total: int
+
+
+class LotReceive(BaseModel):
+    """Book a delivery in.
+
+    `cost_price` is optional because the person receiving a delivery often does
+    not have the invoice yet. Omitted, the service copies the product's current
+    cost price - see `services/lots.receive_lot`, which then freezes it on the
+    lot so a later price rise cannot rewrite history.
+    """
+
+    lot_code: str = Field(..., min_length=1, max_length=64)
+    quantity: int = Field(..., gt=0)
+    expiry_date: date | None = Field(default=None)
+    cost_price: Decimal | None = Field(
+        default=None, ge=0, max_digits=10, decimal_places=2
+    )
+
+
+class SpoilageItemRead(BaseModel):
+    """One at-risk lot, with the markdown that would apply to it.
+
+    Built from a frozen dataclass rather than an ORM row - nothing here is
+    stored, it is computed on demand. `from_attributes=True` reads a dataclass
+    just as happily as a SQLAlchemy model.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    lot_id: int
+    product_id: int
+    sku: str
+    product_name: str
+    lot_code: str
+    expiry_date: date
+    days_remaining: int
+    quantity: int
+
+    current_price: Decimal
+    proposed_price: Decimal
+    discount_percent: int
+    tier_label: str
+
+    cost_at_risk: Decimal
+    projected_recovery: Decimal
+
+
+class SpoilageReportRead(BaseModel):
+    """The whole scan.
+
+    ⚠️ Two money totals, deliberately never netted into one. `total_cost_at_risk`
+    is money already spent; `total_projected_recovery` is a forecast that
+    depends on shoppers actually buying. A single "you save X" figure would
+    present a guess with the confidence of a fact, so the API does not offer
+    one and no client should compute it.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    items: list[SpoilageItemRead]
+    total_cost_at_risk: Decimal
+    total_projected_recovery: Decimal
+    scanned_on: date
+    within_days: int
+
+
+class MarkdownProposal(BaseModel):
+    """Ask the server to stage a markdown draft for the current spoilage.
+
+    Deliberately tiny. The client does NOT send prices or lot ids - it says
+    "propose something for stock expiring within N days" and the server scans,
+    prices and stages. A client that sent the lines would be doing business
+    logic, and two clients would eventually disagree about the discount.
+    """
+
+    within_days: int | None = Field(
+        default=None,
+        ge=0,
+        le=30,
+        description="Horizon to scan. Defaults to the discount ladder's own reach.",
+    )
+    reasoning: str | None = Field(default=None, max_length=2000)

@@ -20,11 +20,11 @@ nullability is expressed once, in a place your type checker also reads, instead
 of twice in two syntaxes that can disagree.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import DateTime, Numeric, String, Text, func
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column
@@ -309,4 +309,117 @@ class ActionDraft(Base):
         return (
             f"ActionDraft(id={self.id!r}, type={self.draft_type!r}, "
             f"status={self.status!r})"
+        )
+
+
+class InventoryLot(Base):
+    """One delivery of one product, with its own expiry date and cost.
+
+    ### Why lots exist, in shop terms
+
+    A product is "Milk 2L". A *lot* is the thirty cartons of Milk 2L that
+    arrived on Tuesday and expire on Friday. The forty that arrive on Thursday
+    are a different lot with a different expiry date, even though they scan as
+    the same product.
+
+    Without this distinction the system can say "we have 70 milk" but cannot
+    answer "how much of it goes off on Friday" - which is the only question
+    that matters for spoilage.
+
+    ### Lots are the source of truth; `Product.quantity_on_hand` is a summary
+
+    A product's stock level is the sum of its lots' quantities. That sum is
+    kept in `Product.quantity_on_hand` because almost every screen wants it and
+    nobody wants to pay for the aggregate each time.
+
+    ⚠️ The summary is maintained in exactly ONE place -
+    `services/lots.py::recalculate_on_hand` - and every operation that touches
+    a lot calls it. Two write paths is how a cached total drifts from the rows
+    it summarises, and a drifted total is invisible until someone counts the
+    shelf by hand.
+    """
+
+    __tablename__ = "inventory_lots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # ON DELETE CASCADE is a statement about ownership: a lot has no meaning
+    # without its product, so if the product row ever goes, its lots go with
+    # it rather than becoming rows pointing at nothing.
+    #
+    # It is currently unreachable - the API deliberately offers no delete for
+    # products (see docs/FRONTEND-PLAN.md's capability inventory) - and it is
+    # declared anyway, because the constraint belongs to the data and not to
+    # whichever door happens to exist today.
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), index=True
+    )
+
+    # The code on the delivery note - "DN-4417", "B2026-0812". Free text: it
+    # comes from whoever supplied the stock and every supplier formats it
+    # differently. Not unique, because two suppliers can and do reuse codes.
+    lot_code: Mapped[str] = mapped_column(String(64))
+
+    # Date, not DateTime. A carton expires on a day, not at 14:32, and storing
+    # a timestamp would invite timezone arithmetic into a question that has
+    # none - "expires 2026-08-29" means the same thing in every timezone.
+    #
+    # Nullable, and this is the interesting part: NULL means "we do not know",
+    # which is the honest state for stock that was already on the shelf before
+    # the shop started tracking expiry. The spoilage scan SKIPS these rather
+    # than guessing, so an unknown expiry can never trigger a markdown.
+    expiry_date: Mapped[date | None] = mapped_column(Date, default=None, index=True)
+
+    quantity: Mapped[int] = mapped_column(default=0)
+
+    # What this particular delivery cost per unit. Deliberately a copy rather
+    # than a lookup to `Product.cost_price`: the price paid in August is a
+    # historical fact, and it must not change retroactively when the supplier
+    # raises their price in September. `cost_at_risk` is only truthful if it
+    # uses what was actually paid for the stock in question.
+    cost_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+
+    # --- provenance --------------------------------------------------------
+    #
+    # Who, through which door, and off the back of which approved draft. These
+    # columns are nearly free to add while writing a table and expensive to
+    # retrofit, which is why they are here before anything reads them. The full
+    # audit ledger is deliberately NOT part of gates 27-30.
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by: Mapped[str] = mapped_column(String(128))
+    updated_by: Mapped[str | None] = mapped_column(String(128), default=None)
+
+    # Which door this lot came through - "web_ui", "mcp_agent", "system".
+    created_via: Mapped[str] = mapped_column(String(16), default="system")
+
+    # The approved ActionDraft this came from, if any. No ForeignKey on
+    # purpose: a draft can be deleted or archived without silently taking a
+    # lot's history with it, and the value is evidence rather than a live link.
+    source_draft_id: Mapped[int | None] = mapped_column(default=None)
+
+    @property
+    def is_expired(self) -> bool:
+        """True once the expiry date has passed. Unknown expiry is never expired.
+
+        A plain property, not a `hybrid_property`, for the same reason as
+        `ActionDraft.is_expired`: nothing filters the database by it. The
+        spoilage scan compares against a date it was *given* so that it can be
+        tested at a fixed point in time, rather than reading the clock in the
+        middle of a query.
+        """
+        if self.expiry_date is None:
+            return False
+        return self.expiry_date < datetime.now(timezone.utc).date()
+
+    def __repr__(self) -> str:
+        return (
+            f"InventoryLot(id={self.id!r}, product_id={self.product_id!r}, "
+            f"lot_code={self.lot_code!r}, expiry={self.expiry_date!r}, "
+            f"qty={self.quantity!r})"
         )

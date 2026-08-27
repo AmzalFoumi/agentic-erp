@@ -85,7 +85,17 @@ _ARGS_VALIDATOR = pydantic_core.SchemaValidator(
 # needs: it asks tools/list on every run rather than caching, specifically so a
 # new backend tool appears without a restart here. A new tool appearing
 # automatically is only safe if it is also gated automatically.
-READ_ONLY = frozenset({"list_products", "get_product", "get_product_by_sku"})
+READ_ONLY = frozenset(
+    {
+        "list_products",
+        "get_product",
+        "get_product_by_sku",
+        # Gate 28. Both look and change nothing - a spoilage scan is a
+        # query, and listing lots is a query.
+        "check_spoilage_risk",
+        "list_product_lots",
+    }
+)
 
 # Tools that WRITE but change nothing anyone can act on yet. Gate 27.
 #
@@ -104,7 +114,17 @@ READ_ONLY = frozenset({"list_products", "get_product", "get_product_by_sku"})
 # inert until they make it. If anything in this set ever becomes load-bearing
 # on its own, it belongs back under approval. See docs/FEATURES-PLAN.md,
 # decision 1.
-STAGING_ONLY = frozenset({"create_action_draft", "list_pending_drafts"})
+STAGING_ONLY = frozenset(
+    {
+        "create_action_draft",
+        "list_pending_drafts",
+        # Gate 28. Writes one draft row and moves no price. It clears the
+        # bar in the comment above: approving it later is a real decision a
+        # manager makes on a screen showing every line and both money
+        # figures.
+        "propose_spoilage_markdown",
+    }
+)
 
 
 def tool_kind(name: str) -> Literal["function", "unapproved"]:

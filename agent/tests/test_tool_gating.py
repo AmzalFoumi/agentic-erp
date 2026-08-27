@@ -38,13 +38,20 @@ def test_an_unknown_tool_is_gated() -> None:
     assert tool_kind("drop_everything") == "unapproved"
 
 
-def test_read_only_holds_exactly_the_three_read_tools() -> None:
+def test_read_only_holds_exactly_the_read_tools() -> None:
     """Pins the contents of the allowlist.
 
     This is the one test that fails if someone widens READ_ONLY, which is the
-    only edit that can quietly un-gate a mutating tool.
+    only edit that can quietly un-gate a mutating tool. Gate 28 added two, and
+    updating this line was the deliberate act the test exists to force.
     """
-    assert READ_ONLY == {"list_products", "get_product", "get_product_by_sku"}
+    assert READ_ONLY == {
+        "list_products",
+        "get_product",
+        "get_product_by_sku",
+        "check_spoilage_risk",
+        "list_product_lots",
+    }
 
 
 def test_staging_tools_run_without_an_in_conversation_prompt() -> None:
@@ -59,7 +66,7 @@ def test_staging_tools_run_without_an_in_conversation_prompt() -> None:
         assert tool_kind(name) == "function", name
 
 
-def test_staging_only_holds_exactly_the_two_draft_tools() -> None:
+def test_staging_only_holds_exactly_the_draft_tools() -> None:
     """Pins the second allowlist, for the same reason the first one is pinned.
 
     STAGING_ONLY is now the other edit that can quietly un-gate a mutating
@@ -67,7 +74,13 @@ def test_staging_only_holds_exactly_the_two_draft_tools() -> None:
     nearly safe", which is exactly the reasoning that would let a real write
     slip in.
     """
-    assert STAGING_ONLY == {"create_action_draft", "list_pending_drafts"}
+    assert STAGING_ONLY == {
+        "create_action_draft",
+        "list_pending_drafts",
+        # Gate 28. Stages one draft row and moves no price; the manager still
+        # sees every line and both money figures before anything happens.
+        "propose_spoilage_markdown",
+    }
 
 
 def test_the_two_allowlists_do_not_overlap() -> None:

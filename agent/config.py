@@ -247,7 +247,16 @@ class Settings(BaseSettings):
     # ask for it. Adding it here would not by itself grant anything - the
     # intersection would still exclude it - but it would remove one layer and
     # make the other two look accidental. See docs/FEATURES-PLAN.md.
-    thunderid_scopes: str = "product.read product.create product.update stock.adjust draft.read draft.create"
+    thunderid_scopes: str = (
+        "product.read product.create product.update stock.adjust "
+        "draft.read draft.create "
+        # Gate 28. `lot.read` lets the agent see expiry dates and run a
+        # spoilage scan. `lot.write` is deliberately ABSENT: receiving a
+        # delivery is a physical event a person witnesses, and an agent
+        # that could invent stock could invent a spoilage problem to
+        # solve.
+        "lot.read"
+    )
 
     # ⚠️ LOCAL ONLY, and the better half of a bad choice. ThunderID's
     # development certificate is self-signed, so an ordinary HTTPS call to the

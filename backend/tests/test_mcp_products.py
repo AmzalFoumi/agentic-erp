@@ -50,6 +50,12 @@ EXPECTED_TOOLS = {
     # would not.
     "create_action_draft",
     "list_pending_drafts",
+    # Gate 28, added the same way and for the same reason. Two of these read
+    # and one stages a draft; none of them changes a price, and there is still
+    # no tool that approves anything - see FORBIDDEN_TOOL_NAMES below.
+    "check_spoilage_risk",
+    "propose_spoilage_markdown",
+    "list_product_lots",
 }
 
 # Tools that would let the agent decide its own proposals. None of these exist,

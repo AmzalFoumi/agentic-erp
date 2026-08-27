@@ -137,5 +137,11 @@ def test_gate_27_ships_with_no_real_draft_types_registered():
     If this test starts failing, a feature registered a type - update it to
     name that type deliberately, rather than deleting it. It is the thing that
     would notice a draft type appearing by accident through some import.
+
+    Gate 28 registered BATCH_PRICE_MARKDOWN (services/spoilage.py, imported by
+    services/__init__.py). TEST_NOOP is this file's own fixture and exists
+    nowhere in production code.
     """
-    assert draft_types.registered_types() == frozenset({"TEST_NOOP"})
+    assert draft_types.registered_types() == frozenset(
+        {"TEST_NOOP", "BATCH_PRICE_MARKDOWN"}
+    )
