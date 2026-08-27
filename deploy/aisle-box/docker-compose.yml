@@ -295,7 +295,25 @@ services:
       args:
         NEXT_PUBLIC_THUNDERID_BASE_URL: https://localhost:8090
         NEXT_PUBLIC_THUNDERID_CLIENT_ID: ${THUNDERID_GATE_CLIENT_ID:-vAf_zSFT1qj4733Xy3jgQw}
-        NEXT_PUBLIC_THUNDERID_SCOPES: openid product.read product.create product.update stock.adjust draft.read draft.create draft.decide
+        # ⚠️ THIS LIST MUST NOT NAME A PERMISSION THE SHIPPED SEED DOES NOT DEFINE.
+        #
+        # Not a style rule - it is the difference between a working box and a
+        # completely broken one. ThunderID answers a request containing an
+        # unknown permission with a valid, correctly-audienced token carrying
+        # **no scope claim at all**. Empty means zero permissions, not "ignore
+        # the unknown one" - so ONE unrecognised name here makes a signed-in
+        # judge fail every check in the application, including the product and
+        # stock screens that have nothing to do with the new feature.
+        #
+        # That is exactly what happened: gate 27 added draft.read/create/decide
+        # here while `thunderid-seed/*.db` still knew none of them, which broke
+        # the whole box rather than just the drafts feature. They are removed
+        # again until the seed is rebuilt - see deploy/SEED-REBUILD.md. Gate
+        # 28's lot.read/lot.write are absent for the same reason.
+        #
+        # Verify before adding a name back, rather than trusting this comment:
+        #   grep -c 'draft.read' deploy/aisle-box/thunderid-seed/configdb.db
+        NEXT_PUBLIC_THUNDERID_SCOPES: openid product.read product.create product.update stock.adjust
     restart: unless-stopped
     network_mode: "service:aisle-net"
     environment:
