@@ -64,6 +64,53 @@ docker compose -f deploy/docker-compose.thunderid.yml start
 rebuilt from committed files on the next `up`. **The same is not true of the dev stack** —
 see the warning above and the next section.
 
+## Restarting either stack does NOT rotate passwords or keys
+
+Worth stating positively, because the opposite was true once and the fear outlived the fix.
+
+**The danger is real in principle.** The vendor's `setup.sh` has no memory: every run mints a new
+administrator password and **new JWT signing keys**, which instantly invalidates every token already
+issued and signs out everyone. Registrations are untouched — they live in the database volume — but
+nothing signed by the old key verifies again.
+
+**It bit this project once**, on 2026-08-16, when a `depends_on` dragged the one-shot setup container
+into every `up`. Both stacks are now guarded, by two different mechanisms. Verified 2026-08-27 by
+reading the compose files and `docker compose config --services`; no live `up` was run against the
+dev stack to test it, deliberately.
+
+| Stack | Guard | Result of a repeat `up -d` |
+|---|---|---|
+| `docker-compose.thunderid.yml` (dev) | `thunderid-setup` and `thunderid-db-init` are behind `profiles: ["init"]`, and `thunderid` has **no** `depends_on` on them | They are not started at all. Only `thunderid` comes up. |
+| `aisle-box/docker-compose.yml` (box) | No profiles, so both one-shots *are* created — but `seed.sh` and `setup-once.sh` each check a **marker file** on the database volume (`.aisle-seeded`, `.aisle-setup-done`) | They start, print "already done — skipping", and exit 0. |
+
+Check it yourself without starting anything:
+
+```bash
+docker compose -f deploy/docker-compose.thunderid.yml config --services
+# -> thunderid, and nothing else
+```
+
+**So `up -d`, `start`, and Docker Desktop's ▶ button are all safe on both stacks**, and `up -d` is
+the correct everyday command for the dev server — as its own compose file says.
+
+### What would still rotate the keys
+
+Three things, all of which take deliberate action:
+
+1. **`down -v`.** It destroys the volumes, and the markers live on the database volume precisely so
+   that seeding and setup can never get out of step. Next `up` regenerates everything. ⚠️ Against
+   the **dev** stack this also destroys every account, role and client secret you have, with no
+   backup — see the warning further up. Against the box it is harmless and expected.
+2. **Running the init profile again by hand** on the dev stack. `thunderid-db-init` refuses with a
+   message and exit code 1 rather than reseeding, so this fails safely.
+3. **Deleting a marker file, or removing the `profiles:` keys.** Both guards are one line each.
+   If you ever edit those services, this is what you are protecting.
+
+### If you do get signed out anyway
+
+Read the new administrator password from the `thunderid-setup` container's logs — it is printed
+there and nowhere else. Then sign in again. Your registrations survived.
+
 ## Where your data lives
 
 Three named Docker volumes hold everything that matters — they are separate from the container,
