@@ -50,6 +50,7 @@ users press wrongly.
 """
 
 import argparse
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -60,11 +61,15 @@ from mcp.server.auth.settings import AuthSettings
 from core.actor import Actor, SystemActor, TokenActor
 from core.config import settings
 from core.database import get_session
+from core.enums import ClientType, DraftStatus
 from core.exceptions import AuthenticationError, ValidationError
-from core.models import Product
+from core.models import ActionDraft, Product
 from mcp_server.auth import ThunderIDTokenVerifier
 from mcp_server.errors import translated
+from services import drafts as draft_service
+from services import lots as lot_service
 from services import products as product_service
+from services import spoilage as spoilage_service
 
 # The server object. The name is what a client displays when listing what is
 # connected; `instructions` is prose the model sees once, describing the server
@@ -494,6 +499,318 @@ def adjust_stock(product_id: int, delta: int, reason: str | None = None) -> dict
                 reason=reason,
             )
         )
+
+# --------------------------------------------------------------------------
+# Action drafts (gate 27)
+# --------------------------------------------------------------------------
+#
+# Note what is NOT here: there is no approve tool, and there will not be one.
+# The agent holds `draft.create` and never `draft.decide`, and the absence of
+# the tool is the second layer of that - a tool that does not exist cannot be
+# called even by a token that would have been allowed to. Two independent
+# mechanisms, because "the agent cannot approve its own work" is the security
+# property this whole feature exists to create.
+
+
+def _describe_lot(lot: Any) -> dict[str, Any]:
+    """One lot, in the shape a model reads best.
+
+    Money as a string, for the same reason it crosses every other boundary that
+    way: a float cannot hold 10.10 exactly, and a model asked to reason about
+    prices should not be handed 10.099999999999999.
+    """
+    return {
+        "lot_id": lot.id,
+        "product_id": lot.product_id,
+        "lot_code": lot.lot_code,
+        # None is meaningful: "we do not know when this expires", not "missing".
+        "expiry_date": lot.expiry_date.isoformat() if lot.expiry_date else None,
+        "quantity": lot.quantity,
+        "cost_price": str(lot.cost_price),
+        "is_expired": lot.is_expired,
+    }
+
+
+def _describe_spoilage(report: Any) -> dict[str, Any]:
+    """A spoilage report, flattened for a model.
+
+    The two totals are separate keys and are never combined here. See the tool
+    docstrings: netting them would turn a forecast into an apparent fact.
+    """
+    return {
+        "scanned_on": report.scanned_on.isoformat(),
+        "within_days": report.within_days,
+        "total_cost_at_risk": str(report.total_cost_at_risk),
+        "total_projected_recovery": str(report.total_projected_recovery),
+        "items": [
+            {
+                "lot_id": item.lot_id,
+                "product_id": item.product_id,
+                "sku": item.sku,
+                "product_name": item.product_name,
+                "lot_code": item.lot_code,
+                "expiry_date": item.expiry_date.isoformat(),
+                "days_remaining": item.days_remaining,
+                "quantity": item.quantity,
+                "current_price": str(item.current_price),
+                "proposed_price": str(item.proposed_price),
+                "discount_percent": item.discount_percent,
+                "why": item.tier_label,
+                "cost_at_risk": str(item.cost_at_risk),
+                "projected_recovery": str(item.projected_recovery),
+            }
+            for item in report.items
+        ],
+    }
+
+
+def _describe_draft(draft: ActionDraft) -> dict[str, Any]:
+    """Turn an ActionDraft into a plain dict the protocol can send.
+
+    Same job as `_describe` above, same two reasons - a SQLAlchemy object is
+    not serialisable and holds a live session link, and choosing the fields by
+    hand means an added column is a decision rather than a leak.
+
+    Money becomes a string, as everywhere else. `None` stays `None` rather than
+    becoming "0.00", because "this proposal has no financial dimension" and
+    "nothing is at stake" are different facts, and a model reading the second
+    when the first is true would report a confident zero.
+    """
+    return {
+        "id": draft.id,
+        "draft_type": draft.draft_type,
+        "status": draft.status,
+        "payload": draft.payload,
+        "reasoning": draft.reasoning,
+        "cost_at_risk": (
+            str(draft.cost_at_risk) if draft.cost_at_risk is not None else None
+        ),
+        "projected_recovery": (
+            str(draft.projected_recovery)
+            if draft.projected_recovery is not None
+            else None
+        ),
+        "expires_at": draft.expires_at.isoformat() if draft.expires_at else None,
+        # Computed on the model and shipped as an answer, not as inputs - the
+        # same call `needs_reorder` represents. A model asked to work out
+        # whether a timestamp has passed will sometimes get it wrong, and there
+        # is no reason to make it try.
+        "is_expired": draft.is_expired,
+        "created_by": draft.created_by,
+        "created_via": draft.created_via,
+        "decided_by": draft.decided_by,
+        "decided_via": draft.decided_via,
+    }
+
+
+@mcp.tool()
+@translated
+def create_action_draft(
+    draft_type: str,
+    payload: dict[str, Any],
+    reasoning: str,
+    cost_at_risk: str | None = None,
+    projected_recovery: str | None = None,
+) -> dict[str, Any]:
+    """Propose a change for a human to approve. Nothing happens until they do.
+
+    Use this for anything that affects many items at once or involves money:
+    marking down a batch of stock that is about to expire, raising a purchase
+    order, issuing a supplier credit. Your proposal goes into the manager's
+    approval queue with your reasoning attached, and a human decides whether it
+    runs.
+
+    You cannot approve your own proposal and there is no tool that would let
+    you. Write a clear `reasoning`: it is the only thing the manager has to
+    judge by, and a proposal they cannot understand is one they will reject.
+
+    For a single small change to one product - correcting one stock count,
+    editing one product's details - use the specific tool for it instead. This
+    is for proposals big enough that someone should look at the whole thing
+    before it happens.
+
+    Args:
+        draft_type: The kind of proposal. Must be one this system recognises;
+            an unknown kind is refused rather than stored.
+        payload: The proposal's details. The required shape depends on
+            draft_type, and is checked now and again when the human approves.
+        reasoning: Plain-English explanation of why you are proposing this.
+        cost_at_risk: Money currently at risk, as a decimal string like
+            "40000.50". Omit when the proposal has no financial dimension -
+            do not send "0" to mean "not applicable".
+        projected_recovery: Money this proposal would recover, same format.
+
+    Returns:
+        The staged proposal, including the id a human will see in the queue.
+
+    Raises:
+        An error if the draft type is unknown, the payload does not match that
+        type's required shape, or the reasoning is empty.
+    """
+    with get_session() as session:
+        return _describe_draft(
+            draft_service.create_draft(
+                session,
+                _actor(),
+                client=ClientType.MCP_AGENT,
+                draft_type=draft_type,
+                payload=payload,
+                reasoning=reasoning,
+                cost_at_risk=(
+                    _price(cost_at_risk, "cost_at_risk")
+                    if cost_at_risk is not None
+                    else None
+                ),
+                projected_recovery=(
+                    _price(projected_recovery, "projected_recovery")
+                    if projected_recovery is not None
+                    else None
+                ),
+            )
+        )
+
+
+@mcp.tool()
+@translated
+def list_pending_drafts(limit: int = 20) -> list[dict[str, Any]]:
+    """List proposals still waiting for a human decision.
+
+    Use this to check whether something you proposed has been decided yet, or
+    to avoid proposing the same thing twice in one conversation.
+
+    A proposal that no longer appears here has been approved or rejected. This
+    tool does not say which - read the individual draft if you need to know.
+
+    ⚠️ A proposal that has passed its deadline DOES still appear here, with
+    `is_expired` set to true. It is still pending, because nothing expires it
+    automatically - no scheduled job exists. Check `is_expired` rather than
+    assuming everything listed is still actionable; an expired proposal can no
+    longer be approved and should be proposed again if it still matters.
+
+    Args:
+        limit: How many to return, newest first.
+
+    Returns:
+        The pending proposals, newest first.
+    """
+    with get_session() as session:
+        return [
+            _describe_draft(draft)
+            for draft in draft_service.list_drafts(
+                session, _actor(), status=DraftStatus.PENDING, limit=limit
+            )
+        ]
+
+@mcp.tool()
+@translated
+def check_spoilage_risk(within_days: int | None = None) -> dict[str, Any]:
+    """Find stock that is about to expire and what discounting it would recover.
+
+    Read-only: this looks, and changes nothing. Use it freely while you are
+    working out what to recommend.
+
+    Each item tells you what the shop paid for that stock (`cost_at_risk` -
+    money already spent, lost entirely if it is thrown away) and what the
+    proposed discount would bring in (`projected_recovery` - a forecast that
+    assumes the discounted stock actually sells).
+
+    ⚠️ Do not subtract one of those from the other and present the result as a
+    saving. They are different kinds of number: one is a fact about the past,
+    the other is a guess about the future. Report them separately, as they are
+    given to you.
+
+    Stock with no recorded expiry date never appears here. That is deliberate -
+    nobody knows when it goes off, so it is not a spoilage risk anyone can act
+    on.
+
+    Args:
+        within_days: How far ahead to look. Leave it out to use the shop's own
+            discount policy, which is the answer you usually want.
+
+    Returns:
+        The at-risk items with their proposed prices, and the two totals.
+    """
+    with get_session() as session:
+        report = spoilage_service.scan_spoilage(
+            session,
+            _actor(),
+            today=date.today(),
+            **({"within_days": within_days} if within_days is not None else {}),
+        )
+        return _describe_spoilage(report)
+
+
+@mcp.tool()
+@translated
+def propose_spoilage_markdown(
+    reasoning: str, within_days: int | None = None
+) -> dict[str, Any]:
+    """Propose discounting everything that is about to expire. A human approves it.
+
+    This stages one proposal covering every at-risk item and puts it in the
+    manager's queue. **No price changes.** Nothing happens until a person reads
+    your reasoning and approves it, and they may edit the prices first.
+
+    Check `check_spoilage_risk` before calling this, so that your `reasoning`
+    describes the actual situation rather than a guess.
+
+    You cannot approve this yourself and there is no tool that would let you.
+
+    Args:
+        reasoning: Why the shop should do this, in plain English, for a manager
+            who has not seen the numbers. Say what is at risk, how soon, and
+            what happens if nothing is done. This is the only thing they have
+            to judge by.
+        within_days: How far ahead to include. Leave it out to use the shop's
+            own discount policy.
+
+    Returns:
+        The staged proposal, including the id a human will see in the queue.
+
+    Raises:
+        An error if nothing is expiring within that window - in which case
+        there is nothing to propose, and you should say so rather than retry
+        with a wider one.
+    """
+    with get_session() as session:
+        return _describe_draft(
+            spoilage_service.propose_markdown(
+                session,
+                _actor(),
+                client=ClientType.MCP_AGENT,
+                today=date.today(),
+                reasoning=reasoning,
+                **({"within_days": within_days} if within_days is not None else {}),
+            )
+        )
+
+
+@mcp.tool()
+@translated
+def list_product_lots(product_id: int) -> list[dict[str, Any]]:
+    """The separate deliveries making up one product's stock, soonest expiry first.
+
+    A product is "Milk 2L". A lot is the thirty cartons that arrived on Tuesday
+    and expire on Friday. Use this when you need to know not just how much
+    there is, but how much of it goes off when.
+
+    Stock is always sold from the soonest-expiring lot first, so the first item
+    in this list is what leaves the shelf next. A lot with no expiry date was
+    on the shelf before the shop tracked expiry, and is used last.
+
+    Args:
+        product_id: Which product's deliveries to list.
+
+    Returns:
+        The lots that still hold stock, soonest expiry first.
+    """
+    with get_session() as session:
+        return [
+            _describe_lot(lot)
+            for lot in lot_service.list_lots(
+                session, _actor(), product_id=product_id
+            )
+        ]
 
 
 def main(argv: list[str] | None = None) -> None:

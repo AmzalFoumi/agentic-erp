@@ -152,6 +152,196 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Drafts
+         * @description List action drafts, newest first, optionally filtered by status.
+         *
+         *     `{items, total}` where `total` counts everything matching `status`
+         *     regardless of the window, so page numbers are buildable - the same contract
+         *     as GET /products.
+         *
+         *     Typing `status` as `DraftStatus` rather than `str` means FastAPI rejects an
+         *     unknown value with a 422 before the service is reached, and the generated
+         *     TypeScript gets a union type rather than `string`. A typo in a query string
+         *     becomes a compile error in the frontend instead of an empty list.
+         */
+        get: operations["list_drafts_drafts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/drafts/{draft_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Draft
+         * @description One action draft, including its full payload and reasoning.
+         */
+        get: operations["get_draft_drafts__draft_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/drafts/{draft_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Draft
+         * @description Approve a draft and run it, optionally with an edited payload.
+         *
+         *     Requires `draft.decide`, which the AI agent does not hold - approving is
+         *     the one thing in this feature only a human can do, and there is no MCP tool
+         *     for it either.
+         *
+         *     A 400 here means the draft is no longer decidable (already decided, or
+         *     expired) or the payload does not match its type's schema. Both are business
+         *     rules, so both arrive as `ValidationError` and translate to 400 rather than
+         *     422 - 422 is reserved for a body that fails FastAPI's own schema check,
+         *     which is a different failure with a different fix.
+         */
+        post: operations["approve_draft_drafts__draft_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/drafts/{draft_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Draft
+         * @description Reject a draft. Terminal, and runs nothing.
+         *
+         *     Takes the same `draft.decide` permission as approving: neither changes the
+         *     world without a human, one simply closes the door. See
+         *     docs/FEATURES-PLAN.md for why the two were not given separate permissions.
+         */
+        post: operations["reject_draft_drafts__draft_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory/spoilage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Spoilage Report
+         * @description What is about to expire, and what marking it down would recover.
+         *
+         *     Read-only. Stages nothing and changes no price - the numbers here are a
+         *     preview of what `POST /inventory/spoilage/propose` would put in front of a
+         *     human for approval.
+         *
+         *     The two money totals are returned separately and must stay that way. One is
+         *     money already spent, the other is a forecast.
+         */
+        get: operations["get_spoilage_report_inventory_spoilage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory/spoilage/propose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Markdown
+         * @description Stage a markdown as a draft for a human to approve. **No price moves.**
+         *
+         *     Returns the created draft, which then appears in `/approvals` alongside
+         *     anything the AI agent proposed. Approving it there is what actually changes
+         *     prices, and that needs `draft.decide` - which the agent does not hold.
+         *
+         *     A 400 means there was nothing expiring within the horizon, so there was
+         *     nothing to propose. That is a refusal rather than an empty draft, because a
+         *     queue whose value is "everything here needs a decision" must not fill with
+         *     items that need none.
+         */
+        post: operations["propose_markdown_inventory_spoilage_propose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory/products/{product_id}/lots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lots
+         * @description A product's lots, soonest expiry first, undated last.
+         *
+         *     That ordering is the same one stock is consumed in, and it is defined once
+         *     in `services/lots.py` so two views of the same lots cannot disagree.
+         */
+        get: operations["list_lots_inventory_products__product_id__lots_get"];
+        put?: never;
+        /**
+         * Receive Lot
+         * @description Book a delivery in as a new lot, and update the product's stock total.
+         *
+         *     The total is not sent by the caller and never could be: it is recalculated
+         *     from the lots themselves, in one place, so the summary cannot drift from
+         *     the rows it summarises.
+         */
+        post: operations["receive_lot_inventory_products__product_id__lots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -188,6 +378,117 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * DraftApproval
+         * @description The body of POST /drafts/{id}/approve.
+         *
+         *     `payload` is optional and replaces the stored one when present - the inline
+         *     adjuster, for a manager who agrees with the proposal but wants 30% rather
+         *     than 50%. Absent means "approve exactly what was proposed".
+         *
+         *     Whatever arrives here is re-validated against the draft type's own schema
+         *     before anything runs. This model deliberately does not attempt that itself:
+         *     it cannot, because the right schema depends on the draft's type, which is
+         *     in the database and not in this request.
+         */
+        DraftApproval: {
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * DraftList
+         * @description A page of drafts plus the size of the whole match. Mirrors ProductList.
+         */
+        DraftList: {
+            /** Items */
+            items: components["schemas"]["DraftRead"][];
+            /**
+             * Total
+             * @description Total matching the status filter, ignoring limit/offset.
+             */
+            total: number;
+        };
+        /**
+         * DraftRead
+         * @description What every draft endpoint returns.
+         *
+         *     `cost_at_risk` and `projected_recovery` are `Decimal`, which Pydantic
+         *     serialises to a JSON **string** - the same decision ProductRead makes for
+         *     prices, and for the same reason set out at the top of this file.
+         *
+         *     `payload` is typed `dict` and not something stricter, deliberately. Three
+         *     different proposal shapes share the draft table, and which one applies is
+         *     decided by `draft_type` through the registry in services/draft_types.py.
+         *     Declaring a union here would mean restating every payload schema in the
+         *     API layer and keeping the two in step forever - the drift this project
+         *     avoids everywhere else. The frontend narrows on `draft_type`, exactly as
+         *     the backend does.
+         */
+        DraftRead: {
+            /** Id */
+            id: number;
+            /** Draft Type */
+            draft_type: string;
+            /** Status */
+            status: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /**
+             * Reasoning
+             * @description The proposer's own explanation, for the human deciding.
+             */
+            reasoning: string;
+            /** Cost At Risk */
+            cost_at_risk: string | null;
+            /** Projected Recovery */
+            projected_recovery: string | null;
+            /** Expires At */
+            expires_at: string | null;
+            /**
+             * Is Expired
+             * @description True when expires_at has passed. Computed, never stored.
+             */
+            is_expired: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /**
+             * Created Via
+             * @description Which door proposed this: web_ui or mcp_agent.
+             */
+            created_via: string;
+            /** Decided By */
+            decided_by: string | null;
+            /** Decided At */
+            decided_at: string | null;
+            /** Decided Via */
+            decided_via: string | null;
+        };
+        /**
+         * DraftStatus
+         * @description Where an Action Draft is in its life.
+         *
+         *     PENDING  - proposed, waiting for a human
+         *     APPROVED - a human said yes; reserved for a future two-phase execution
+         *     REJECTED - a human said no. Terminal
+         *     EXECUTED - the handler ran and the change is real. Terminal
+         *
+         *     **There is deliberately no EXPIRED.** A draft carries `expires_at`, and
+         *     whether that moment has passed is computed when the row is read. Storing it
+         *     would need something to do the storing, and this project has no scheduler -
+         *     so the value would only ever be written by whoever happened to read the row
+         *     next, which is the same work as computing it plus a write.
+         * @enum {string}
+         */
+        DraftStatus: "pending" | "approved" | "rejected" | "executed";
+        /**
          * ErrorResponse
          * @description The shape of every error this API returns.
          *
@@ -219,6 +520,89 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * LotList
+         * @description A product's lots. No pagination: a product has a handful, not thousands.
+         */
+        LotList: {
+            /** Items */
+            items: components["schemas"]["LotRead"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * LotRead
+         * @description One delivery of one product.
+         *
+         *     `expiry_date` is `date | None`, and the None is meaningful rather than
+         *     missing data: it means "we do not know when this goes off", which is the
+         *     honest state for stock that predates expiry tracking. The spoilage scan
+         *     skips those lots, so a client showing "-" here is showing the truth.
+         */
+        LotRead: {
+            /** Id */
+            id: number;
+            /** Product Id */
+            product_id: number;
+            /** Lot Code */
+            lot_code: string;
+            /** Expiry Date */
+            expiry_date: string | null;
+            /** Quantity */
+            quantity: number;
+            /** Cost Price */
+            cost_price: string;
+            /** Is Expired */
+            is_expired: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Created Via */
+            created_via: string;
+            /** Source Draft Id */
+            source_draft_id: number | null;
+        };
+        /**
+         * LotReceive
+         * @description Book a delivery in.
+         *
+         *     `cost_price` is optional because the person receiving a delivery often does
+         *     not have the invoice yet. Omitted, the service copies the product's current
+         *     cost price - see `services/lots.receive_lot`, which then freezes it on the
+         *     lot so a later price rise cannot rewrite history.
+         */
+        LotReceive: {
+            /** Lot Code */
+            lot_code: string;
+            /** Quantity */
+            quantity: number;
+            /** Expiry Date */
+            expiry_date?: string | null;
+            /** Cost Price */
+            cost_price?: number | string | null;
+        };
+        /**
+         * MarkdownProposal
+         * @description Ask the server to stage a markdown draft for the current spoilage.
+         *
+         *     Deliberately tiny. The client does NOT send prices or lot ids - it says
+         *     "propose something for stock expiring within N days" and the server scans,
+         *     prices and stages. A client that sent the lines would be doing business
+         *     logic, and two clients would eventually disagree about the discount.
+         */
+        MarkdownProposal: {
+            /**
+             * Within Days
+             * @description Horizon to scan. Defaults to the discount ladder's own reach.
+             */
+            within_days?: number | null;
+            /** Reasoning */
+            reasoning?: string | null;
         };
         /**
          * ProductCreate
@@ -385,6 +769,72 @@ export interface components {
             sell_price?: number | string | null;
             /** Reorder Level */
             reorder_level?: number | null;
+        };
+        /**
+         * SpoilageItemRead
+         * @description One at-risk lot, with the markdown that would apply to it.
+         *
+         *     Built from a frozen dataclass rather than an ORM row - nothing here is
+         *     stored, it is computed on demand. `from_attributes=True` reads a dataclass
+         *     just as happily as a SQLAlchemy model.
+         */
+        SpoilageItemRead: {
+            /** Lot Id */
+            lot_id: number;
+            /** Product Id */
+            product_id: number;
+            /** Sku */
+            sku: string;
+            /** Product Name */
+            product_name: string;
+            /** Lot Code */
+            lot_code: string;
+            /**
+             * Expiry Date
+             * Format: date
+             */
+            expiry_date: string;
+            /** Days Remaining */
+            days_remaining: number;
+            /** Quantity */
+            quantity: number;
+            /** Current Price */
+            current_price: string;
+            /** Proposed Price */
+            proposed_price: string;
+            /** Discount Percent */
+            discount_percent: number;
+            /** Tier Label */
+            tier_label: string;
+            /** Cost At Risk */
+            cost_at_risk: string;
+            /** Projected Recovery */
+            projected_recovery: string;
+        };
+        /**
+         * SpoilageReportRead
+         * @description The whole scan.
+         *
+         *     ⚠️ Two money totals, deliberately never netted into one. `total_cost_at_risk`
+         *     is money already spent; `total_projected_recovery` is a forecast that
+         *     depends on shoppers actually buying. A single "you save X" figure would
+         *     present a guess with the confidence of a fact, so the API does not offer
+         *     one and no client should compute it.
+         */
+        SpoilageReportRead: {
+            /** Items */
+            items: components["schemas"]["SpoilageItemRead"][];
+            /** Total Cost At Risk */
+            total_cost_at_risk: string;
+            /** Total Projected Recovery */
+            total_projected_recovery: string;
+            /**
+             * Scanned On
+             * Format: date
+             */
+            scanned_on: string;
+            /** Within Days */
+            within_days: number;
         };
         /**
          * StockAdjustment
@@ -711,6 +1161,424 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such product. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_drafts_drafts_get: {
+        parameters: {
+            query?: {
+                /** @description Filter by status. Omit for all. */
+                status?: components["schemas"]["DraftStatus"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftList"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_draft_drafts__draft_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftRead"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such action draft. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    approve_draft_drafts__draft_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftApproval"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such action draft. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reject_draft_drafts__draft_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such action draft. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_spoilage_report_inventory_spoilage_get: {
+        parameters: {
+            query?: {
+                /** @description Scan horizon in days. Defaults to the discount ladder's reach. */
+                within_days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpoilageReportRead"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    propose_markdown_inventory_spoilage_propose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkdownProposal"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_lots_inventory_products__product_id__lots_get: {
+        parameters: {
+            query?: {
+                /** @description Include lots already consumed to zero. History, not stock. */
+                include_empty?: boolean;
+            };
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotList"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such product. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    receive_lot_inventory_products__product_id__lots_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LotReceive"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LotRead"];
                 };
             };
             /** @description A business rule was broken. */

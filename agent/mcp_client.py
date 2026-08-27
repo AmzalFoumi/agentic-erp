@@ -85,7 +85,50 @@ _ARGS_VALIDATOR = pydantic_core.SchemaValidator(
 # needs: it asks tools/list on every run rather than caching, specifically so a
 # new backend tool appears without a restart here. A new tool appearing
 # automatically is only safe if it is also gated automatically.
-READ_ONLY = frozenset({"list_products", "get_product", "get_product_by_sku"})
+READ_ONLY = frozenset(
+    {
+        "list_products",
+        "get_product",
+        "get_product_by_sku",
+        # Gate 28. Both look and change nothing - a spoilage scan is a
+        # query, and listing lots is a query.
+        "check_spoilage_risk",
+        "list_product_lots",
+        # Moved here from STAGING_ONLY. It only lists drafts - it writes
+        # nothing - and leaving it next to the tools that DO write made the
+        # comment on STAGING_ONLY factually wrong, which matters more than
+        # usual on a set whose whole job is to say what is safe.
+        "list_pending_drafts",
+    }
+)
+
+# Tools that WRITE but change nothing anyone can act on yet. Gate 27.
+#
+# Creating an Action Draft writes a row that sits in a queue until a human
+# opens /approvals and decides. No price moves, no order is placed, no stock
+# changes. The human approval did not disappear - it moved somewhere better,
+# where the whole proposal can be read and edited before it runs, rather than
+# being a yes/no on a chat card.
+#
+# **A separate constant rather than three more entries in READ_ONLY**, because
+# READ_ONLY means what it says and a writing tool listed there would make the
+# name a lie for whoever reads it next.
+#
+# The bar for adding anything here, and it is deliberately high: approving it
+# later must be a real decision a human actually makes, and the row must be
+# inert until they make it. If anything in this set ever becomes load-bearing
+# on its own, it belongs back under approval. See docs/FEATURES-PLAN.md,
+# decision 1.
+STAGING_ONLY = frozenset(
+    {
+        "create_action_draft",
+        # Gate 28. Writes one draft row and moves no price. It clears the
+        # bar in the comment above: approving it later is a real decision a
+        # manager makes on a screen showing every line and both money
+        # figures.
+        "propose_spoilage_markdown",
+    }
+)
 
 
 def tool_kind(name: str) -> Literal["function", "unapproved"]:
@@ -104,8 +147,15 @@ def tool_kind(name: str) -> Literal["function", "unapproved"]:
     A separate function rather than an inline conditional in get_tools() so the
     rule can be tested without a live MCP server, and so tests/ can gate its
     own fake tools through the same function that gates the real ones.
+
+    Gate 27 added STAGING_ONLY alongside READ_ONLY. The **default is unchanged
+    and is the part that matters**: a name in neither set is `unapproved`, so a
+    new backend tool is gated automatically rather than slipping through
+    because nobody remembered to come back here.
     """
-    return "function" if name in READ_ONLY else "unapproved"
+    if name in READ_ONLY or name in STAGING_ONLY:
+        return "function"
+    return "unapproved"
 
 
 def normalise_tool_schema(schema: dict[str, Any]) -> dict[str, Any]:

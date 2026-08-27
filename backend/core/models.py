@@ -20,14 +20,17 @@ nullability is expressed once, in a place your type checker also reads, instead
 of twice in two syntaxes that can disagree.
 """
 
-from datetime import datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import DateTime, Numeric, String, func
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
+from core.enums import DraftStatus
 
 
 class Product(Base):
@@ -179,3 +182,244 @@ class Product(Base):
 
     def __repr__(self) -> str:
         return f"Product(id={self.id!r}, sku={self.sku!r}, name={self.name!r})"
+
+
+class ActionDraft(Base):
+    """A proposed change, waiting for a human to approve it.
+
+    The AI agent does not change prices, raise purchase orders or issue
+    supplier credits. It writes down what it *wants* to do, with its reasoning
+    and the money at stake, and a manager reads it and presses a button. See
+    docs/FEATURES-PLAN.md, decision 1, for why this coexists with gate 19's
+    in-conversation approval rather than replacing it: small single-item writes
+    are confirmed in the chat, multi-item and financial ones come here.
+
+    **`draft_type` is a name from a closed list, never a function.** The
+    registry in `services/draft_types.py` maps it to one Pydantic schema and
+    one hand-written handler. That is the whole security design of this gate.
+    The feature set was specified with the payload carrying "target service
+    function names and arguments"; resolving a function from a string held in a
+    database row means anyone who can write a row can call anything with
+    anything, so a row names a *type* and an unregistered type simply cannot
+    run.
+    """
+
+    __tablename__ = "action_drafts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Not a Postgres ENUM type. A database enum needs a migration to add a
+    # value, and gates 28-30 each add one; a checked string keeps that a
+    # one-line change in Python. Nothing is lost, because the real gate is the
+    # registry lookup, not the column type - an unknown string is refused
+    # before it reaches the database on the way in, and before it reaches a
+    # handler on the way out.
+    draft_type: Mapped[str] = mapped_column(String(64), index=True)
+
+    # Indexed because the approval queue's only query is "show me the pending
+    # ones", and that is the query a human waits on.
+    status: Mapped[str] = mapped_column(
+        String(16), default=DraftStatus.PENDING, index=True
+    )
+
+    # JSONB rather than JSON: Postgres stores it decomposed instead of as text,
+    # so it can be indexed and queried rather than only round-tripped. The
+    # shape is decided per draft_type by that type's schema, deliberately not
+    # by this column - three different proposal shapes share this one table,
+    # which is the point of having a generic staging engine at all.
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+    # The agent's own words, for the human reading the card. `Text` rather than
+    # `String(n)` because a model writing a summary should not hit a length
+    # limit and get silently truncated mid-sentence - and this string is the
+    # only thing the approver has to judge by.
+    reasoning: Mapped[str] = mapped_column(Text)
+
+    # --- the two money figures --------------------------------------------
+    #
+    # Two columns rather than one net figure, on purpose. "We saved 12,000" and
+    # "we were about to lose 40,000 and recovered 12,000" are different
+    # sentences to a manager, and a single number cannot tell them apart.
+    #
+    # Numeric(10, 2) for the reason spelled out on Product.cost_price: money in
+    # a float drifts, and a till that does not balance is the bug you get.
+    # Nullable because not every draft type has a financial dimension, and NULL
+    # says "not applicable" where 0.00 would say "nothing at stake".
+    cost_at_risk: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    projected_recovery: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2), default=None
+    )
+
+    # NULL means "never expires". See DraftStatus for why this is a timestamp
+    # compared on read rather than a status somebody has to write.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+
+    # --- provenance --------------------------------------------------------
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Not nullable, unlike Product.created_by. A product row can predate anyone
+    # knowing who made it; a draft cannot - it is created by exactly one call
+    # that always has an actor, and a proposal with no proposer is not a thing
+    # a human should be asked to approve.
+    created_by: Mapped[str] = mapped_column(String(128))
+    created_via: Mapped[str] = mapped_column(String(16))
+
+    # NULL until somebody decides. `decided_via` records which door the
+    # DECISION came through, which is usually not the door the proposal came
+    # through - the agent proposes over MCP, a human approves in the browser,
+    # and that difference is the entire feature.
+    decided_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    decided_via: Mapped[str | None] = mapped_column(String(16), default=None)
+
+    @property
+    def is_expired(self) -> bool:
+        """True when this draft's deadline has passed.
+
+        A plain `@property`, not a `hybrid_property` like `needs_reorder`
+        above. The difference is deliberate: a hybrid also compiles to SQL, so
+        the database can filter on it, which `needs_reorder` genuinely needs
+        because the product list would otherwise load every row to find the low
+        ones. Expiry does not need that - the pending queue is small by
+        construction, since it is a list of things a human is about to read.
+        Writing this as a hybrid would mean maintaining the rule twice, in
+        Python and in SQL, for no benefit.
+
+        `datetime.now(timezone.utc)` rather than `datetime.now()`: the column
+        is TIMESTAMPTZ, so the value loaded back is timezone-aware, and Python
+        raises TypeError when an aware and a naive datetime are compared. The
+        naive version would pass every test on a UTC machine and fail on this
+        developer's.
+        """
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) >= self.expires_at
+
+    def __repr__(self) -> str:
+        return (
+            f"ActionDraft(id={self.id!r}, type={self.draft_type!r}, "
+            f"status={self.status!r})"
+        )
+
+
+class InventoryLot(Base):
+    """One delivery of one product, with its own expiry date and cost.
+
+    ### Why lots exist, in shop terms
+
+    A product is "Milk 2L". A *lot* is the thirty cartons of Milk 2L that
+    arrived on Tuesday and expire on Friday. The forty that arrive on Thursday
+    are a different lot with a different expiry date, even though they scan as
+    the same product.
+
+    Without this distinction the system can say "we have 70 milk" but cannot
+    answer "how much of it goes off on Friday" - which is the only question
+    that matters for spoilage.
+
+    ### Lots are the source of truth; `Product.quantity_on_hand` is a summary
+
+    A product's stock level is the sum of its lots' quantities. That sum is
+    kept in `Product.quantity_on_hand` because almost every screen wants it and
+    nobody wants to pay for the aggregate each time.
+
+    ⚠️ The summary is maintained in exactly ONE place -
+    `services/lots.py::recalculate_on_hand` - and every operation that touches
+    a lot calls it. Two write paths is how a cached total drifts from the rows
+    it summarises, and a drifted total is invisible until someone counts the
+    shelf by hand.
+    """
+
+    __tablename__ = "inventory_lots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # ON DELETE CASCADE is a statement about ownership: a lot has no meaning
+    # without its product, so if the product row ever goes, its lots go with
+    # it rather than becoming rows pointing at nothing.
+    #
+    # It is currently unreachable - the API deliberately offers no delete for
+    # products (see docs/FRONTEND-PLAN.md's capability inventory) - and it is
+    # declared anyway, because the constraint belongs to the data and not to
+    # whichever door happens to exist today.
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), index=True
+    )
+
+    # The code on the delivery note - "DN-4417", "B2026-0812". Free text: it
+    # comes from whoever supplied the stock and every supplier formats it
+    # differently. Not unique, because two suppliers can and do reuse codes.
+    lot_code: Mapped[str] = mapped_column(String(64))
+
+    # Date, not DateTime. A carton expires on a day, not at 14:32, and storing
+    # a timestamp would invite timezone arithmetic into a question that has
+    # none - "expires 2026-08-29" means the same thing in every timezone.
+    #
+    # Nullable, and this is the interesting part: NULL means "we do not know",
+    # which is the honest state for stock that was already on the shelf before
+    # the shop started tracking expiry. The spoilage scan SKIPS these rather
+    # than guessing, so an unknown expiry can never trigger a markdown.
+    expiry_date: Mapped[date | None] = mapped_column(Date, default=None, index=True)
+
+    quantity: Mapped[int] = mapped_column(default=0)
+
+    # What this particular delivery cost per unit. Deliberately a copy rather
+    # than a lookup to `Product.cost_price`: the price paid in August is a
+    # historical fact, and it must not change retroactively when the supplier
+    # raises their price in September. `cost_at_risk` is only truthful if it
+    # uses what was actually paid for the stock in question.
+    cost_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+
+    # --- provenance --------------------------------------------------------
+    #
+    # Who, through which door, and off the back of which approved draft. These
+    # columns are nearly free to add while writing a table and expensive to
+    # retrofit, which is why they are here before anything reads them. The full
+    # audit ledger is deliberately NOT part of gates 27-30.
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by: Mapped[str] = mapped_column(String(128))
+    updated_by: Mapped[str | None] = mapped_column(String(128), default=None)
+
+    # Which door this lot came through - "web_ui", "mcp_agent", "system".
+    created_via: Mapped[str] = mapped_column(String(16), default="system")
+
+    # The approved ActionDraft this came from, if any. No ForeignKey on
+    # purpose: a draft can be deleted or archived without silently taking a
+    # lot's history with it, and the value is evidence rather than a live link.
+    source_draft_id: Mapped[int | None] = mapped_column(default=None)
+
+    @property
+    def is_expired(self) -> bool:
+        """True once the expiry date has passed. Unknown expiry is never expired.
+
+        A plain property, not a `hybrid_property`, for the same reason as
+        `ActionDraft.is_expired`: nothing filters the database by it. The
+        spoilage scan compares against a date it was *given* so that it can be
+        tested at a fixed point in time, rather than reading the clock in the
+        middle of a query.
+        """
+        if self.expiry_date is None:
+            return False
+        return self.expiry_date < datetime.now(timezone.utc).date()
+
+    def __repr__(self) -> str:
+        return (
+            f"InventoryLot(id={self.id!r}, product_id={self.product_id!r}, "
+            f"lot_code={self.lot_code!r}, expiry={self.expiry_date!r}, "
+            f"qty={self.quantity!r})"
+        )
