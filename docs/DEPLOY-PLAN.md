@@ -4,7 +4,10 @@
 this file is the detail doc for the deployment gate, the way `BACKEND-PLAN.md` is for gates 0–8 and
 `AUTH-PLAN.md` is for gates 22–25.
 
-**Status: in progress on `build/aisle-box`.** Sub-gate table below.
+**Status: in progress on `dev`/`main`, not on a feature branch.** `build/aisle-box` was fully
+merged (PR #35) and is a stale pointer kept only for history; do not check it out. Sub-gate table
+below. `docs/PLAN.md`'s gate-26 row is the root statement of this status — if the two ever
+disagree, that one wins and this line is the one out of date.
 
 **Where this content was before.** Gate 26 was written up inside `AUTH-PLAN.md`, because at the
 time it looked like the last of the login gates. It is not: gates 22–25 are about *who you are*,
@@ -401,3 +404,96 @@ from an assumption.
   cannot be regenerated: lose it and encrypted data is unrecoverable.
 - **Whether the MCP server's protected-resource discovery/metadata ceremony lands here.** It was
   deferred from gate 25 at the developer's explicit request, with questions still open on it.
+
+---
+
+## What a new feature has to update in the box
+
+Added 2026-08-27, before the project went back to feature work on multiple branches. Everything
+below was found by reading `deploy/aisle-box/` against the rest of the tree, not by hitting it in
+production. Each one has the same shape: **the feature works perfectly on the developer's machine
+and is broken or absent in the box**, because the box is a second, hand-maintained copy of the
+configuration. Nothing checks these automatically. This section is the check.
+
+### 1. A new permission is written down in seven places, and drift fails silently
+
+This is the worst of the three, because of *how* it fails. Gate 23 established it and gate 25
+restated it: **asking ThunderID for a permission it has never heard of does not produce an error.**
+It returns a perfectly valid, correctly-audienced token carrying **no `scope` claim at all**. Every
+`actor.can(...)` then returns false, so the symptom is that the whole application answers 403 to a
+signed-in user. It looks like a bug in the authorization code. It is a spelling mismatch in a
+configuration file.
+
+Adding, renaming or removing a permission means changing all of these together:
+
+| # | Where | What |
+|---|---|---|
+| 1 | `backend/services/*.py` | `_require(actor, "...")` — the real source of truth, the only one the business logic reads |
+| 2 | `frontend/.env.example` **and** the developer's own `frontend/.env` | `NEXT_PUBLIC_THUNDERID_SCOPES` |
+| 3 | `deploy/aisle-box/docker-compose.yml` (`web` service, `args:`) | the same string again — a **build** argument, because `NEXT_PUBLIC_*` is compiled into the browser JavaScript, so changing it needs `--build`, not a restart |
+| 4 | `agent/config.py` | the `thunderid_scopes` default |
+| 5 | `agent/.env.example` | the commented `THUNDERID_SCOPES` line |
+| 6 | `deploy/aisle-box/seed-build/aisle-config.yml` | the **resource server** definition *and* the `AIsle Full Access` role — and against **both** resource servers, the API's and the MCP server's, which are separate entries |
+| 7 | The developer's own running ThunderID | the same two changes, made in the Console, or nothing works locally either |
+
+Numbers 6 and 7 are the ones that get forgotten, because the first five are in the source tree
+where a search finds them. Number 6 additionally requires **rebuilding the shipped seed** —
+`prune-config.py`, then `build-seed.py`, then `scan-seed.py` — or the committed `.db` files still
+carry the old permission list regardless of what the YAML says.
+
+⚠️ **The `.db` files are the artefact, not `aisle-config.yml`.** The YAML is an input to a build
+step. Editing it alone changes nothing about what a judge runs.
+
+### 2. The box never runs a database migration
+
+`docker-compose.yml` starts `uvicorn` directly. There is no `alembic upgrade head` anywhere in
+`deploy/`, and that is deliberate — the box points at the **shared hosted Supabase database**, which
+is already migrated, and letting six containers on six judges' machines race to migrate a shared
+database would be worse than not migrating at all.
+
+The consequence for feature work: **a new migration is not applied by anything the judge runs.** If
+a feature adds one, the developer must apply it to Supabase by hand before anyone runs the box, or
+the box starts cleanly and then fails at the first query against the new column.
+
+CI does not cover this either, in the direction that matters. `.github/workflows/ci.yml` runs
+`alembic upgrade head` against a throwaway Postgres, which proves the migration *applies*. It says
+nothing about whether the shared Supabase database has had it applied.
+
+### 3. A new setting has to be added to the compose file by hand
+
+`backend/`, `agent/` and `frontend/` each read settings from their own `.env`, which the box does
+not use — the box declares every value in `docker-compose.yml` instead, per container. A setting
+added to `backend/core/config.py` with a default will therefore take its **default** inside the box,
+silently, while working correctly on the developer's machine where `.env` supplies it.
+
+A new setting needs: the service's own `.env.example`, the matching `environment:` block for **each
+container that needs it** (remember `api` and `mcp` are the same image and need it twice), and — if
+a judge has to supply the value — a line in `deploy/aisle-box/.env.example` and in the `aisle.env`
+handed over with the submission.
+
+⚠️ **A `NEXT_PUBLIC_*` setting is the exception, and it fails silently in the usual way.** It is
+compiled into the browser JavaScript at build time, so it belongs in the `web` service's `args:`
+block, **not** `environment:` — an `environment:` entry for one is accepted, changes nothing, and
+leaves the bundle carrying the old value. Changing it also needs `--build`; a restart will not do
+it. Same rule as row 3 of the permission table above, for the same reason.
+
+Two rules that do not bend:
+
+- **`AUTH_ENABLED` is hard-wired `"true"` in the compose file and must never be read from the
+  judge's `.env`.** One boolean turns identity off across two services at once.
+- **A secret never becomes a `NEXT_PUBLIC_*` variable.** That prefix means "compile this into every
+  visitor's browser".
+
+### A correction to this plan's own account of the seed
+
+The design spec says removing `Test Agent` "also removes a `Product Reader` assignment". In the seed
+as actually built, `Product Reader` is assigned to `__JUDGE_USER_ID__` — because
+`prune-config.py` replaces the developer's user id with the judge placeholder everywhere it appears,
+including inside role assignments, while `strip_references()` only deletes assignments pointing at
+the three dropped documents. So the developer's assignment was redirected, not dropped.
+
+No security consequence today: `Product Reader` in the shipped configuration grants the same six
+permissions as `AIsle Full Access` (against one resource server rather than two), and the judge
+already holds the latter. It is recorded because the claim above is otherwise false, and because
+anyone who later narrows `Product Reader` to genuinely read-only — intending it as a demonstration
+of least privilege — would be quietly handing it to the judge as well.

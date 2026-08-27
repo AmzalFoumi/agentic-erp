@@ -186,6 +186,21 @@ turn, not just during initial build-out:
    API behavior — this project has already been bitten twice by stale assumptions (MCP spec/SDK
    changed the day before Gate 6; several version pins from memory were wrong before being checked).
 
+**Branch flow.** Feature branch → pull request into `dev` → pull request into `main`. This is not
+just habit: `.coderabbit.yaml`'s `base_branches` list has to name every branch that receives pull
+requests, or reviews on those pull requests silently do not happen. A new long-lived integration
+branch means editing that file too. See `docs/CI-PLAN.md` for the rest of what runs on a PR.
+
+**Before a feature is finished, check what it owes the demo box.** `deploy/aisle-box/` is a second,
+hand-maintained copy of the configuration, and nothing verifies it automatically. A new permission
+and a new setting each have to be carried into it by hand, and a new database migration has to be
+applied to the shared Supabase database by hand — the box deliberately runs none. A missed
+permission or setting fails **silently**; a missed migration is the one that does announce itself,
+as a query failing on a column that is not there. The silent pair is the dangerous pair, and a
+permission most of all, because ThunderID answers an unknown one with a valid token carrying no
+permissions rather than an error. The checklist is
+`docs/DEPLOY-PLAN.md`, "What a new feature has to update in the box".
+
 When picking up new work: check `docs/PLAN.md`'s progress table for the current gate, and follow the
 same stop-gate discipline it describes (explain what changed, list files touched and why, hand off
 for a manual commit) unless the user has explicitly asked to move faster. If the work is in
