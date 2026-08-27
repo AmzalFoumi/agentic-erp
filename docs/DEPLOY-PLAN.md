@@ -461,8 +461,15 @@ harmless the moment a feature has a permission that is **deliberately human-only
 **Gate 28 added a second, for a different reason.** `lot.write` books a delivery in, and the
 agent deliberately does not hold it: receiving stock is a physical event a person witnesses, and
 an agent that could invent stock could invent a spoilage problem and then propose the solution
-to it. `lot.read` it does hold. So the running total of permissions the box's seed must
-reproduce is:
+to it. `lot.read` it does hold.
+
+**Gate 29 adds a third human-only permission, for the same shape of reason as `lot.write`.**
+`purchasing.write` places an order and commits the shop's money — placing one is a decision a human
+makes, not something the agent should be able to trigger by proposing and then quietly holding the
+permission to also approve. `purchasing.read` the agent does hold, so it can look at suppliers and
+the reorder report and stage a proposal through `propose_reorder_order`, exactly the same shape as
+`draft.create`/`draft.decide` and `lot.read`/`lot.write` before it. So the running total of
+permissions the box's seed must reproduce is:
 
 | Permission | Human role | Agent role |
 |---|---|---|
@@ -470,6 +477,8 @@ reproduce is:
 | `draft.decide` | yes | **no** |
 | `lot.read` | yes | yes |
 | `lot.write` | yes | **no** |
+| `purchasing.read` | yes | yes |
+| `purchasing.write` | yes | **no** |
 
 
 A permission that must not reach the agent needs the agent moved to its own role first. Putting it
@@ -494,6 +503,13 @@ the box starts cleanly and then fails at the first query against the new column.
 CI does not cover this either, in the direction that matters. `.github/workflows/ci.yml` runs
 `alembic upgrade head` against a throwaway Postgres, which proves the migration *applies*. It says
 nothing about whether the shared Supabase database has had it applied.
+
+**The same is true of `backend/seed/*.sql`, and it is the quieter failure of the two.** A missed
+migration announces itself as a query failing on a column that is not there. A missed seed file does
+not — the box starts cleanly, every endpoint answers, and the feature it is meant to demonstrate
+simply has nothing to show: an empty supplier list, a reorder screen with nothing to bundle. Gate 29
+added `backend/seed/2026-08-27-suppliers.sql`; run it against Supabase by hand the same way as a
+migration, before a judge runs the box, or `/purchasing` is correct and empty.
 
 ### 3. A new setting has to be added to the compose file by hand
 
