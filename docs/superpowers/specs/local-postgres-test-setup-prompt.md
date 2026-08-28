@@ -80,10 +80,12 @@ explains the current design and its rationale. Summary:
    working exactly as today (hitting real Supabase), so nobody's existing
    workflow silently changes.
 
-3. **A one-time migration step against the local DB** — document (in
-   whatever README/doc you add) that `alembic upgrade head` needs to run
-   once against the local Postgres before tests can pass against it, the
-   same as it would against a fresh Supabase project.
+3. **A migration step against the local DB, documented as recurring, not
+   one-time** — because the compose file has no persistent volume (per item 1),
+   `docker compose down` throws away all state, so `alembic upgrade head`
+   needs to run again every time the container is recreated, not just the
+   first time. Document that clearly (in whatever README/doc you add), or
+   have the documented startup command run it automatically each time.
 
 4. **Update `backend/tests/conftest.py`'s docstring** to reflect that the
    "Worth revisiting" gap is now closed, briefly, and point to the new doc.

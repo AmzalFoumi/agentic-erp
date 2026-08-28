@@ -32,9 +32,10 @@ first. This plan implements it task-by-task; where the two disagree, the spec is
 - **No new ThunderID permissions.** Reuse `purchasing.write` (moves order status, creates credit
   memos) and `lot.write` (writes lots) — both already exist as *concepts* in this codebase, even
   though neither is created on the login server yet (that's a separate, already-tracked gap).
-- **Received quantity is capped at ordered.** A receipt where `quantity_received +
-  quantity_damaged` exceeds `quantity_ordered` is rejected outright, not silently truncated.
-  Overshipment is out of scope — see the design spec's "Alternatives considered."
+- **A receipt above ordered is rejected, not capped.** A receipt where `quantity_received +
+  quantity_damaged` exceeds `quantity_ordered` is rejected outright — never silently truncated to
+  the ordered amount. Overshipment is out of scope — see the design spec's "Alternatives
+  considered."
 - **Expiry date is required on both doors, no default.** Never invent one.
 - **`quantity_received` is already the count of good units** — it does NOT include
   `quantity_damaged`. The two are separate counts that both come out of the same
@@ -1362,7 +1363,8 @@ a second style.
 - [ ] **Step 6: Manual browser check** — per this project's standing rule, browser MCP tools may
   only be used after the developer has started both `uvicorn` and `npm run dev` and says continue.
   Ask for that before attempting to view the page. Verify: the form only appears on a `sent`
-  order, submitting it moves the order to `received` or `partially_received`, and a short/damaged
+  order, submitting it moves the order to `received` or `partially_received`, credit memos appear
+  on the order detail page, and a short/damaged
   submission shows a credit memo afterward (once Step 5's gap is resolved either way).
 
 - [ ] **Step 7: Run `tsc`/`eslint`/`next build` from `frontend/` (developer runs these), then commit**
