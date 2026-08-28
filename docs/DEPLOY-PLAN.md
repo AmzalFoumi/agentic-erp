@@ -441,6 +441,51 @@ where a search finds them. Number 6 additionally requires **rebuilding the shipp
 `prune-config.py`, then `build-seed.py`, then `scan-seed.py` — or the committed `.db` files still
 carry the old permission list regardless of what the YAML says.
 
+⚠️ **The seven places are not always filled in identically, and the box's role layout hides that.**
+Found on 2026-08-27 while carrying gate 27's permissions in. `AIsle Full Access` is assigned to
+**both** the judge user *and* the agent:
+
+```yaml
+assignments:
+  - id: __JUDGE_USER_ID__
+    type: user
+  - id: 01a038f2-baa4-7a5a-a21c-b87124977fb8
+    type: agent
+```
+
+So one role serves two very different principals, and every permission added to it is added to
+both. That was harmless while every permission was one the agent legitimately holds. It stops being
+harmless the moment a feature has a permission that is **deliberately human-only** — gate 27's
+`draft.decide` is the first, and gates 29–30 will add more.
+
+**Gate 28 added a second, for a different reason.** `lot.write` books a delivery in, and the
+agent deliberately does not hold it: receiving stock is a physical event a person witnesses, and
+an agent that could invent stock could invent a spoilage problem and then propose the solution
+to it. `lot.read` it does hold.
+
+**Gate 29 adds a third human-only permission, for the same shape of reason as `lot.write`.**
+`purchasing.write` places an order and commits the shop's money — placing one is a decision a human
+makes, not something the agent should be able to trigger by proposing and then quietly holding the
+permission to also approve. `purchasing.read` the agent does hold, so it can look at suppliers and
+the reorder report and stage a proposal through `propose_reorder_order`, exactly the same shape as
+`draft.create`/`draft.decide` and `lot.read`/`lot.write` before it. So the running total of
+permissions the box's seed must reproduce is:
+
+| Permission | Human role | Agent role |
+|---|---|---|
+| `draft.read`, `draft.create` | yes | yes |
+| `draft.decide` | yes | **no** |
+| `lot.read` | yes | yes |
+| `lot.write` | yes | **no** |
+| `purchasing.read` | yes | yes |
+| `purchasing.write` | yes | **no** |
+
+
+A permission that must not reach the agent needs the agent moved to its own role first. Putting it
+in `AIsle Full Access` grants it to the agent, silently, with every test in the repository still
+green — because the tests prove the *code* refuses an actor without the permission, and this hands
+the agent the permission.
+
 ⚠️ **The `.db` files are the artefact, not `aisle-config.yml`.** The YAML is an input to a build
 step. Editing it alone changes nothing about what a judge runs.
 
@@ -458,6 +503,13 @@ the box starts cleanly and then fails at the first query against the new column.
 CI does not cover this either, in the direction that matters. `.github/workflows/ci.yml` runs
 `alembic upgrade head` against a throwaway Postgres, which proves the migration *applies*. It says
 nothing about whether the shared Supabase database has had it applied.
+
+**The same is true of `backend/seed/*.sql`, and it is the quieter failure of the two.** A missed
+migration announces itself as a query failing on a column that is not there. A missed seed file does
+not — the box starts cleanly, every endpoint answers, and the feature it is meant to demonstrate
+simply has nothing to show: an empty supplier list, a reorder screen with nothing to bundle. Gate 29
+added `backend/seed/2026-08-27-suppliers.sql`; run it against Supabase by hand the same way as a
+migration, before a judge runs the box, or `/purchasing` is correct and empty.
 
 ### 3. A new setting has to be added to the compose file by hand
 

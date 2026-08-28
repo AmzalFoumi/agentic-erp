@@ -34,11 +34,11 @@ string it arrives intact, and the frontend formats it or parses it with a
 decimal library. Do not "fix" this by casting to float.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # --------------------------------------------------------------------------
 # Input
@@ -193,6 +193,75 @@ class ProductList(BaseModel):
     )
 
 
+
+# --------------------------------------------------------------------------
+# Action drafts (gate 27)
+# --------------------------------------------------------------------------
+
+
+class DraftRead(BaseModel):
+    """What every draft endpoint returns.
+
+    `cost_at_risk` and `projected_recovery` are `Decimal`, which Pydantic
+    serialises to a JSON **string** - the same decision ProductRead makes for
+    prices, and for the same reason set out at the top of this file.
+
+    `payload` is typed `dict` and not something stricter, deliberately. Three
+    different proposal shapes share the draft table, and which one applies is
+    decided by `draft_type` through the registry in services/draft_types.py.
+    Declaring a union here would mean restating every payload schema in the
+    API layer and keeping the two in step forever - the drift this project
+    avoids everywhere else. The frontend narrows on `draft_type`, exactly as
+    the backend does.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    draft_type: str
+    status: str
+    payload: dict
+    reasoning: str = Field(
+        description="The proposer's own explanation, for the human deciding."
+    )
+    cost_at_risk: Decimal | None
+    projected_recovery: Decimal | None
+    expires_at: datetime | None
+    is_expired: bool = Field(
+        description="True when expires_at has passed. Computed, never stored."
+    )
+    created_at: datetime
+    created_by: str
+    created_via: str = Field(description="Which door proposed this: web_ui or mcp_agent.")
+    decided_by: str | None
+    decided_at: datetime | None
+    decided_via: str | None
+
+
+class DraftList(BaseModel):
+    """A page of drafts plus the size of the whole match. Mirrors ProductList."""
+
+    items: list[DraftRead]
+    total: int = Field(
+        description="Total matching the status filter, ignoring limit/offset.",
+    )
+
+
+class DraftApproval(BaseModel):
+    """The body of POST /drafts/{id}/approve.
+
+    `payload` is optional and replaces the stored one when present - the inline
+    adjuster, for a manager who agrees with the proposal but wants 30% rather
+    than 50%. Absent means "approve exactly what was proposed".
+
+    Whatever arrives here is re-validated against the draft type's own schema
+    before anything runs. This model deliberately does not attempt that itself:
+    it cannot, because the right schema depends on the draft's type, which is
+    in the database and not in this request.
+    """
+
+    payload: dict | None = None
+
 # Every value the `error` field can take. Written out as a Literal rather than
 # `str` so the generated TypeScript is a union type and a `switch` over it can
 # be checked for exhaustiveness by the compiler - the frontend then cannot
@@ -238,3 +307,381 @@ class ErrorResponse(BaseModel):
         default=None,
         description="Field name -> message. Present on 422 only.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Inventory lots and spoilage - gate 28
+# ---------------------------------------------------------------------------
+
+
+class LotRead(BaseModel):
+    """One delivery of one product.
+
+    `expiry_date` is `date | None`, and the None is meaningful rather than
+    missing data: it means "we do not know when this goes off", which is the
+    honest state for stock that predates expiry tracking. The spoilage scan
+    skips those lots, so a client showing "-" here is showing the truth.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    product_id: int
+    lot_code: str
+    expiry_date: date | None
+    quantity: int
+    cost_price: Decimal
+
+    # Computed on the model, not stored. Included so a client never has to do
+    # date arithmetic against its own clock - which would disagree with the
+    # server's for anyone in another timezone.
+    is_expired: bool
+
+    created_at: datetime
+    created_by: str
+    created_via: str
+    source_draft_id: int | None
+
+
+class LotList(BaseModel):
+    """A product's lots. No pagination: a product has a handful, not thousands."""
+
+    items: list[LotRead]
+    total: int
+
+
+class LotReceive(BaseModel):
+    """Book a delivery in.
+
+    `cost_price` is optional because the person receiving a delivery often does
+    not have the invoice yet. Omitted, the service copies the product's current
+    cost price - see `services/lots.receive_lot`, which then freezes it on the
+    lot so a later price rise cannot rewrite history.
+    """
+
+    lot_code: str = Field(..., min_length=1, max_length=64)
+    quantity: int = Field(..., gt=0)
+    expiry_date: date | None = Field(default=None)
+    cost_price: Decimal | None = Field(
+        default=None, ge=0, max_digits=10, decimal_places=2
+    )
+
+
+class SpoilageItemRead(BaseModel):
+    """One at-risk lot, with the markdown that would apply to it.
+
+    Built from a frozen dataclass rather than an ORM row - nothing here is
+    stored, it is computed on demand. `from_attributes=True` reads a dataclass
+    just as happily as a SQLAlchemy model.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    lot_id: int
+    product_id: int
+    sku: str
+    product_name: str
+    lot_code: str
+    expiry_date: date
+    days_remaining: int
+    quantity: int
+
+    current_price: Decimal
+    proposed_price: Decimal
+    discount_percent: int
+    tier_label: str
+
+    cost_at_risk: Decimal
+    projected_recovery: Decimal
+
+
+class SpoilageReportRead(BaseModel):
+    """The whole scan.
+
+    ⚠️ Two money totals, deliberately never netted into one. `total_cost_at_risk`
+    is money already spent; `total_projected_recovery` is a forecast that
+    depends on shoppers actually buying. A single "you save X" figure would
+    present a guess with the confidence of a fact, so the API does not offer
+    one and no client should compute it.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    items: list[SpoilageItemRead]
+    total_cost_at_risk: Decimal
+    total_projected_recovery: Decimal
+    scanned_on: date
+    within_days: int
+
+
+class MarkdownProposal(BaseModel):
+    """Ask the server to stage a markdown draft for the current spoilage.
+
+    Deliberately tiny. The client does NOT send prices or lot ids - it says
+    "propose something for stock expiring within N days" and the server scans,
+    prices and stages. A client that sent the lines would be doing business
+    logic, and two clients would eventually disagree about the discount.
+    """
+
+    within_days: int | None = Field(
+        default=None,
+        ge=0,
+        le=30,
+        description="Horizon to scan. Defaults to the discount ladder's own reach.",
+    )
+    reasoning: str | None = Field(default=None, max_length=2000)
+
+
+# --- purchasing (gate 29) ---------------------------------------------------
+
+
+class SupplierRead(BaseModel):
+    """One supplier."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    contact_email: str | None
+    contact_phone: str | None
+    lead_time_days: int
+    minimum_order_value: Decimal
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class SupplierList(BaseModel):
+    items: list[SupplierRead]
+    total: int
+
+
+class SupplierCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    contact_email: str | None = Field(default=None, max_length=255)
+    contact_phone: str | None = Field(default=None, max_length=50)
+    lead_time_days: int = Field(default=0, ge=0, le=365)
+    minimum_order_value: Decimal = Field(
+        default=Decimal("0.00"), ge=0, max_digits=12, decimal_places=2
+    )
+
+
+def _reject_explicit_nulls(data: object, fields: tuple[str, ...]) -> object:
+    """Refuse `{"field": null}` for fields the column cannot hold null in.
+
+    `exclude_unset=True` makes an *omitted* field mean 'leave it alone', but it
+    cannot tell that apart from a field explicitly sent as null - both patch
+    schemas below would otherwise forward `None` into a non-nullable column,
+    or into a `.strip()` that has nothing to strip. Only the contact fields
+    are genuinely clearable, so only they keep null.
+    """
+    if isinstance(data, dict):
+        for field in fields:
+            if field in data and data[field] is None:
+                raise ValueError(f"{field} cannot be null. Omit it to leave it alone.")
+    return data
+
+
+class SupplierUpdate(BaseModel):
+    """Every field optional. Omitted means 'leave it alone'.
+
+    The route turns absence into the service's `_UNSET` sentinel using
+    `model_dump(exclude_unset=True)`, so 'clear the email' and 'do not touch
+    the email' stay different requests.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_nulls(cls, data: object) -> object:
+        return _reject_explicit_nulls(
+            data, ("name", "lead_time_days", "minimum_order_value", "is_active")
+        )
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    contact_email: str | None = Field(default=None, max_length=255)
+    contact_phone: str | None = Field(default=None, max_length=50)
+    lead_time_days: int | None = Field(default=None, ge=0, le=365)
+    minimum_order_value: Decimal | None = Field(
+        default=None, ge=0, max_digits=12, decimal_places=2
+    )
+    is_active: bool | None = None
+
+
+class SupplierProductRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    supplier_id: int
+    product_id: int
+    unit_cost: Decimal
+    pack_size: int
+    is_preferred: bool
+
+
+class SupplierProductList(BaseModel):
+    items: list[SupplierProductRead]
+    total: int
+
+
+class SupplierProductCreate(BaseModel):
+    product_id: int
+    unit_cost: Decimal = Field(..., ge=0, max_digits=10, decimal_places=2)
+    pack_size: int = Field(default=1, ge=1)
+    is_preferred: bool = False
+
+
+class SupplierProductUpdate(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def _no_nulls(cls, data: object) -> object:
+        return _reject_explicit_nulls(data, ("unit_cost", "pack_size", "is_preferred"))
+
+    unit_cost: Decimal | None = Field(
+        default=None, ge=0, max_digits=10, decimal_places=2
+    )
+    pack_size: int | None = Field(default=None, ge=1)
+    is_preferred: bool | None = None
+
+
+class ReorderLineRead(BaseModel):
+    """One product on a proposed order.
+
+    `is_top_up` is False for 'this is low and we are replacing it' and True for
+    'this is not low yet, and it is here to reach the supplier's minimum'. The
+    screen labels them differently; a manager is entitled to know which is
+    which.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    product_id: int
+    sku: str
+    name: str
+    quantity_on_hand: int
+    reorder_level: int
+    quantity: int
+    unit_cost: Decimal
+    pack_size: int
+    line_total: Decimal
+    is_top_up: bool
+
+
+class ReorderBundleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    supplier_id: int
+    supplier_name: str
+    lead_time_days: int
+    minimum_order_value: Decimal
+    bundle_value: Decimal
+    below_minimum: bool
+    shortfall: Decimal
+    lines: list[ReorderLineRead]
+
+
+class UnsourcedProductRead(BaseModel):
+    product_id: int
+    sku: str
+    name: str
+    quantity_on_hand: int
+    reorder_level: int
+
+
+class ReorderReportRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    bundles: list[ReorderBundleRead]
+    unsourced: list[UnsourcedProductRead]
+    total_value: Decimal
+
+
+class ReorderProposal(BaseModel):
+    """Stage one supplier's bundle as an Action Draft."""
+
+    supplier_id: int
+    reasoning: str | None = Field(default=None, max_length=2000)
+
+
+class PurchaseOrderLineRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    product_id: int
+    quantity_ordered: int
+    unit_cost: Decimal
+    line_total: Decimal
+    quantity_received: int
+    quantity_damaged: int
+
+
+class CreditMemoRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    supplier_id: int
+    purchase_order_id: int
+    reason: str
+    amount: Decimal
+    status: str
+    created_at: datetime
+
+
+class PurchaseOrderRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    supplier_id: int
+    status: str
+    expected_date: date | None
+    total_value: Decimal
+    notes: str | None
+    source_draft_id: int | None
+    created_at: datetime
+    created_by: str | None
+    lines: list[PurchaseOrderLineRead]
+    credit_memos: list[CreditMemoRead] = []
+
+
+class PurchaseOrderList(BaseModel):
+    items: list[PurchaseOrderRead]
+    total: int
+    limit: int
+    offset: int
+
+
+class PurchaseOrderLineCreate(BaseModel):
+    product_id: int
+    quantity: int = Field(..., gt=0)
+    unit_cost: Decimal = Field(..., ge=0, max_digits=10, decimal_places=2)
+
+
+class PurchaseOrderCreate(BaseModel):
+    supplier_id: int
+    lines: list[PurchaseOrderLineCreate] = Field(..., min_length=1)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class ReceiptLineCreate(BaseModel):
+    """What arrived for one line on a purchase order.
+
+    `quantity_received` is the count of GOOD units only - it does not
+    include `quantity_damaged`. The two are separate counts that both come
+    out of the same `quantity_ordered`; their sum must not exceed it.
+    """
+
+    product_id: int
+    quantity_received: int = Field(..., ge=0)
+    quantity_damaged: int = Field(..., ge=0)
+    expiry_date: date
+    lot_code: str = Field(..., min_length=1, max_length=64)
+
+
+class PurchaseOrderReceive(BaseModel):
+    lines: list[ReceiptLineCreate] = Field(..., min_length=1)
+
+
+class ReceiptDraftCreate(BaseModel):
+    lines: list[ReceiptLineCreate] = Field(..., min_length=1)
+    reasoning: str = Field(..., min_length=1, max_length=2000)
+
+

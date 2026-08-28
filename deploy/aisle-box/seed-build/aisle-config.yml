@@ -42,6 +42,23 @@ type: API
 ouId: 01900000-0000-7000-8000-000000000001
 delimiter: "."
 resources:
+  - name: Purchasing
+    handle: purchasing
+    actions:
+      - name: Read
+        handle: read
+  - name: Lot
+    handle: lot
+    actions:
+      - name: Read
+        handle: read
+  - name: Draft
+    handle: draft
+    actions:
+      - name: Create
+        handle: create
+      - name: Read
+        handle: read
   - name: Stock
     handle: stock
     actions:
@@ -67,6 +84,32 @@ type: API
 ouId: 01900000-0000-7000-8000-000000000001
 delimiter: "."
 resources:
+  - name: Purchasing
+    handle: purchasing
+    actions:
+      - name: Write
+        handle: write
+      - name: Read
+        handle: read
+  - name: Lot
+    handle: lot
+    actions:
+      - name: Write
+        handle: write
+      - name: Read
+        handle: read
+  - name: Draft
+    handle: draft
+    description: 'Action drafts: changes proposed by the AI agent, awaiting human approval.'
+    actions:
+      - name: Decide
+        handle: decide
+      - name: Create
+        handle: create
+        description: Stage a proposal. Held by the AI agent; changes nothing until a human approves.
+      - name: Read
+        handle: read
+        description: See the approval queue and individual proposals.
   - name: Stock
     handle: stock
     actions:
@@ -182,7 +225,6 @@ inboundAuthConfig:
           - name
           - ouId
       scopeClaims:
-        phone:
         profile:
           - name
           - given_name
@@ -194,6 +236,7 @@ inboundAuthConfig:
           - groups
         ou:
           - ouId
+        phone:
 
 ---
 # File: AIsle_Web.yaml
@@ -285,6 +328,9 @@ inboundAuthConfig:
           - picture
           - roles
       scopeClaims:
+        address:
+        email:
+          - email
         phone:
         profile:
           - name
@@ -293,9 +339,6 @@ inboundAuthConfig:
           - picture
         roles:
           - roles
-        address:
-        email:
-          - email
 
 ---
 # File: AIsle_Agent.yaml
@@ -307,9 +350,9 @@ name: AIsle Agent
 logoUrl: avatar:shape=circle,variant=anonymous_entity,content=bot_head,colors=0
 owner: __JUDGE_USER_ID__
 attributes:
-  modelProvider: "gemini"
   function: "assistant"
   model: "gemini-3.5-flash-lite"
+  modelProvider: "gemini"
 authFlowId: 01900000-0000-7000-8000-000000000061
 isRegistrationFlowEnabled: false
 isRecoveryFlowEnabled: false
@@ -364,6 +407,8 @@ inboundAuthConfig:
           - picture
           - roles
       scopeClaims:
+        roles:
+          - roles
         address:
         email:
           - email
@@ -373,8 +418,6 @@ inboundAuthConfig:
           - family_name
           - given_name
           - picture
-        roles:
-          - roles
 
 ---
 # File: AIsle_Gate_Sign-in_Flow.yaml
@@ -1909,309 +1952,309 @@ isReadOnly: false
 resource_type: translation
 language: en-US
 translations:
-  invite:
-    errors.failed.description: An error occurred. Please try again.
-    errors.invalid.title: Unable to verify invite
-    errors.failed.title: Error
-    complete.description.withApp: Your account has been successfully set up for {{appName}}. You can now sign in.
-    validating: Validating your invite link...
-    complete.backToApp: Back to Application
-    complete.description: Your account has been successfully set up. You can now sign in.
-    errors.invalid.description: This invite link is invalid or has expired.
-    signIn: Sign In
-    complete.backToApp.withApp: Back to {{appName}}
-    complete.title: Welcome Aboard!
-    goToSignIn: Go to Sign In
-  signout:
-    forms.confirm.description: You are about to sign out of your account. Do you want to continue?
-    errors.failed.description: Something went wrong. Please try again.
-    forms.confirm.actions.submit.label: Sign out
-    forms.confirm.title: Sign out?
   elements:
     fields.usertype.placeholder: Select User Type
     fields.usertype.label: User Type
   custom:
-  recovery:
-    forms.username.actions.submit.label: Submit
-    forms.email_sent.title: Check Your Email
-    forms.new_password.title: Reset Password
-    forms.otp_sent.message: We sent you a verification code via SMS. Please check your messages and enter the code to continue.
-    forms.new_password.subtitle: Enter a new password for your account
-    forms.email.fields.email.placeholder: Enter your email
-    forms.username.subtitle: Enter your username to start the password recovery
-    forms.complete.title: Password Reset Successful
-    forms.new_password.fields.password.placeholder: Enter your new password
-    forms.username.title: Password Recovery
-    forms.username.links.sign_in.label: Sign in
-    forms.email_sent.message: We sent you a password reset link. Please check your inbox and click the link to reset your password.
-    forms.otp_sent.fields.otp.placeholder: Enter code
-    forms.email.actions.next.label: Next
-    forms.email.fields.email.label: Email
-    forms.otp_sent.actions.verify.label: Verify
-    forms.complete.message: Your password has been successfully reset. You can now sign in with your new password.
-    forms.username.fields.username.placeholder: Enter your username
-    forms.new_password.actions.submit.label: Reset Password
-    forms.otp_sent.fields.otp.label: Verification Code
-    forms.username.links.sign_in.prefix: Remember your password?
-    forms.otp_sent.title: OTP Sent to your mobile
-    forms.new_password.fields.password.label: New Password
-    forms.username.fields.username.label: Username
   signup:
-    forms.registration.actions.submit.label: Sign Up
-    forms.credentials.fields.email.label: Email
-    forms.registration.fields.password.placeholder: Enter your password
-    forms.user_info.fields.first_name.label: First Name
-    forms.passkey.add.actions.add.label: Add Passkey
-    forms.collect_user_info.fields.password.placeholder: Enter your password
-    forms.credentials.fields.user_type.label: User Type
-    forms.phone.fields.phone.label: Mobile Number
-    forms.registration.title: Sign Up
-    forms.otp.fields.otp.label: Verification Code
-    forms.registration.fields.username.label: Username
-    forms.user_type.fields.user_type.label: User Type
-    forms.user_details.fields.first_name.label: First Name
-    forms.collect_user_info.fields.username.placeholder: Enter your username
-    forms.credentials.fields.last_name.placeholder: Enter your last name
-    forms.choose_registration_method.actions.continue.label: Continue
-    forms.email.title: Sign Up
-    forms.credentials.fields.first_name.placeholder: Enter your first name
-    forms.basic_user_info.actions.continue.label: Continue
-    forms.basic_user_info.fields.email.label: Email
-    forms.otp.title: Verify Your Phone
-    forms.credentials.complete_profile: Complete your profile
-    forms.user_info.fields.email_address.placeholder: Enter your email address
     forms.collect_passkey_user_info.description: Sign up with a passkey for secure access without a password
-    forms.registration.fields.first_name.label: First Name
-    forms.user_info.title: Sign Up
-    forms.credentials.fields.username.label: Username
-    forms.user_details.fields.username.placeholder: Enter your username
-    forms.registration.fields.email_address.placeholder: Enter your email address
-    forms.choose_registration_method.divider.or: OR
-    forms.credentials.fields.last_name.label: Last Name
-    forms.collect_user_info.fields.email.label: Email
-    forms.credentials.fields.email_address.label: Email Address
-    forms.email.fields.email.label: Email
-    forms.collect_passkey_user_info.fields.email.label: Email
-    forms.user_details.actions.next.label: Next
-    forms.credentials.title: Sign Up
-    forms.credentials.fields.email.placeholder: Enter your email
-    forms.choose_registration_method.fields.password.label: Password
-    forms.user_info.fields.last_name.placeholder: Enter your last name
-    forms.collect_passkey_user_info.fields.username.placeholder: Enter your username
-    forms.credential.fields.password.label: Password
-    forms.basic_user_info.fields.first_name.label: First Name
-    forms.otp.description: Enter the verification code sent to your phone
-    forms.user_details.fields.last_name.placeholder: Enter your last name
-    forms.phone.fields.phone.placeholder: Enter your mobile number
-    forms.registration.fields.email_address.label: Email Address
-    forms.phone.title: Sign Up
-    forms.collect_user_info.fields.email.placeholder: Enter your email
-    forms.choose_registration_method.fields.username.label: Username
-    forms.passkey.add.title: Add a Passkey
     forms.user_details.title: Sign Up
-    forms.otp.actions.submit.label: Verify
-    forms.magic_link.email_sent.title: Check Your Email
-    forms.collect_user_info.fields.username.label: Username
-    forms.email.actions.next.label: Next
-    forms.basic_user_info.fields.last_name.placeholder: Enter your last name
-    forms.basic_user_info.title: Sign Up
-    forms.passkey.add.actions.skip.label: Skip for now
-    forms.phone.actions.next.label: Next
-    forms.credentials.fields.username.placeholder: Enter your username
-    forms.choose_registration_method.fields.username.placeholder: Enter your username
-    forms.credentials.fields.first_name.label: First Name
-    forms.credential.actions.submit.label: Sign Up
-    forms.collect_passkey_user_info.actions.continue.label: Continue
-    forms.user_details.fields.username.label: Username
-    forms.email.fields.email.placeholder: Enter your email
-    forms.email_sent.message: We sent you a verification link. Please check your inbox and click the link to continue.
-    forms.email_otp.description: Enter the verification code sent to your email
-    forms.credentials.actions.submit.label: Sign Up
-    forms.collect_user_info.title: Sign Up
-    forms.user_info.actions.continue.label: Continue
-    forms.collect_user_info.fields.password.label: Password
-    forms.choose_registration_method.fields.password.placeholder: Enter your password
+    forms.collect_passkey_user_info.fields.username.placeholder: Enter your username
     forms.user_details.fields.last_name.label: Last Name
-    forms.passkey.actions.continue.label: Continue
-    forms.sms_sent.message: We sent you a verification link via SMS. Please check your messages and click the link to continue.
-    forms.user_type.actions.continue.label: Continue
-    forms.registration.fields.password.label: Password
+    forms.credentials.fields.email_address.label: Email Address
+    forms.basic_user_info.complete_profile: Complete your profile
+    forms.choose_registration_method.fields.username.label: Username
     forms.credential.title: Create Password
-    forms.credentials.links.sign_in.label: Sign in
+    forms.registration.fields.password.placeholder: Enter your password
+    forms.email.title: Sign Up
+    forms.credentials.title: Sign Up
+    forms.basic_user_info.fields.last_name.label: Last Name
+    forms.basic_user_info.fields.email.placeholder: Enter your email
+    forms.collect_passkey_user_info.fields.email.label: Email
+    forms.choose_registration_method.fields.password.placeholder: Enter your password
+    forms.credentials.fields.last_name.placeholder: Enter your last name
+    forms.credentials.fields.username.placeholder: Enter your username
+    forms.choose_registration_method.fields.password.label: Password
+    forms.otp.actions.submit.label: Verify
+    forms.registration.fields.email_address.label: Email Address
+    forms.credentials.fields.password.placeholder: Enter your password
+    forms.credentials.actions.submit.label: Sign Up
+    forms.registration.fields.last_name.placeholder: Enter your last name
+    forms.sms_sent.title: Check Your Phone
+    forms.credentials.divider.or: OR
+    forms.otp.description: Enter the verification code sent to your phone
+    forms.basic_user_info.fields.first_name.placeholder: Enter your first name
+    forms.registration.fields.first_name.placeholder: Enter your first name
+    forms.otp.fields.otp.label: Verification Code
+    images.app_logo.alt: Application logo
+    forms.email.description: Enter your email address to receive a verification code
+    forms.magic_link.email_sent.title: Check Your Email
+    forms.passkey.add.title: Add a Passkey
+    forms.credentials.actions.continue.label: Continue
+    forms.user_info.fields.first_name.placeholder: Enter your first name
+    forms.email_otp.description: Enter the verification code sent to your email
+    forms.passkey.actions.submit.label: Sign up with Passkey
+    forms.email.actions.next.label: Next
+    forms.choose_registration_method.title: Sign Up
     forms.registration.fields.last_name.label: Last Name
-    forms.email_otp.title: Verify Your Email
-    forms.collect_passkey_user_info.fields.email.placeholder: Enter your email
+    forms.registration.fields.username.placeholder: Enter your username
+    forms.collect_user_info.actions.submit.label: Sign Up
+    forms.user_details.fields.last_name.placeholder: Enter your last name
+    forms.user_details.actions.next.label: Next
+    forms.passkey.add.description: Would you like to add a passkey to your account for faster and more secure sign-ins?
+    forms.registration.fields.password.label: Password
+    forms.passkey.add.actions.skip.label: Skip for now
+    forms.collect_user_info.title: Sign Up
+    forms.basic_user_info.fields.email.label: Email
+    forms.collect_user_info.fields.username.placeholder: Enter your username
+    forms.credentials.fields.email.placeholder: Enter your email
+    forms.user_info.fields.email_address.placeholder: Enter your email address
+    forms.credentials.fields.password.label: Password
+    forms.email_sent.message: We sent you a verification link. Please check your inbox and click the link to continue.
+    forms.user_info.fields.email_address.label: Email Address
+    forms.collect_user_info.fields.email.label: Email
+    forms.choose_registration_method.divider.or: OR
+    forms.otp.fields.otp.placeholder: Enter code
+    forms.user_details.fields.first_name.label: First Name
+    forms.basic_user_info.title: Sign Up
     forms.user_details.fields.first_name.placeholder: Enter your first name
     forms.choose_registration_method.description: Choose your preferred registration method
-    forms.credentials.actions.continue.label: Continue
-    forms.user_type.title: Sign Up
-    forms.basic_user_info.complete_profile: Complete your profile
-    forms.passkey.add.description: Would you like to add a passkey to your account for faster and more secure sign-ins?
-    forms.basic_user_info.fields.last_name.label: Last Name
-    forms.registration.fields.username.placeholder: Enter your username
-    forms.credentials.divider.or: OR
-    forms.user_info.fields.first_name.placeholder: Enter your first name
-    forms.credentials.fields.user_type.placeholder: Select your user type
-    forms.registration.fields.first_name.placeholder: Enter your first name
-    forms.credentials.links.sign_in.prefix: Already have an account?
-    forms.choose_registration_method.title: Sign Up
-    forms.credentials.description: Choose your preferred registration method
-    forms.credential.fields.password.placeholder: Enter your password
-    forms.credentials.fields.password.placeholder: Enter your password
-    forms.user_type.fields.user_type.placeholder: Select your user type
-    forms.user_info.actions.submit.label: Sign Up
-    forms.passkey.description: Sign up with a passkey for secure access without a password
-    forms.passkey.actions.submit.label: Sign up with Passkey
-    forms.email.description: Enter your email address to receive a verification code
-    forms.credentials.fields.password.label: Password
-    forms.basic_user_info.fields.email.placeholder: Enter your email
-    forms.choose_registration_method.actions.passkey.label: Sign up with Passkey
-    forms.collect_passkey_user_info.fields.username.label: Username
-    images.app_logo.alt: Application logo
-    forms.magic_link.email_sent.description: We sent you a verification link. Please check your inbox and click the link to continue.
-    forms.passkey.title: Sign Up
-    forms.user_info.fields.last_name.label: Last Name
-    forms.collect_passkey_user_info.title: Sign Up
-    forms.credentials.fields.email_address.placeholder: Enter your email address
-    forms.basic_user_info.fields.first_name.placeholder: Enter your first name
-    forms.user_info.fields.email_address.label: Email Address
-    forms.registration.fields.last_name.placeholder: Enter your last name
-    forms.collect_user_info.actions.submit.label: Sign Up
-    forms.sms_sent.title: Check Your Phone
-    forms.email_sent.title: Check Your Email
-    forms.otp.fields.otp.placeholder: Enter code
-  signin:
-    forms.choose_auth_method.fields.username.label: Username
-    forms.passkey_identifier.fields.username.placeholder: Enter your username
-    forms.phone.fields.phone.placeholder: Enter your mobile number
+    forms.credentials.links.sign_in.label: Sign in
+    forms.collect_passkey_user_info.actions.continue.label: Continue
+    forms.user_type.fields.user_type.label: User Type
     forms.email_otp.title: Verify Your Email
-    forms.ciba.success.message: You have successfully authenticated. You may close this window.
-    forms.passkey_identifier.actions.continue.label: Continue
-    forms.ciba.notification_sent.message: A notification has been sent. Follow the link in the notification to continue.
-    forms.otp.actions.submit.label: Verify
-    forms.ciba.notification_error.message: The authentication notification could not be delivered. Please try again or contact support.
-    forms.ciba.credentials.actions.approve.label: Approve
-    forms.choose_auth_method.fields.password.placeholder: Enter your password
-    forms.credentials.links.sign_up.label: Sign up
-    forms.phone.title: Sign In with SMS
-    forms.passkey.description: Use your passkey to securely sign in to your account without a password.
-    forms.choose_auth_method.actions.passkey.label: Sign in with Passkey
-    forms.choose_auth_method.fields.username.placeholder: Enter your username
-    forms.email.actions.submit.label: Continue
-    forms.magic_link.email_sent.title: Check Your Email
-    forms.credentials.fields.username.placeholder: Enter your username
-    forms.credentials.fields.password.label: Password
-    forms.magic_link.fields.email.label: Email Address
-    forms.magic_link.fields.email.placeholder: Enter your email address
-    forms.passkey_identifier.title: Sign in with Passkey
-    forms.passkey_identifier.fields.username.label: Username
-    forms.passkey.register.actions.submit.label: Register Passkey
-    forms.ciba.consent.message: By clicking Approve, you confirm that you initiated this request and consent to the action being performed.
-    forms.email.fields.email.placeholder: Enter your email address
-    forms.password_for_registration.fields.password.label: Password
-    forms.ciba.credentials.message: Enter your credentials to approve the authentication request.
-    forms.choose_auth_method.actions.submit.label: Sign In
-    forms.choose_auth_method.title: Sign In
-    forms.magic_link.actions.submit.label: Send Magic Link
-    forms.ciba.consent.actions.approve.label: Approve
-    forms.ciba.notification_error.heading: Notification Failed
-    forms.phone.actions.submit.label: Continue
-    forms.magic_link.title: Sign In with Magic Link
-    forms.passkey.actions.submit.label: Sign in with Passkey
-    forms.passkey.register.description: No passkey found for your account. Enter your password to register a new passkey.
+    forms.credentials.fields.first_name.label: First Name
+    forms.credentials.fields.username.label: Username
+    forms.credential.fields.password.label: Password
+    forms.magic_link.email_sent.description: We sent you a verification link. Please check your inbox and click the link to continue.
+    forms.user_info.actions.continue.label: Continue
+    forms.passkey.description: Sign up with a passkey for secure access without a password
+    forms.collect_user_info.fields.username.label: Username
+    forms.user_type.fields.user_type.placeholder: Select your user type
+    forms.registration.fields.first_name.label: First Name
+    forms.credentials.complete_profile: Complete your profile
+    forms.credentials.fields.user_type.label: User Type
+    forms.choose_registration_method.actions.passkey.label: Sign up with Passkey
+    forms.collect_user_info.fields.password.label: Password
+    forms.credential.actions.submit.label: Sign Up
+    forms.user_info.fields.last_name.label: Last Name
+    forms.credentials.description: Choose your preferred registration method
+    forms.credentials.fields.first_name.placeholder: Enter your first name
+    forms.user_type.title: Sign Up
+    forms.phone.fields.phone.placeholder: Enter your mobile number
     forms.phone.fields.phone.label: Mobile Number
-    forms.choose_auth_method.fields.password.label: Password
-    forms.passkey.title: Sign in with Passkey
-    forms.passkey.register.title: Register Passkey
-    forms.credentials.title: Sign In
-    forms.password_for_registration.description: No passkey found for your account. Enter your password to register a new passkey.
-    forms.schema_attrs.actions.continue.label: Continue
-    forms.otp.title: Verify Your Identity
-    forms.otp.fields.otp.placeholder: Enter code
-    forms.ciba.notification_sent.heading: Authentication Request Sent
-    forms.schema_attrs.title: Tell us about you
-    forms.otp.fields.otp.label: Verification Code
-    forms.ciba.success.heading: Authentication Successful
-    forms.email.title: Sign In with Email
-    forms.passkey.actions.continue.label: Continue
-    forms.otp.description: Enter the verification code sent to your phone
+    forms.collect_passkey_user_info.fields.email.placeholder: Enter your email
+    forms.credential.fields.password.placeholder: Enter your password
+    forms.phone.title: Sign Up
+    forms.registration.fields.email_address.placeholder: Enter your email address
+    forms.collect_passkey_user_info.fields.username.label: Username
+    forms.user_type.actions.continue.label: Continue
+    forms.collect_passkey_user_info.title: Sign Up
+    forms.registration.actions.submit.label: Sign Up
+    forms.credentials.fields.user_type.placeholder: Select your user type
+    forms.phone.actions.next.label: Next
+    forms.user_info.title: Sign Up
+    forms.collect_user_info.fields.email.placeholder: Enter your email
+    forms.basic_user_info.fields.last_name.placeholder: Enter your last name
+    forms.collect_user_info.fields.password.placeholder: Enter your password
+    forms.user_details.fields.username.label: Username
+    forms.user_info.fields.last_name.placeholder: Enter your last name
+    forms.registration.title: Sign Up
+    forms.choose_registration_method.fields.username.placeholder: Enter your username
+    forms.sms_sent.message: We sent you a verification link via SMS. Please check your messages and click the link to continue.
+    forms.otp.title: Verify Your Phone
+    forms.credentials.fields.email_address.placeholder: Enter your email address
+    forms.passkey.title: Sign Up
+    forms.basic_user_info.fields.first_name.label: First Name
+    forms.email.fields.email.placeholder: Enter your email
+    forms.user_info.fields.first_name.label: First Name
+    forms.credentials.fields.email.label: Email
+    forms.credentials.fields.last_name.label: Last Name
+    forms.user_info.actions.submit.label: Sign Up
+    forms.basic_user_info.actions.continue.label: Continue
+    forms.credentials.links.sign_in.prefix: Already have an account?
+    forms.email_sent.title: Check Your Email
+    forms.registration.fields.username.label: Username
+    forms.choose_registration_method.actions.continue.label: Continue
+    forms.user_details.fields.username.placeholder: Enter your username
     forms.email.fields.email.label: Email
-    forms.email.description: Enter your email address to receive a verification code
-    forms.password_for_registration.title: Register Passkey
-    forms.credentials.links.forgot_password.prefix: Forgot password?
-    images.app_logo.alt: Application logo
-    forms.password_for_registration.fields.password.placeholder: Enter your password
+    forms.passkey.actions.continue.label: Continue
+    forms.passkey.add.actions.add.label: Add Passkey
+  signin:
+    forms.credentials.actions.submit.label: Sign In
+    forms.email_otp.title: Verify Your Email
+    forms.credentials.fields.username.placeholder: Enter your username
+    forms.schema_attrs.title: Tell us about you
     forms.email_otp.description: Enter the verification code sent to your email
-    forms.ciba.consent.heading: Authorize Request
-    forms.credentials.fields.password.placeholder: Enter your password
-    forms.credentials.links.sign_up.prefix: Don't have an account?
-    forms.password_for_registration.actions.submit.label: Register Passkey
+    forms.schema_attrs.actions.continue.label: Continue
+    forms.magic_link.fields.email.placeholder: Enter your email address
+    forms.phone.fields.phone.label: Mobile Number
+    images.app_logo.alt: Application logo
+    forms.choose_auth_method.fields.password.label: Password
+    forms.credentials.fields.password.label: Password
     forms.magic_link.email_sent.description: We sent you a verification link. Please check your inbox and click the link to continue.
     forms.phone.description: Enter your mobile number to receive a verification code
-    forms.credentials.actions.submit.label: Sign In
-    forms.credentials.links.forgot_password.label: Reset
-    forms.ciba.credentials.heading: Confirm Your Identity
-    forms.credentials.fields.username.label: Username
-  onboarding:
-    forms.invite_link_status.link_label: Invite Link
-    forms.onboarding_mode.actions.create.label: Create User
-    forms.phone.actions.next.label: Next
-    forms.invite_status.title: Invitation Sent
-    forms.user_details.fields.last_name.placeholder: Enter last name
-    forms.invite_mode.title: Invite User
-    forms.add_user_complete.title: User Added Successfully
-    forms.user_details.fields.last_name.label: Last Name
-    forms.invite_status.message: An invitation has been sent to the user. The user can complete their registration using the link.
-    forms.credential.title: Set Password
-    forms.phone.title: Phone Number
-    forms.invite_link_status.title: Invite Link Ready
-    forms.invite_mode.actions.sms.label: Send Invite SMS
-    forms.phone.fields.phone.placeholder: Enter phone number
-    forms.invite_sms_sent.message: An invitation SMS has been sent to the user. They can complete their registration using the link in the message.
-    forms.invite_email_sent.message: An invitation email has been sent to the user. They can complete their registration using the link in the email.
-    forms.invite_mode.subtitle: Choose how you'd like to invite this user.
-    forms.ou_selection.actions.continue.label: Continue
-    forms.credential.actions.submit.label: Set Password
-    forms.add_user.subtitle: Provide the new user details to create the account immediately.
-    forms.add_user_complete.description: The new account has been created successfully.
-    forms.email.actions.next.label: Next
-    forms.user_details.actions.next.label: Next
-    forms.onboarding_mode.subtitle: Choose whether to create the account now or send an invite for the user to finish onboarding later.
-    forms.email.title: User Email
-    forms.ou_selection.fields.ou.label: Organization Unit
-    forms.user_type.title: Select a user type
-    forms.invite_mode.actions.link.label: Get Invite Link
-    forms.complete_registration.actions.submit.label: Complete Setup
-    forms.user_type.actions.continue.label: Continue
-    forms.invite_link_status.message: Share the invite link below with the user to complete their registration.
-    forms.user_details.fields.phone_number.placeholder: Enter phone number
-    forms.user_type.fields.user_type.placeholder: Select a user type
-    forms.user_type.subtitle: Choose a user type (schema) for the new user.
-    forms.user_details.fields.username.placeholder: Enter username
-    forms.email.fields.email.placeholder: Enter email
-    forms.credential.fields.password.placeholder: Enter password
-    forms.credential.fields.password.label: Password
-    forms.user_details.fields.first_name.label: First Name
-    forms.phone.fields.phone.label: Phone Number
-    forms.user_details.fields.username.label: Username
-    forms.add_user.title: Add User Details
-    forms.invite_email_sent.title: Invitation Sent
-    forms.user_details.fields.phone_number.label: Phone Number
-    forms.user_details.fields.first_name.placeholder: Enter first name
-    forms.onboarding_mode.title: Add User
-    forms.onboarding_mode.actions.invite.label: Invite User
-    forms.add_user.actions.submit.label: Create User
-    forms.complete_registration.subtitle: Provide remaining details to finish setting up your account.
-    forms.complete_registration.title: Complete Your Account
-    forms.invite_email_unavailable.title: Email Delivery Failed
-    forms.invite_mode.actions.email.label: Send Invite Email
-    forms.ou_selection.subtitle: Choose which organization unit this user should belong to.
-    forms.invite_sms_sent.title: Invitation Sent
-    forms.user_type.fields.user_type.label: User Type
+    forms.choose_auth_method.fields.username.placeholder: Enter your username
+    forms.ciba.credentials.message: Enter your credentials to approve the authentication request.
     forms.email.fields.email.label: Email
-    forms.ou_selection.title: Select an organization unit
+    forms.credentials.links.forgot_password.label: Reset
+    forms.email.fields.email.placeholder: Enter your email address
+    forms.passkey.description: Use your passkey to securely sign in to your account without a password.
+    forms.magic_link.title: Sign In with Magic Link
+    forms.magic_link.email_sent.title: Check Your Email
+    forms.otp.fields.otp.label: Verification Code
+    forms.passkey_identifier.fields.username.placeholder: Enter your username
+    forms.passkey.actions.submit.label: Sign in with Passkey
+    forms.passkey.title: Sign in with Passkey
+    forms.ciba.consent.heading: Authorize Request
+    forms.phone.actions.submit.label: Continue
+    forms.passkey_identifier.title: Sign in with Passkey
+    forms.email.title: Sign In with Email
+    forms.email.description: Enter your email address to receive a verification code
+    forms.choose_auth_method.title: Sign In
+    forms.ciba.success.message: You have successfully authenticated. You may close this window.
+    forms.passkey.register.title: Register Passkey
+    forms.otp.fields.otp.placeholder: Enter code
+    forms.ciba.notification_sent.message: A notification has been sent. Follow the link in the notification to continue.
+    forms.otp.description: Enter the verification code sent to your phone
+    forms.magic_link.fields.email.label: Email Address
+    forms.passkey.register.description: No passkey found for your account. Enter your password to register a new passkey.
+    forms.credentials.links.sign_up.prefix: Don't have an account?
+    forms.ciba.notification_error.heading: Notification Failed
+    forms.ciba.notification_sent.heading: Authentication Request Sent
+    forms.magic_link.actions.submit.label: Send Magic Link
+    forms.password_for_registration.fields.password.label: Password
+    forms.passkey_identifier.actions.continue.label: Continue
+    forms.passkey.actions.continue.label: Continue
+    forms.password_for_registration.title: Register Passkey
+    forms.otp.actions.submit.label: Verify
+    forms.choose_auth_method.fields.username.label: Username
+    forms.ciba.consent.actions.approve.label: Approve
+    forms.credentials.links.forgot_password.prefix: Forgot password?
+    forms.password_for_registration.description: No passkey found for your account. Enter your password to register a new passkey.
+    forms.choose_auth_method.fields.password.placeholder: Enter your password
+    forms.credentials.links.sign_up.label: Sign up
+    forms.ciba.success.heading: Authentication Successful
+    forms.ciba.notification_error.message: The authentication notification could not be delivered. Please try again or contact support.
+    forms.passkey.register.actions.submit.label: Register Passkey
+    forms.credentials.fields.password.placeholder: Enter your password
+    forms.credentials.fields.username.label: Username
+    forms.phone.fields.phone.placeholder: Enter your mobile number
+    forms.password_for_registration.actions.submit.label: Register Passkey
+    forms.ciba.credentials.heading: Confirm Your Identity
+    forms.ciba.consent.message: By clicking Approve, you confirm that you initiated this request and consent to the action being performed.
+    forms.password_for_registration.fields.password.placeholder: Enter your password
+    forms.passkey_identifier.fields.username.label: Username
+    forms.phone.title: Sign In with SMS
+    forms.choose_auth_method.actions.submit.label: Sign In
+    forms.email.actions.submit.label: Continue
+    forms.choose_auth_method.actions.passkey.label: Sign in with Passkey
+    forms.credentials.title: Sign In
+    forms.ciba.credentials.actions.approve.label: Approve
+    forms.otp.title: Verify Your Identity
+  onboarding:
+    forms.add_user_complete.title: User Added Successfully
     forms.user_details.title: User Details
+    forms.invite_mode.title: Invite User
+    forms.email.fields.email.label: Email
+    forms.user_type.fields.user_type.placeholder: Select a user type
+    forms.phone.actions.next.label: Next
+    forms.invite_status.message: An invitation has been sent to the user. The user can complete their registration using the link.
+    forms.onboarding_mode.actions.create.label: Create User
+    forms.invite_status.title: Invitation Sent
+    forms.add_user.title: Add User Details
+    forms.invite_link_status.link_label: Invite Link
+    forms.invite_mode.actions.email.label: Send Invite Email
+    forms.email.actions.next.label: Next
+    forms.user_details.fields.username.placeholder: Enter username
+    forms.credential.fields.password.placeholder: Enter password
+    forms.ou_selection.fields.ou.label: Organization Unit
+    forms.onboarding_mode.subtitle: Choose whether to create the account now or send an invite for the user to finish onboarding later.
+    forms.invite_mode.subtitle: Choose how you'd like to invite this user.
+    forms.invite_link_status.message: Share the invite link below with the user to complete their registration.
+    forms.email.title: User Email
+    forms.phone.fields.phone.placeholder: Enter phone number
+    forms.add_user.subtitle: Provide the new user details to create the account immediately.
+    forms.credential.fields.password.label: Password
+    forms.user_type.subtitle: Choose a user type (schema) for the new user.
+    forms.phone.title: Phone Number
+    forms.invite_email_sent.message: An invitation email has been sent to the user. They can complete their registration using the link in the email.
+    forms.invite_email_unavailable.title: Email Delivery Failed
+    forms.user_details.fields.first_name.label: First Name
+    forms.complete_registration.actions.submit.label: Complete Setup
+    forms.invite_sms_sent.title: Invitation Sent
+    forms.add_user.actions.submit.label: Create User
+    forms.invite_mode.actions.sms.label: Send Invite SMS
+    forms.invite_sms_sent.message: An invitation SMS has been sent to the user. They can complete their registration using the link in the message.
+    forms.add_user_complete.description: The new account has been created successfully.
+    forms.ou_selection.actions.continue.label: Continue
+    forms.user_type.actions.continue.label: Continue
+    forms.invite_link_status.title: Invite Link Ready
+    forms.user_details.fields.last_name.placeholder: Enter last name
+    forms.complete_registration.subtitle: Provide remaining details to finish setting up your account.
+    forms.onboarding_mode.actions.invite.label: Invite User
+    forms.user_details.fields.first_name.placeholder: Enter first name
+    forms.credential.title: Set Password
     forms.invite_email_unavailable.message: The invitation email could not be delivered. Please use the link below to share the invite manually.
+    forms.user_details.fields.username.label: Username
+    forms.phone.fields.phone.label: Phone Number
+    forms.email.fields.email.placeholder: Enter email
+    forms.user_details.actions.next.label: Next
+    forms.invite_email_sent.title: Invitation Sent
+    forms.invite_mode.actions.link.label: Get Invite Link
+    forms.credential.actions.submit.label: Set Password
+    forms.onboarding_mode.title: Add User
+    forms.ou_selection.title: Select an organization unit
+    forms.user_details.fields.phone_number.label: Phone Number
+    forms.ou_selection.subtitle: Choose which organization unit this user should belong to.
+    forms.user_details.fields.last_name.label: Last Name
+    forms.complete_registration.title: Complete Your Account
+    forms.user_type.title: Select a user type
+    forms.user_type.fields.user_type.label: User Type
+    forms.user_details.fields.phone_number.placeholder: Enter phone number
+  invite:
+    complete.backToApp: Back to Application
+    complete.description.withApp: Your account has been successfully set up for {{appName}}. You can now sign in.
+    errors.failed.title: Error
+    validating: Validating your invite link...
+    goToSignIn: Go to Sign In
+    complete.backToApp.withApp: Back to {{appName}}
+    errors.invalid.title: Unable to verify invite
+    complete.title: Welcome Aboard!
+    signIn: Sign In
+    complete.description: Your account has been successfully set up. You can now sign in.
+    errors.invalid.description: This invite link is invalid or has expired.
+    errors.failed.description: An error occurred. Please try again.
+  recovery:
+    forms.username.links.sign_in.prefix: Remember your password?
+    forms.email_sent.title: Check Your Email
+    forms.otp_sent.actions.verify.label: Verify
+    forms.new_password.subtitle: Enter a new password for your account
+    forms.email.actions.next.label: Next
+    forms.otp_sent.title: OTP Sent to your mobile
+    forms.new_password.fields.password.placeholder: Enter your new password
+    forms.otp_sent.fields.otp.label: Verification Code
+    forms.new_password.title: Reset Password
+    forms.username.links.sign_in.label: Sign in
+    forms.username.fields.username.placeholder: Enter your username
+    forms.new_password.fields.password.label: New Password
+    forms.email_sent.message: We sent you a password reset link. Please check your inbox and click the link to reset your password.
+    forms.username.title: Password Recovery
+    forms.username.actions.submit.label: Submit
+    forms.complete.message: Your password has been successfully reset. You can now sign in with your new password.
+    forms.email.fields.email.placeholder: Enter your email
+    forms.otp_sent.message: We sent you a verification code via SMS. Please check your messages and enter the code to continue.
+    forms.email.fields.email.label: Email
+    forms.username.subtitle: Enter your username to start the password recovery
+    forms.new_password.actions.submit.label: Reset Password
+    forms.otp_sent.fields.otp.placeholder: Enter code
+    forms.complete.title: Password Reset Successful
+    forms.username.fields.username.label: Username
+  signout:
+    forms.confirm.title: Sign out?
+    errors.failed.description: Something went wrong. Please try again.
+    forms.confirm.description: You are about to sign out of your account. Do you want to continue?
+    forms.confirm.actions.submit.label: Sign out
 
 ---
 # File: cors.yaml
@@ -2244,6 +2287,44 @@ name: csp
 value: {"reportOnly":false,"paths":[{"location":"/console/","directives":{"connect-src":["'self'","https://thunderid.dev"],"font-src":["'self'","data:"],"img-src":["'self'","data:"],"style-src-attr":["'self'","'unsafe-inline'"],"style-src-elem":["'self'","'unsafe-inline'"],"worker-src":["'self'","blob:"]}},{"location":"/gate/","directives":{"font-src":["'self'","data:"],"img-src":["'self'","data:"],"style-src-attr":["'self'","'unsafe-inline'"],"style-src-elem":["'self'"]}}]}
 
 ---
+# File: AIsle_Agent_Access.yaml
+resource_type: role
+id: 01a042b1-2244-71ac-9ac7-23f80c0b1750
+name: AIsle Agent Access
+ouId: 01900000-0000-7000-8000-000000000001
+permissions:
+  - resourceServerId: 01a0114d-85c1-7baa-b530-31065e83942b
+    permissions:
+      - draft.create
+      - draft.read
+      - lot.read
+      - product
+      - product.create
+      - product.read
+      - product.update
+      - purchasing.read
+      - stock
+      - stock.adjust
+  - resourceServerId: 01a03918-f077-7417-b274-8506f66b8aef
+    permissions:
+      - draft
+      - draft.create
+      - draft.read
+      - lot
+      - lot.read
+      - product
+      - product.create
+      - product.read
+      - product.update
+      - purchasing
+      - purchasing.read
+      - stock
+      - stock.adjust
+assignments:
+  - id: 01a038f2-baa4-7a5a-a21c-b87124977fb8
+    type: agent
+
+---
 # File: AIsle_Full_Access.yaml
 resource_type: role
 id: 01a038dd-5c3f-7c4e-af07-d6e1595c7e2d
@@ -2252,25 +2333,40 @@ ouId: 01900000-0000-7000-8000-000000000001
 permissions:
   - resourceServerId: 01a0114d-85c1-7baa-b530-31065e83942b
     permissions:
+      - draft
+      - draft.create
+      - draft.decide
+      - draft.read
+      - lot
+      - lot.read
+      - lot.write
       - product
       - product.create
       - product.read
       - product.update
+      - purchasing
+      - purchasing.read
+      - purchasing.write
       - stock
       - stock.adjust
   - resourceServerId: 01a03918-f077-7417-b274-8506f66b8aef
     permissions:
+      - draft
+      - draft.create
+      - draft.read
+      - lot
+      - lot.read
       - product
       - product.create
       - product.read
       - product.update
+      - purchasing
+      - purchasing.read
       - stock
       - stock.adjust
 assignments:
   - id: __JUDGE_USER_ID__
     type: user
-  - id: 01a038f2-baa4-7a5a-a21c-b87124977fb8
-    type: agent
 
 ---
 # File: Product_Reader.yaml

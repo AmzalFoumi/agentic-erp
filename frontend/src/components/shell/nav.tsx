@@ -8,11 +8,26 @@ import { cn } from "@/lib/utils";
 const links = [
   { href: "/products", label: "Products" },
   { href: "/products/new", label: "New product" },
+  { href: "/inventory/spoilage", label: "Expiring soon" },
+  { href: "/suppliers", label: "Suppliers" },
+  { href: "/purchasing", label: "Purchasing" },
+  { href: "/approvals", label: "Approvals" },
 ];
 
 /**
- * Exactly two destinations, deliberately — see the capability inventory in
+ * Deliberately few destinations — see the capability inventory in
  * docs/FRONTEND-PLAN.md. No dashboard, no reports, no settings.
+ *
+ * "Expiring soon", "Suppliers" and "Purchasing" sit directly above Approvals
+ * because that is the order the work happens in: look at what is spoiling or
+ * low, stage a markdown or a reorder, then approve it. A manager following
+ * any feature top to bottom is following the nav.
+ *
+ * "Approvals" arrived with gate 27 and is the one screen that is not about
+ * products: it is where changes the assistant has proposed wait for a human.
+ * It earns top-level placement because a proposal nobody notices is a proposal
+ * that expires, and the queue is the only thing standing between the agent and
+ * an unsupervised write.
  */
 export function Nav() {
   const pathname = usePathname();

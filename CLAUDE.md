@@ -16,14 +16,15 @@ read when you are working in the area they cover.
 
 | File | Scope | Read when |
 |---|---|---|
-| `docs/PLAN.md` | Progress table (gates 0–26), stop gates, division of labour, verify-docs rule, structure | **Every gate. Root — wins over all others** |
+| `docs/PLAN.md` | Progress table (gates 0–30), stop gates, division of labour, verify-docs rule, structure | **Every gate. Root — wins over all others** |
 | `docs/BACKEND-PLAN.md` | Gates 0–8 as built, backend decisions and deferrals | Changing backend code |
 | `docs/FRONTEND-PLAN.md` | Gates 9–13, screen and capability inventories, design-system rationale | Changing frontend code |
 | `docs/AUTH-PLAN.md` | Gates 22–25: provider decision (**ThunderID, confirmed by the Gate 23 spike**), RFC 8693 delegation, the ID-JAG-later rule, permission mapping | The auth gates |
 | `docs/DEPLOY-PLAN.md` | Gate 26: sub-gates 26a–26i, the **"Aisle in a box"** design (the gate's target changed on 2026-08-26 from hosting to a one-command box), and the three security gaps gate 25 deferred into it | Deployment work |
 | `docs/AGENT-PLAN.md` | Gates 14–21, the Pydantic AI / Gemini decision, the agent's own schema, the localhost stop condition | Changing anything in `agent/` |
-| `CLAUDE.md` (this file) | A summary for agent onboarding | Subordinate to all five |
-| `frontend/AGENTS.md` (+ `frontend/CLAUDE.md`, which just includes it) | **Build output** — rewritten by `next dev` on every start, not hand-edited. One instruction: read `node_modules/next/dist/docs/` rather than trusting training data about Next.js | Writing Next.js code. Framework-only — says nothing about this project, so it never overrides the five above |
+| `docs/FEATURES-PLAN.md` | Gates 27–30: the Action Draft queue, the **closed-enum draft-type rule**, the two-approval-mechanism split, lots-as-truth, and the eight places the external feature spec did not match this codebase | Building the standout features |
+| `CLAUDE.md` (this file) | A summary for agent onboarding | Subordinate to all six |
+| `frontend/AGENTS.md` (+ `frontend/CLAUDE.md`, which just includes it) | **Build output** — rewritten by `next dev` on every start, not hand-edited. One instruction: read `node_modules/next/dist/docs/` rather than trusting training data about Next.js | Writing Next.js code. Framework-only — says nothing about this project, so it never overrides the six above |
 
 **This file is a summary, never a second opinion.** Where it disagrees with any plan doc, the plan
 doc wins and this file is the thing that is out of date. A decision is recorded **once, where it is
@@ -182,6 +183,11 @@ turn, not just during initial build-out:
    **build output — committed but never hand-edited**; and browser MCP tools (chrome-devtools,
    playwright) may only be used **after the developer has started both `uvicorn` and `npm run dev`**
    and said continue.
+   **One standing exception (added 2026-08-28):** `pytest`/`alembic` against the disposable local
+   Postgres in `backend/docker-compose.test.yml` — bringing that container up, migrating it, and
+   running backend tests against it — are agent-run, no need to ask each time. Scope is exactly that
+   one container; `pytest`/`alembic` against real Supabase, and everything else in this list, still
+   isn't. Full procedure in `backend/tests/README.md`.
 2. **Verify against current docs/PyPI rather than training data** before pinning a version or citing
    API behavior — this project has already been bitten twice by stale assumptions (MCP spec/SDK
    changed the day before Gate 6; several version pins from memory were wrong before being checked).
