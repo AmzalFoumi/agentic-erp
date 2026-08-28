@@ -267,6 +267,64 @@ something. It should carry `openid` plus every permission the backend checks.
 
 > Script equivalent: `bash deploy/aisle-box/seed-build/rebuild-seed.sh verify`
 
+#### If sign-in fails, check these two things before suspecting the login-server data
+
+This rebuild only touches ThunderID's identity data (the two `.db` files). It never rebuilds
+the box's application images or touches your host machine's ports. Two problems that look
+like a broken rebuild are actually neither, and both were hit for real on 2026-08-28:
+
+**1. The box's own images are stale.** If a feature branch changed anything under
+`docker-compose.yml`'s `args:` — most commonly `NEXT_PUBLIC_THUNDERID_SCOPES`, a build-time
+value baked into the browser bundle, not read at container start — then `up -d` alone will
+keep running the *old* image forever. `docker compose up -d` never rebuilds an existing image
+on its own; only `--build`, or deleting the image first, does. The symptom is a `401` on
+`/oauth2/token` that has nothing to do with permissions or secrets, because the browser bundle
+is still requesting the old, incomplete scope list.
+
+Fix — rebuild images before running `verify`, whenever a change touched `docker-compose.yml`'s
+`args:` block:
+
+```bash
+docker compose -f deploy/aisle-box/docker-compose.yml build web api mcp agent
+bash deploy/aisle-box/seed-build/rebuild-seed.sh verify
+```
+
+This is not automatic. `rebuild-seed.sh` never passes `--build` to any `docker compose up`
+call, on purpose — it exists to manage identity data, not application code, so don't expect it
+to catch this for you. Check `docs/DEPLOY-PLAN.md`'s "What a new feature has to update in the
+box" checklist any time you touch a scope or another build-time value.
+
+**2. A local dev frontend is squatting on port 3000.** The box publishes port 3000 to
+`127.0.0.1` for its own `web` container. If you also have `npm run dev` running on your host
+machine (from ordinary frontend work), Windows will let *both* processes bind port 3000 — one
+on `0.0.0.0:3000`, one on `127.0.0.1:3000` — and your browser can silently land on the wrong
+one. The giveaway is a `[HMR] connected` line in the browser console: that's Next.js
+dev-server hot-reload, which a production Docker build never emits. If you see it while testing
+the box, you're talking to your local dev server, not the container — and that dev server
+points at your *real* dev ThunderID (possibly stopped), so sign-in fails for reasons that have
+nothing to do with the box at all.
+
+Fix — find and stop the stray process before testing:
+
+```bash
+netstat -ano | grep ":3000" | grep LISTENING
+```
+
+Whichever PID is a plain `node.exe` (not a `docker` process) is the local dev server. Stop it
+(PowerShell: `Stop-Process -Id <pid> -Force`; Git Bash's `taskkill` needs the slash escaped:
+`taskkill //PID <pid> //F`), then retry sign-in.
+
+**3. The admin password is different after every `verify`.** `verify` does a full `down -v` +
+`up -d` of the box, which wipes the ThunderID database volume and re-triggers its first-run
+setup — a brand-new admin account and password, every single time, unrelated to whatever
+password `prepare` printed earlier. Always re-fetch the current one with:
+
+```bash
+docker compose -f deploy/aisle-box/docker-compose.yml logs thunderid-setup
+```
+
+Don't reuse a password from an earlier phase or an earlier run.
+
 ### Step 8 — Put the dev login server back
 
 ```bash
