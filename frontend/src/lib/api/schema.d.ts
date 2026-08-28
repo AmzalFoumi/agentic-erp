@@ -525,6 +525,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/purchase-orders/{order_id}/receive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive Order
+         * @description Record what arrived. Applies immediately - see gate 30's design for
+         *     why this door skips the draft queue while the AI door below does not.
+         */
+        post: operations["receive_order_purchase_orders__order_id__receive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchase-orders/{order_id}/receipt-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Receipt
+         * @description Stage what arrived for approval. No lot or credit memo is written yet.
+         */
+        post: operations["propose_receipt_purchase_orders__order_id__receipt_drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -560,6 +601,26 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** CreditMemoRead */
+        CreditMemoRead: {
+            /** Id */
+            id: number;
+            /** Supplier Id */
+            supplier_id: number;
+            /** Purchase Order Id */
+            purchase_order_id: number;
+            /** Reason */
+            reason: string;
+            /** Amount */
+            amount: string;
+            /** Status */
+            status: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /**
          * DraftApproval
          * @description The body of POST /drafts/{id}/approve.
@@ -983,6 +1044,10 @@ export interface components {
             unit_cost: string;
             /** Line Total */
             line_total: string;
+            /** Quantity Received */
+            quantity_received: number;
+            /** Quantity Damaged */
+            quantity_damaged: number;
         };
         /** PurchaseOrderList */
         PurchaseOrderList: {
@@ -1020,6 +1085,39 @@ export interface components {
             created_by: string | null;
             /** Lines */
             lines: components["schemas"]["PurchaseOrderLineRead"][];
+            /**
+             * Credit Memos
+             * @default []
+             */
+            credit_memos: components["schemas"]["CreditMemoRead"][];
+        };
+        /** PurchaseOrderReceive */
+        PurchaseOrderReceive: {
+            /** Lines */
+            lines: components["schemas"]["ReceiptLineCreate"][];
+        };
+        /** ReceiptDraftCreate */
+        ReceiptDraftCreate: {
+            /** Lines */
+            lines: components["schemas"]["ReceiptLineCreate"][];
+            /** Reasoning */
+            reasoning: string;
+        };
+        /** ReceiptLineCreate */
+        ReceiptLineCreate: {
+            /** Product Id */
+            product_id: number;
+            /** Quantity Received */
+            quantity_received: number;
+            /** Quantity Damaged */
+            quantity_damaged: number;
+            /**
+             * Expiry Date
+             * Format: date
+             */
+            expiry_date: string;
+            /** Lot Code */
+            lot_code: string;
         };
         /** ReorderBundleRead */
         ReorderBundleRead: {
@@ -2815,6 +2913,130 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PurchaseOrderRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    receive_order_purchase_orders__order_id__receive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchaseOrderReceive"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
+                };
+            };
+            /** @description A business rule was broken. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The actor lacks the required permission. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The resource does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request body does not match the schema. Carries `fields`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    propose_receipt_purchase_orders__order_id__receipt_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReceiptDraftCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftRead"];
                 };
             };
             /** @description A business rule was broken. */
