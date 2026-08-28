@@ -12,7 +12,8 @@ name: Docker build
 
 on:
   pull_request:
-    branches: [main]
+  push:
+    branches: [main, dev]
 
 concurrency:
   group: docker-build-${{ github.ref }}

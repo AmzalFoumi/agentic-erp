@@ -255,7 +255,11 @@ class Settings(BaseSettings):
         # delivery is a physical event a person witnesses, and an agent
         # that could invent stock could invent a spoilage problem to
         # solve.
-        "lot.read"
+        "lot.read "
+        # Gate 29. Same shape again: the agent may read suppliers and the
+        # reorder report and stage a proposal, but `purchasing.write` places
+        # an order and commits the shop's money, so it is ABSENT too.
+        "purchasing.read"
     )
 
     # ⚠️ LOCAL ONLY, and the better half of a bad choice. ThunderID's

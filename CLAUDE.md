@@ -183,6 +183,11 @@ turn, not just during initial build-out:
    **build output — committed but never hand-edited**; and browser MCP tools (chrome-devtools,
    playwright) may only be used **after the developer has started both `uvicorn` and `npm run dev`**
    and said continue.
+   **One standing exception (added 2026-08-28):** `pytest`/`alembic` against the disposable local
+   Postgres in `backend/docker-compose.test.yml` — bringing that container up, migrating it, and
+   running backend tests against it — are agent-run, no need to ask each time. Scope is exactly that
+   one container; `pytest`/`alembic` against real Supabase, and everything else in this list, still
+   isn't. Full procedure in `backend/tests/README.md`.
 2. **Verify against current docs/PyPI rather than training data** before pinning a version or citing
    API behavior — this project has already been bitten twice by stale assumptions (MCP spec/SDK
    changed the day before Gate 6; several version pins from memory were wrong before being checked).

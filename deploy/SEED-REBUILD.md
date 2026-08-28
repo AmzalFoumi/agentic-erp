@@ -91,37 +91,59 @@ replaces, so you can also do the whole thing by hand if the script misbehaves.
 
 ### Step 1 — Export the configuration from the dev login server
 
-This one is manual, and the *how* is not obvious.
-
-The Console's export is **not a file download**. It is an HTTP response containing JSON, with
-the whole configuration sitting inside one field called `resources` as a single long string.
-You have to capture that response and pull the field out.
+This one is manual — it needs a browser — but it is one button and one paste.
 
 1. Open <https://localhost:8090/console> and sign in as `admin`.
    The password is in `deploy/admin-password.txt` (gitignored — never commit it).
-2. Open the browser's developer tools, **Network** tab, and leave it recording.
-3. In the Console, run the export (Settings → Export, or whatever the current build calls it).
-4. Find the export request in the Network tab, save its **response body** to
-   `deploy/thunderid-export/export-response.network-response`.
-5. Pull the YAML out of it:
+2. Go to **Import / Export → Export Configuration**, or straight to
+   <https://localhost:8090/console/export>.
+3. Read the **Total Resources** number on that page and write it down. You compare the
+   import against it in step 4, and it is the only way to catch a partial import.
+4. Open the browser's JavaScript console (F12 → Console) and paste this. It asks the
+   server for the configuration and saves it as a real file download:
 
-```bash
-python -c "import json,pathlib; p=pathlib.Path('deploy/thunderid-export'); \
-pathlib.Path(p/'thunderid-config.yml').write_text( \
-json.loads((p/'export-response.network-response').read_text(encoding='utf-8'))['resources'], \
-encoding='utf-8')"
+```js
+(async () => {
+  const t = JSON.parse(sessionStorage.getItem("session_data-instance_0-CONSOLE")).access_token;
+  const body = {};
+  for (const k of ["applications","connections","flows","themes","users","organizationUnits",
+                   "userTypes","agentTypes","translations","layouts","resourceServers",
+                   "roles","groups","agents","serverConfigs"]) body[k] = ["*"];
+  const r = await fetch("/export", {method: "POST", body: JSON.stringify(body),
+    headers: {Authorization: "Bearer " + t, "Content-Type": "application/json"}});
+  if (!r.ok) throw new Error(`Export failed: ${r.status} ${r.statusText}`);
+  const j = await r.json();
+  if (typeof j.resources !== "string") {
+    throw new Error("Export response did not contain resources");
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([j.resources], {type: "text/yaml"}));
+  a.download = "thunderid-config.yml";
+  document.body.appendChild(a); a.click(); a.remove();
+})();
 ```
 
-You should end up with `deploy/thunderid-export/thunderid-config.yml`, roughly 180 KB, whose
-first line is `# File: Test_Agent.yaml`.
+5. Move the downloaded file from your Downloads folder to
+   `deploy/thunderid-export/thunderid-config.yml`.
 
-> **This folder is gitignored by a single `*` and must stay that way.** The export contains
-> the developer's real name and real email address, and this repository is public.
+It should be roughly 180 KB and its first line should be `# File: Test_Agent.yaml`.
+
+**What that snippet is doing, in plain English.** The Console's own **Export Configuration**
+button sends the server a list saying "give me everything of every kind". The server answers
+with JSON, and the whole configuration sits inside one field of it called `resources`, as a
+single very long string. The snippet sends the same request, pulls that one field out, and
+hands it to the browser as a file to save. The page's own export button does *not* save a
+file — it only shows the result — which is why the snippet exists.
+
+> **The `deploy/thunderid-export/` folder is gitignored by a single `*` and must stay that
+> way.** The export contains the developer's real name and real email address, and this
+> repository is public. Delete the copy left in your Downloads folder too.
 
 **Why a browser is unavoidable here.** It was tried without one and does not work: the Direct
 API answers `401` on every administrative path, and the flow API refuses to start a headless
-sign-in for a browser-type application (error `FES-1010`). This is a measured result, not an
-assumption.
+sign-in for a browser-type application (error `FES-1010`). The snippet above sidesteps that by
+running *inside* an already-signed-in Console tab, borrowing the token that tab is holding —
+it does not get you out of signing in by hand.
 
 ### Step 2 — Strip the personal data out
 
@@ -248,6 +270,64 @@ document — a signed-in judge with an empty permission list looks fine until th
 something. It should carry `openid` plus every permission the backend checks.
 
 > Script equivalent: `bash deploy/aisle-box/seed-build/rebuild-seed.sh verify`
+
+#### If sign-in fails, check these three things before suspecting the login-server data
+
+This rebuild only touches ThunderID's identity data (the two `.db` files). It never rebuilds
+the box's application images or touches your host machine's ports. Three problems that look
+like a broken rebuild are actually neither, and all three were hit for real on 2026-08-28:
+
+**1. The box's own images are stale.** If a feature branch changed anything under
+`docker-compose.yml`'s `args:` — most commonly `NEXT_PUBLIC_THUNDERID_SCOPES`, a build-time
+value baked into the browser bundle, not read at container start — then `up -d` alone will
+keep running the *old* image forever. `docker compose up -d` never rebuilds an existing image
+on its own; only `--build`, or deleting the image first, does. The symptom is a `401` on
+`/oauth2/token` that has nothing to do with permissions or secrets, because the browser bundle
+is still requesting the old, incomplete scope list.
+
+Fix — rebuild images before running `verify`, whenever a change touched `docker-compose.yml`'s
+`args:` block:
+
+```bash
+docker compose -f deploy/aisle-box/docker-compose.yml build web api mcp agent
+bash deploy/aisle-box/seed-build/rebuild-seed.sh verify
+```
+
+This is not automatic. `rebuild-seed.sh` never passes `--build` to any `docker compose up`
+call, on purpose — it exists to manage identity data, not application code, so don't expect it
+to catch this for you. Check `docs/DEPLOY-PLAN.md`'s "What a new feature has to update in the
+box" checklist any time you touch a scope or another build-time value.
+
+**2. A local dev frontend is squatting on port 3000.** The box publishes port 3000 to
+`127.0.0.1` for its own `web` container. If you also have `npm run dev` running on your host
+machine (from ordinary frontend work), Windows will let *both* processes bind port 3000 — one
+on `0.0.0.0:3000`, one on `127.0.0.1:3000` — and your browser can silently land on the wrong
+one. The giveaway is a `[HMR] connected` line in the browser console: that's Next.js
+dev-server hot-reload, which a production Docker build never emits. If you see it while testing
+the box, you're talking to your local dev server, not the container — and that dev server
+points at your *real* dev ThunderID (possibly stopped), so sign-in fails for reasons that have
+nothing to do with the box at all.
+
+Fix — find and stop the stray process before testing:
+
+```bash
+netstat -ano | grep ":3000" | grep LISTENING
+```
+
+Whichever PID is a plain `node.exe` (not a `docker` process) is the local dev server. Stop it
+(PowerShell: `Stop-Process -Id <pid> -Force`; Git Bash's `taskkill` needs the slash escaped:
+`taskkill //PID <pid> //F`), then retry sign-in.
+
+**3. The admin password is different after every `verify`.** `verify` does a full `down -v` +
+`up -d` of the box, which wipes the ThunderID database volume and re-triggers its first-run
+setup — a brand-new admin account and password, every single time, unrelated to whatever
+password `prepare` printed earlier. Always re-fetch the current one with:
+
+```bash
+docker compose -f deploy/aisle-box/docker-compose.yml logs thunderid-setup
+```
+
+Don't reuse a password from an earlier phase or an earlier run.
 
 ### Step 8 — Put the dev login server back
 
