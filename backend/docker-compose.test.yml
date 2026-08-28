@@ -1,0 +1,60 @@
+# Throwaway local Postgres for the backend test suite.
+#
+# WHY THIS EXISTS
+#
+# backend/tests/conftest.py rolls every test back in a transaction, so no test
+# leaves data behind - but by default that transaction runs against the real,
+# hosted Supabase project, in eu-west-3. Every query in every one of the ~300
+# tests pays a network round trip to that region, which is most of why a full
+# `pytest` run takes ~10 minutes. Pointed at the container below instead, the
+# same queries go to 127.0.0.1: no WAN hop, no TLS handshake, no pooler.
+#
+# This does not replace the Supabase run - see backend/tests/README.md for
+# when to use which. It only gives you a second, much faster address to point
+# TEST_DATABASE_URL at while iterating - a name of its own, not DATABASE_URL,
+# so exporting it in a terminal can never bleed into a dev-server `uvicorn`
+# run in that same terminal.
+#
+# No top-level `version:` key - Compose deprecated it and now warns if it's
+# present (https://docs.docker.com/reference/compose-file/version-and-name/).
+name: aisle-test-db
+
+services:
+  db:
+    # Pinned to 17 to match Supabase's engine version (checked live via the
+    # Supabase dashboard on 2026-08-28: postgres_engine "17"), so a migration
+    # that applies cleanly here behaves the same way against the real project.
+    # `alpine` just means a smaller image; it changes nothing about behavior.
+    image: postgres:17-alpine
+    restart: "no"
+    environment:
+      # Plain, throwaway credentials, committed in the open on purpose: this
+      # database is reachable only from 127.0.0.1 on your own machine, holds
+      # nothing but rolled-back test rows, and is destroyed by `down`. Treating
+      # a value like that as a secret would only mean the next developer has
+      # to go find it instead of reading it here.
+      POSTGRES_USER: aisle
+      POSTGRES_PASSWORD: aisle
+      POSTGRES_DB: aisle_test
+    ports:
+      # Bound to loopback only, and to 5433 rather than Postgres's usual 5432
+      # - many developer machines already have a local Postgres listening on
+      # 5432, and colliding with it produces a flat "port is already
+      # allocated" error instead of anything that points at the real cause.
+      # Nothing in deploy/aisle-box/ uses 5433 either (it publishes only 3000
+      # and 8090), so there is no cross-project collision to worry about.
+      - "127.0.0.1:5433:5432"
+    # Deliberately NO `volumes:` entry. Data lives only inside the container's
+    # writable layer, so `docker compose down` actually erases it - there is
+    # no stale state to debug days later, and every fresh `up` starts from a
+    # truly empty database (which is why the migration step below is a
+    # required part of the workflow, not an optional one).
+    healthcheck:
+      # `--wait` (see backend/tests/README.md) blocks on this rather than on
+      # the container merely existing, so `alembic upgrade head` never runs
+      # against a Postgres that has started the process but isn't accepting
+      # connections yet.
+      test: ["CMD-SHELL", "pg_isready -U aisle -d aisle_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 10

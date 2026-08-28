@@ -7,11 +7,13 @@ the injection is per-parameter rather than global.
 
 ### The problem this file solves
 
-We have exactly one database - the live Supabase project. There is no local
-Postgres. So a test that calls `create_product(...)` writes a real row to the
-real database and leaves it there forever. Run the suite twice and the
-duplicate-SKU test fails against leftovers from its own previous run, which is
-the worst kind of failing test: correct code, red bar, no bug.
+Whichever database is in play - the live Supabase project by default, or a
+local Docker Postgres via `TEST_DATABASE_URL`, see `tests/README.md` - a test
+that calls
+`create_product(...)` would otherwise write a real row and leave it there
+forever. Run the suite twice and the duplicate-SKU test fails against
+leftovers from its own previous run, which is the worst kind of failing test:
+correct code, red bar, no bug.
 
 ### The fix
 
@@ -31,23 +33,50 @@ everything.
 TypeScript analogue: wrapping each Jest test in a Prisma `$transaction` whose
 callback always throws at the end so it never commits.
 
-### Worth revisiting
+### Local Postgres, for speed rather than isolation
 
-The more thorough answer is a dedicated test database, so the suite cannot
-touch production data even in principle. That means a second Supabase project
-(or Docker Postgres locally) and a `TEST_DATABASE_URL`. Not worth it for four
-tests; worth it the moment the suite grows or anyone else runs it. Noted in
-docs/BACKEND-PLAN.md.
+Isolation was never the problem - the rollback above already gives every test
+its own throwaway transaction against whichever database it's pointed at. The
+suite growing past ~300 tests made *speed* the problem instead: each query
+against the hosted Supabase project pays a network round trip to eu-west-3.
+`tests/README.md` documents a local Docker Postgres and a `TEST_DATABASE_URL`
+variable that gets the same tests, same rollback behavior, onto loopback
+instead - opt-in, and a name of its own so it can never collide with the
+`DATABASE_URL` your dev server reads. Plain `pytest` still hits Supabase
+exactly as before.
 """
 
+import os
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import pytest
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from core.actor import SystemActor
-from core.database import engine
+
+# `TEST_DATABASE_URL`, not `DATABASE_URL` - deliberately a different name, not
+# just a different value. `core/config.py`'s `settings.database_url` (and the
+# `engine` built from it in core/database.py) is what `uvicorn` and `alembic`
+# also read. If this fixture reused that same variable name, exporting it in a
+# terminal to speed up a test run would silently point your next `uvicorn`
+# in that same terminal at the throwaway container too. A distinct name means
+# nothing outside this file ever looks at it, so there's nothing to leak.
+#
+# core/database.py and core/config.py are intentionally NOT touched by this -
+# see backend/tests/README.md for the full local-Postgres setup they opt into.
+_test_database_url = os.environ.get("TEST_DATABASE_URL")
+
+if _test_database_url:
+    # Mirrors core/database.py's engine construction, minus the Supabase-
+    # specific pool tuning (pool_size/max_overflow/pool_recycle exist there to
+    # be a good citizen of Supabase's shared connection ceiling; a local
+    # container has no such constraint). `pool_pre_ping` is kept because it's
+    # cheap and harmless either way.
+    engine = create_engine(_test_database_url, pool_pre_ping=True)
+else:
+    from core.database import engine
 
 if TYPE_CHECKING:
     # Imported for the type annotation only. `TYPE_CHECKING` is False at

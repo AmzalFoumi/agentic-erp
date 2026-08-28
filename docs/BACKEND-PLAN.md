@@ -367,6 +367,11 @@ database keeps none of them. (Same trick as wrapping each Jest test in a Prisma 
 always throws.) A dedicated test database would be the more thorough answer and is worth revisiting
 if the suite grows; rollback is the right cost/benefit today.
 
+**Revisited 2026-08-28**, once the suite's growth made a full run take ~10 minutes, dominated by
+network round trips to Supabase's eu-west-3 region rather than by anything the rollback fixture
+costs. `backend/docker-compose.test.yml` and `backend/tests/README.md` add an opt-in local Postgres
+for iterating faster; the hosted-Supabase run (and CI) still uses the path above unchanged.
+
 Also in this gate: `backend/pyproject.toml`, which settles pytest's import path via `pythonpath`
 — the same `sys.path` problem that broke Alembic in Gate 3, needing a different fix per tool.
 
