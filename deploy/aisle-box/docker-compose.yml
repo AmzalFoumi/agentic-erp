@@ -73,8 +73,8 @@ services:
       # server (8001) and the agent (8002) are deliberately NOT published — they are
       # reachable only from inside the box. That is what keeps `agent/app.py`'s
       # `HOST = "127.0.0.1"` line honest; see docs/DEPLOY-PLAN.md.
-      - "127.0.0.1:3000:3000"    # the Aisle website — this is what you open
-      - "127.0.0.1:8090:8090"    # the login server — your browser is redirected here
+      - "127.0.0.1:3000:3000" # the Aisle website — this is what you open
+      - "127.0.0.1:8090:8090" # the login server — your browser is redirected here
 
   # ─────────────────────────────────────────────────────────────────────────────────────
   #  thunderid-seed — runs once, then exits.
@@ -313,7 +313,7 @@ services:
         #
         # Verify before adding a name back, rather than trusting this comment:
         #   grep -c 'draft.read' deploy/aisle-box/thunderid-seed/configdb.db
-        NEXT_PUBLIC_THUNDERID_SCOPES: openid product.read product.create product.update stock.adjust
+        NEXT_PUBLIC_THUNDERID_SCOPES: openid product.read product.create product.update stock.adjust draft.read draft.create draft.decide lot.read lot.write purchasing.read purchasing.write
     restart: unless-stopped
     network_mode: "service:aisle-net"
     environment:
