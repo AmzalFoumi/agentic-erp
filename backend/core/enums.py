@@ -104,8 +104,9 @@ class CreditMemoStatus(str, Enum):
     One value today, on purpose. `docs/superpowers/specs/2026-08-27-gate30-
     delivery-discrepancy-design.md`'s "Alternatives considered" defers
     tracking a credit against a future order - that would need a second
-    status (e.g. APPLIED). A real enum column with one member costs nothing
-    now and needs no migration to grow later.
+    status (e.g. APPLIED). A Python enum with one member costs nothing now
+    and needs no migration to grow later - it's persisted as a plain
+    `String(16)` column, same as every other status field in this codebase.
     """
 
     OPEN = "open"

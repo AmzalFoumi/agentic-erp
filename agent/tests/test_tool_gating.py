@@ -87,7 +87,8 @@ def test_staging_only_holds_exactly_the_draft_tools() -> None:
         "propose_reorder_order",
         # Gate 30. Stages one draft row for a delivery receipt proposal and
         # records no credit until the manager approves; the manager still sees
-        # every line, expiry dates, and the cost at risk before anything happens.
+        # every line and every expiry date before anything happens. The draft
+        # carries no cost_at_risk - the credit amount is derived at approval.
         "propose_delivery_receipt",
     }
 

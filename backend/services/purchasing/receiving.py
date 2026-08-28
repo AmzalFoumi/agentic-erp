@@ -20,6 +20,18 @@ exactly the drift `docs/FEATURES-PLAN.md` decision 3 exists to prevent.
 Overshipment is out of scope for gate 30 - see the design spec's
 "Alternatives considered". A line asking for more than was ordered is
 refused before anything is written, not silently truncated.
+
+### Every order line is accounted for, not just the ones in the receipt
+
+The loop below walks `order.lines`, not the caller's receipt lines. A
+receipt that leaves out a line on the order is not a no-op for that line -
+it means nothing arrived for it, which is a 100% short shipment, and it
+must produce a credit memo and a `partially_received` status like any other
+shortfall. Before this fix the loop walked the receipt instead, so an order
+line missing from the receipt was never examined at all: no credit memo,
+and if every *mentioned* line was complete, the order was wrongly marked
+fully `received` with no way to correct it (receiving is refused once
+status leaves `sent`).
 """
 
 from __future__ import annotations
@@ -46,6 +58,10 @@ class ReceiptLineInput:
     Frozen, and deliberately not the ORM model - a caller describing a
     receipt should not be handing us half-built database rows, the same
     reasoning as orders.OrderLineInput.
+
+    `quantity_received` is the count of GOOD units only - it does not
+    include `quantity_damaged`. The two are separate counts that both come
+    out of the same `quantity_ordered`; their sum must not exceed it.
     """
 
     product_id: int
@@ -62,6 +78,42 @@ def _find_line(order: PurchaseOrder, product_id: int):
     raise ValidationError(
         f"Product {product_id} is not on purchase order {order.id}."
     )
+
+
+def validate_receipt_against_order(order: PurchaseOrder, lines) -> None:
+    """Order-relative checks shared by both doors: `receive_order` (via
+    `_apply_receipt`) and `drafts.propose_receipt`, which stages a
+    DELIVERY_RECEIPT draft before any human has approved it. Without this
+    running at staging time too, an AI-proposed draft naming a product not on
+    the order, or a quantity above what was ordered, could sit in the queue
+    looking approvable and then always fail when a manager actually approves
+    it.
+
+    Duck-typed on `product_id` / `quantity_received` / `quantity_damaged`
+    rather than `ReceiptLineInput` specifically, so `drafts.py`'s pydantic
+    `ReceiptPayloadLine` can be checked here too without an import cycle.
+    """
+    seen: set[int] = set()
+    for receipt_line in lines:
+        if receipt_line.product_id in seen:
+            raise ValidationError(
+                f"Product {receipt_line.product_id} appears on this receipt "
+                "more than once."
+            )
+        seen.add(receipt_line.product_id)
+
+        if receipt_line.quantity_received < 0 or receipt_line.quantity_damaged < 0:
+            raise ValidationError("Received and damaged quantities cannot be negative.")
+
+        order_line = _find_line(order, receipt_line.product_id)
+        total_accounted = receipt_line.quantity_received + receipt_line.quantity_damaged
+        if total_accounted > order_line.quantity_ordered:
+            raise ValidationError(
+                f"Product {receipt_line.product_id}: received "
+                f"({receipt_line.quantity_received}) plus damaged "
+                f"({receipt_line.quantity_damaged}) exceeds the "
+                f"{order_line.quantity_ordered} ordered."
+            )
 
 
 def _apply_receipt(
@@ -98,27 +150,26 @@ def _apply_receipt(
     if not lines:
         raise ValidationError("A receipt must have at least one line.")
 
-    seen: set[int] = set()
+    validate_receipt_against_order(order, lines)
+    receipt_by_product: dict[int, ReceiptLineInput] = {
+        receipt_line.product_id: receipt_line for receipt_line in lines
+    }
+
     fully_received = True
 
-    for receipt_line in lines:
-        if receipt_line.product_id in seen:
-            raise ValidationError(
-                f"Product {receipt_line.product_id} appears on this receipt "
-                "more than once."
-            )
-        seen.add(receipt_line.product_id)
+    # Walk every line on the order, not just the ones the caller mentioned -
+    # see "Every order line is accounted for" above.
+    for order_line in order.lines:
+        receipt_line = receipt_by_product.get(order_line.product_id)
+        quantity_received = receipt_line.quantity_received if receipt_line else 0
+        quantity_damaged = receipt_line.quantity_damaged if receipt_line else 0
 
-        if receipt_line.quantity_received < 0 or receipt_line.quantity_damaged < 0:
-            raise ValidationError("Received and damaged quantities cannot be negative.")
-
-        order_line = _find_line(order, receipt_line.product_id)
-        total_accounted = receipt_line.quantity_received + receipt_line.quantity_damaged
+        total_accounted = quantity_received + quantity_damaged
         if total_accounted > order_line.quantity_ordered:
             raise ValidationError(
-                f"Product {receipt_line.product_id}: received "
-                f"({receipt_line.quantity_received}) plus damaged "
-                f"({receipt_line.quantity_damaged}) exceeds the "
+                f"Product {order_line.product_id}: received "
+                f"({quantity_received}) plus damaged "
+                f"({quantity_damaged}) exceeds the "
                 f"{order_line.quantity_ordered} ordered."
             )
 
@@ -126,10 +177,10 @@ def _apply_receipt(
         # include `quantity_damaged`. The two are separate counts that both
         # come out of the same ordered quantity, which is exactly what
         # `total_accounted` above checked.
-        good_units = receipt_line.quantity_received
+        good_units = quantity_received
 
-        order_line.quantity_received = receipt_line.quantity_received
-        order_line.quantity_damaged = receipt_line.quantity_damaged
+        order_line.quantity_received = quantity_received
+        order_line.quantity_damaged = quantity_damaged
         order_line.updated_by = actor.id
 
         if good_units > 0:
@@ -137,7 +188,7 @@ def _apply_receipt(
                 session,
                 actor,
                 client=client,
-                product_id=receipt_line.product_id,
+                product_id=order_line.product_id,
                 lot_code=receipt_line.lot_code,
                 quantity=good_units,
                 cost_price=order_line.unit_cost,
@@ -160,21 +211,18 @@ def _apply_receipt(
             )
             fully_received = False
 
-        if receipt_line.quantity_damaged > 0:
+        if quantity_damaged > 0:
             session.add(
                 CreditMemo(
                     supplier_id=order.supplier_id,
                     purchase_order_id=order.id,
                     reason=CreditMemoReason.DAMAGED.value,
-                    amount=Decimal(receipt_line.quantity_damaged) * order_line.unit_cost,
+                    amount=Decimal(quantity_damaged) * order_line.unit_cost,
                     created_by=actor.id,
                     created_via=client.value,
                     source_draft_id=source_draft_id,
                 )
             )
-            fully_received = False
-
-        if total_accounted < order_line.quantity_ordered:
             fully_received = False
 
     order.status = (

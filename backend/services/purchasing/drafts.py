@@ -35,7 +35,7 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 
 from core.actor import Actor
-from core.enums import ClientType
+from core.enums import ClientType, PurchaseOrderStatus
 from core.exceptions import ValidationError
 from core.models import ActionDraft
 from services import draft_types, drafts as draft_queue
@@ -278,7 +278,7 @@ def propose_receipt(
     # proposing to receive an order that cannot legally be received yet is
     # noise nobody can approve.
     order = orders._get_or_raise(session, order_id)
-    if order.status != "sent":
+    if order.status != PurchaseOrderStatus.SENT.value:
         raise ValidationError(
             f"Purchase order {order_id} is {order.status!r}, not 'sent', "
             "and cannot be received."
@@ -291,9 +291,16 @@ def propose_receipt(
     # ours, same as services/draft_types.py does at approval time - services/
     # never lets a pydantic exception escape to a caller.
     try:
-        ReceiptPayload.model_validate(payload)
+        parsed = ReceiptPayload.model_validate(payload)
     except PydanticValidationError as exc:
         raise ValidationError(str(exc)) from exc
+
+    # Shape-only (Pydantic) validation isn't enough - a payload can be
+    # well-formed and still name a product that isn't on this order, or a
+    # quantity above what was ordered. `_apply_receipt` catches that too, but
+    # only once a manager approves; catching it here means a draft that can
+    # never be approved never reaches the queue at all.
+    receiving.validate_receipt_against_order(order, parsed.lines)
 
     return draft_queue.create_draft(
         session,

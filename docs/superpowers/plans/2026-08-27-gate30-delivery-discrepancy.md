@@ -32,10 +32,13 @@ first. This plan implements it task-by-task; where the two disagree, the spec is
 - **No new ThunderID permissions.** Reuse `purchasing.write` (moves order status, creates credit
   memos) and `lot.write` (writes lots) — both already exist as *concepts* in this codebase, even
   though neither is created on the login server yet (that's a separate, already-tracked gap).
-- **Received quantity is capped at ordered.** Overshipment is out of scope — see the design spec's
-  "Alternatives considered."
+- **Received quantity is capped at ordered.** A receipt where `quantity_received +
+  quantity_damaged` exceeds `quantity_ordered` is rejected outright, not silently truncated.
+  Overshipment is out of scope — see the design spec's "Alternatives considered."
 - **Expiry date is required on both doors, no default.** Never invent one.
-- **Damaged units never become stock.** Only good (received minus damaged) units become a lot.
+- **`quantity_received` is already the count of good units** — it does NOT include
+  `quantity_damaged`. The two are separate counts that both come out of the same
+  `quantity_ordered`; only `quantity_received` units become a lot, damaged units never do.
 - **One delivery closes the order.** No partial-receipt-then-top-up-later tracking.
 - Run only the test file(s) for the task you're on while iterating; save a full `pytest` run for
   the end of the plan.
@@ -103,9 +106,10 @@ class CreditMemo(Base):
     """The supplier owes the shop money: a receipt came in short or damaged.
 
     Record-only for gate 30 — see the design spec's "Alternatives
-    considered". Nothing else in the system reads this table yet; it exists
-    so a manager can see who owes what. `supplier_id` is denormalized off
-    the order so a supplier-wide credit list needs no join.
+    considered". `PurchaseOrderRead` exposes these rows for reading, but
+    nothing applies or settles a credit memo against a future order yet — it
+    exists so a manager can see who owes what. `supplier_id` is denormalized
+    off the order so a supplier-wide credit list needs no join.
     """
 
     __tablename__ = "credit_memos"
@@ -1349,15 +1353,11 @@ a second style.
   rule), plus a `lot_code` text input. Only rendered when `order.status === "sent"` — matching how
   the existing Send/Cancel buttons are already conditionally shown based on status.
 
-- [ ] **Step 5: Show credit memos on the order detail page**, if any exist for this order — a
-  simple list (`reason`, `amount`) below the lines table. This needs a way to fetch them; check
-  whether Task 4's `PurchaseOrderRead` should have gained a `credit_memos` field (it does not, per
-  the schema written in Task 4) — if the developer wants this visible without adding a new
-  endpoint, the simplest fix consistent with existing patterns is adding
-  `credit_memos: list[CreditMemoRead]` to `PurchaseOrderRead` in Task 4 and eager-loading it in
-  `_repository.get_order`. **Flag this gap to the developer rather than silently expanding Task 4
-  or Task 6's scope** — it was not decided during brainstorming and needs a quick yes/no, not an
-  assumption.
+- [x] **Step 5: Show credit memos on the order detail page**, if any exist for this order — a
+  simple list (`reason`, `amount`) below the lines table. Resolved via a Task 4b follow-up, approved
+  by the developer: `PurchaseOrderRead` gained `credit_memos: list[CreditMemoRead]`, eager-loaded in
+  both `_repository.get_order` and `_repository.list_orders` (the latter was missed on the first pass
+  and fixed in the final whole-branch review — see gate 30's commit history).
 
 - [ ] **Step 6: Manual browser check** — per this project's standing rule, browser MCP tools may
   only be used after the developer has started both `uvicorn` and `npm run dev` and says continue.

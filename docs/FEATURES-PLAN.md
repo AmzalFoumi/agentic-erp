@@ -516,8 +516,9 @@ nothing. Full reasoning for each is in the design spec; summarised here:
   gate 28's markdown machinery in a way that wants its own design pass.
 - **Multiple deliveries against one order** — one delivery closes it; no partial-receipt-then-top-up
   tracking.
-- **Overshipment** (more arrives than was ordered) — not representable; received is capped at
-  ordered.
+- **Overshipment** (more arrives than was ordered) — not representable; a receipt where
+  `quantity_received + quantity_damaged` exceeds `quantity_ordered` for any line is rejected
+  outright, not silently truncated to the ordered amount.
 - **Repackaging `products.py`/`spoilage.py`/`lots.py` into packages** — the existing trigger above
   fires during this gate and is knowingly not acted on; see that note.
 

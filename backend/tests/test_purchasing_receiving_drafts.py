@@ -1,4 +1,13 @@
-"""DELIVERY_RECEIPT: propose a receipt, approve it, watch it apply."""
+"""DELIVERY_RECEIPT: propose a receipt, approve it, watch it apply.
+
+Covers the draft-only invariant (`propose_receipt` writes an `ActionDraft`
+and nothing operational - no lot, no credit memo, no order-status change,
+until a manager approves it), the approval boundary (approving is the only
+path that calls `_apply_receipt` for a draft-originated receipt, and an
+approver without `purchasing.write` cannot cross it even holding
+`draft.decide` and `lot.write`), and provenance (rows written on approval
+carry `source_draft_id` back to the draft that proposed them).
+"""
 
 from datetime import date
 from decimal import Decimal
@@ -175,4 +184,47 @@ def test_a_duplicate_product_line_is_refused(session, sent_order, product):
                 },
             ],
             reasoning="Two lines, same product.",
+        )
+
+
+def test_staging_rejects_a_quantity_above_what_was_ordered(session, sent_order, product):
+    """Order-relative checks run at staging time too, not only at approval -
+    an AI-proposed draft that can never be approved should never reach the
+    queue in the first place."""
+    with pytest.raises(ValidationError):
+        propose_receipt(
+            session,
+            SystemActor(),
+            client=ClientType.MCP_AGENT,
+            order_id=sent_order.id,
+            lines=[
+                {
+                    "product_id": product.id,
+                    "quantity_received": 51,  # sent_order ordered 50
+                    "quantity_damaged": 0,
+                    "expiry_date": "2026-09-10",
+                    "lot_code": "DN-OVER-1",
+                },
+            ],
+            reasoning="Dock worker miscounted, more claimed than was ordered.",
+        )
+
+
+def test_staging_rejects_a_product_not_on_the_order(session, sent_order, product):
+    with pytest.raises(ValidationError):
+        propose_receipt(
+            session,
+            SystemActor(),
+            client=ClientType.MCP_AGENT,
+            order_id=sent_order.id,
+            lines=[
+                {
+                    "product_id": product.id + 999_999,
+                    "quantity_received": 1,
+                    "quantity_damaged": 0,
+                    "expiry_date": "2026-09-10",
+                    "lot_code": "DN-UNKNOWN-1",
+                },
+            ],
+            reasoning="Wrong product on this order.",
         )

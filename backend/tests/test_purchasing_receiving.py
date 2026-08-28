@@ -50,6 +50,48 @@ def sent_order(session, product):
     )
 
 
+@pytest.fixture
+def second_product(session):
+    from uuid import uuid4
+
+    from services import products
+
+    return products.create_product(
+        session,
+        SystemActor(),
+        sku=f"TEST-{uuid4().hex[:12].upper()}",
+        name="Receiving Test Product 2",
+        unit="unit",
+        cost_price=Decimal("1.00"),
+        sell_price=Decimal("2.00"),
+    )
+
+
+@pytest.fixture
+def sent_order_two_lines(session, product, second_product):
+    supplier = purchasing.create_supplier(
+        session,
+        SystemActor(),
+        client=ClientType.SYSTEM,
+        name="Receiving Test Supplier (two lines)",
+        lead_time_days=2,
+        minimum_order_value=Decimal("0.00"),
+    )
+    order = purchasing.create_order(
+        session,
+        SystemActor(),
+        client=ClientType.SYSTEM,
+        supplier_id=supplier.id,
+        lines=[
+            OrderLineInput(product_id=product.id, quantity=50, unit_cost=Decimal("2.00")),
+            OrderLineInput(product_id=second_product.id, quantity=30, unit_cost=Decimal("3.00")),
+        ],
+    )
+    return purchasing.send_order(
+        session, SystemActor(), order_id=order.id, today=date(2026, 8, 27)
+    )
+
+
 def test_receiving_everything_ordered_moves_order_to_received(session, sent_order, product):
     result = receive_order(
         session,
@@ -203,6 +245,50 @@ def test_all_units_damaged_produces_no_lot_and_one_damage_credit(
 
     session.refresh(product)
     assert product.quantity_on_hand == 0  # nothing became stock
+
+
+def test_omitted_order_line_stays_partially_received_and_gets_a_full_short_credit(
+    session, sent_order_two_lines, product, second_product
+):
+    """A receipt naming only one of the order's two lines must not be treated
+    as a no-op for the line it left out: nothing arrived for that product, so
+    it is a 100% short shipment, same as if the caller had explicitly sent
+    quantity_received=0 for it."""
+    result = receive_order(
+        session,
+        SystemActor(),
+        client=ClientType.WEB_UI,
+        order_id=sent_order_two_lines.id,
+        lines=[
+            ReceiptLineInput(
+                product_id=product.id,
+                quantity_received=50,
+                quantity_damaged=0,
+                expiry_date=date(2026, 9, 10),
+                lot_code="DN-TEST-7",
+            )
+        ],
+    )
+    assert result.status == PurchaseOrderStatus.PARTIALLY_RECEIVED.value
+
+    lines_by_product = {line.product_id: line for line in result.lines}
+    assert lines_by_product[product.id].quantity_received == 50
+    omitted_line = lines_by_product[second_product.id]
+    assert omitted_line.quantity_received == 0
+    assert omitted_line.quantity_damaged == 0
+
+    from core.models import CreditMemo
+    from sqlalchemy import select
+
+    memos = session.execute(
+        select(CreditMemo).where(CreditMemo.purchase_order_id == result.id)
+    ).scalars().all()
+    assert len(memos) == 1
+    assert memos[0].reason == CreditMemoReason.SHORT_SHIPPED.value
+    assert memos[0].amount == Decimal("90.00")  # 30 short * 3.00 unit_cost
+
+    session.refresh(second_product)
+    assert second_product.quantity_on_hand == 0  # nothing arrived, nothing became stock
 
 
 def test_receiving_requires_purchasing_write(session, sent_order, product):

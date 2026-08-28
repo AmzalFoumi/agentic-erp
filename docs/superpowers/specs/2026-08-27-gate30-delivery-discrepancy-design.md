@@ -1,6 +1,7 @@
 # Gate 30 — delivery discrepancy and supplier credit
 
-**Status:** design approved 2026-08-27. Implementation not started.
+**Status:** design approved 2026-08-27. Code complete 2026-08-28, on `feat/erp/standout` — see
+`docs/PLAN.md`'s gate 30 row and `docs/FEATURES-PLAN.md` for the built state.
 **Owns:** gate 30 only, exactly as scoped by section 10 of
 `docs/superpowers/specs/2026-08-27-gate29-purchasing-design.md` — receiving a **sent** purchase
 order, splitting what arrived from what was ordered, and recording a supplier credit.

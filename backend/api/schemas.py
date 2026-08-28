@@ -662,6 +662,13 @@ class PurchaseOrderCreate(BaseModel):
 
 
 class ReceiptLineCreate(BaseModel):
+    """What arrived for one line on a purchase order.
+
+    `quantity_received` is the count of GOOD units only - it does not
+    include `quantity_damaged`. The two are separate counts that both come
+    out of the same `quantity_ordered`; their sum must not exceed it.
+    """
+
     product_id: int
     quantity_received: int = Field(..., ge=0)
     quantity_damaged: int = Field(..., ge=0)

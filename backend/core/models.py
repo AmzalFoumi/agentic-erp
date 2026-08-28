@@ -672,9 +672,10 @@ class CreditMemo(Base):
     """The supplier owes the shop money: a receipt came in short or damaged.
 
     Record-only for gate 30 - see the design spec's "Alternatives
-    considered". Nothing else in the system reads this table yet; it exists
-    so a manager can see who owes what. `supplier_id` is denormalized off
-    the order so a supplier-wide credit list needs no join.
+    considered". `PurchaseOrderRead` exposes these rows for reading, but no
+    workflow applies or settles a credit memo against a future order yet -
+    it exists so a manager can see who owes what. `supplier_id` is
+    denormalized off the order so a supplier-wide credit list needs no join.
     """
 
     __tablename__ = "credit_memos"
