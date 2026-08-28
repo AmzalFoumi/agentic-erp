@@ -268,18 +268,31 @@ rungs, with the day-9 and day-14 batches correctly excluded.
 
 **What is left, and none of it is business logic:**
 
-1. ⚠️ **`lot.read` and `lot.write` do not exist on the login server.** Until they are created, a
-   real token cannot carry them, and every spoilage screen and tool answers 403 for a signed-in
-   user. Tests pass regardless — they build actors directly. This is the silent-failure mode the
-   whole permissions table below warns about.
-2. `frontend/src/lib/api/schema.d.ts` needs regenerating (`npm run api:types` against a running
+1. `frontend/src/lib/api/schema.d.ts` needs regenerating (`npm run api:types` against a running
    uvicorn). It is build output, committed but never hand-edited.
-3. The browser walkthrough — now finally meaningful, because `/approvals` has something to show.
-4. The demo box seed, still deferred until all features stop changing. See `deploy/SEED-REBUILD.md`.
+2. The browser walkthrough — now finally meaningful, because `/approvals` has something to show,
+   and `/products/[id]` now lists each product's lots and has an **Add lot** sub-page
+   (`/products/[id]/lots/new`).
+3. The demo box seed, still deferred until all features stop changing. See `deploy/SEED-REBUILD.md`.
 
-**`lot.write` is deliberately NOT given to the agent.** Receiving a delivery is a physical event a
-person witnesses. An agent that could invent stock could invent a spoilage problem and then propose
-the solution to it. `agent/config.py` requests `lot.read` only.
+**Lot permissions were repointed onto gate-6 permissions (final stretch).** `lot.read` and
+`lot.write` were never created on the login server, so every lot screen and tool answered 403 for a
+signed-in user. Rather than a role rebuild before the demo, the checks now ride permissions that
+already exist:
+
+- reading lots / the spoilage scan → `product.read`
+- receiving a lot (`services/lots.receive_lot`, and therefore the gate-30 delivery-receipt
+  approver) → `stock.adjust`
+
+`backend/tests/test_lots.py`, `test_spoilage.py` and `test_purchasing_receiving_drafts.py` assert
+the new strings. The `lot.*` rows are gone from the box-debt list — nothing to seed.
+
+**The agent can now book a delivery into stock**, via the `receive_stock_lot` MCP tool, on
+`stock.adjust` (which it already holds). The old guard — "an agent that could invent stock could
+invent a spoilage problem and then propose the solution" — now rests on a different mechanism:
+`receive_stock_lot` is in **neither** `READ_ONLY` nor `STAGING_ONLY` in `agent/mcp_client.py`, so
+every call pauses for a human to confirm or cancel before anything is written. `agent/config.py` no
+longer requests `lot.read`.
 
 ### Known and deliberately deferred: concurrent decisions are not serialised
 
@@ -419,8 +432,9 @@ agent's pinned tool-gating set (34 tests) passes with the three new tools correc
 
 1. ⚠️ **`purchasing.read` and `purchasing.write` do not exist on the login server.** Until they are
    created, a real token cannot carry them, and the feature 403s for a signed-in user — the same
-   silent-failure mode gate 28's `lot.read`/`lot.write` carries. Batched with those two for after
-   gate 30, to avoid a seed rebuild per gate.
+   silent-failure mode gate 28's lot permissions carried before they were repointed onto
+   `product.read`/`stock.adjust` (see gate 28's section). `purchasing.*` could be repointed the same
+   way if a rebuild stays out of reach; not done yet.
 2. The browser walkthrough is blocked by the same permissions gap — `/suppliers` and `/purchasing`
    redirect the same way `/products` does for a session without them.
 3. The demo box seed, still deferred until all features stop changing. See `deploy/SEED-REBUILD.md`.
@@ -441,8 +455,9 @@ this file, not the spec, is the durable record.
 
 **One new table, `credit_memos`** (`supplier_id`, `purchase_order_id`, `reason`
 `short_shipped`/`damaged`, `amount`, `status` — one value, `open`, today). No new permissions: it
-reuses `purchasing.write` (moves the order to `received`/`partially_received`) and `lot.write`
-(writes the receiving lots), so it does not join the "seven places" list below with an eighth.
+reuses `purchasing.write` (moves the order to `received`/`partially_received`) and `stock.adjust`
+(writes the receiving lots, via `services/lots.receive_lot` — repointed off `lot.write` on the final
+stretch), so it does not join the "seven places" list below with an eighth.
 
 **A shared core, two doors, split by who produced the numbers, not by item count.** The plain form
 (`receive_order`) applies immediately — a human typing the numbers already **is** the check. The AI
@@ -474,8 +489,9 @@ task.
 **No new permission.** Verified by grepping every `require_permission`/`.can(` call added across
 Tasks 1–6, not assumed from the design doc: `services/purchasing/receiving.py`'s `_apply_receipt`
 checks `purchasing.write` (the same permission `send_order`/`cancel_order` already use), and
-`receive_lot` — called internally from `services/lots.py`, unchanged since gate 28 — checks
-`lot.write`. `services/purchasing/drafts.py`'s `propose_receipt` reuses the existing
+`receive_lot` — called internally from `services/lots.py` — checked `lot.write` here (since
+repointed to `stock.adjust` on the final stretch, when `lot.*` proved absent from the login
+server). `services/purchasing/drafts.py`'s `propose_receipt` reuses the existing
 `draft.create` check. Nothing new appears anywhere in the diff. This is unlike gates 28 and 29,
 which each introduced a fresh permission pair still missing from the login server — gate 30 adds no
 eighth or ninth item to that wait.
@@ -533,8 +549,8 @@ difference between them is negligible and the maintenance difference is not.
 | `draft.read` | human, agent | see the queue |
 | `draft.create` | human, agent | stage a proposal |
 | `draft.decide` | human **only** | approve or reject — see decision 1 |
-| `lot.read` | human, agent | expiry and spoilage views |
-| `lot.write` | human, agent | receive stock into a lot |
+| ~~`lot.read`~~ | — | **never created on the login server; repointed to `product.read`** (see gate 28) |
+| ~~`lot.write`~~ | — | **never created; repointed to `stock.adjust`.** The agent's `receive_stock_lot` tool rides it, guarded instead by in-conversation approval |
 | `purchasing.read` | human, agent | suppliers, price lists, the reorder report, orders |
 | `purchasing.write` | human **only** | create/edit suppliers and links, place and send/cancel orders — see gate 29's note above |
 

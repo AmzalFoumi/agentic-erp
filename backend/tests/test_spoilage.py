@@ -101,9 +101,9 @@ def test_scanning_changes_nothing(session, actor, unique_sku):
     assert drafts.count_drafts(session, actor, status=DraftStatus.PENDING) == pending_before
 
 
-def test_scanning_needs_lot_read(session, unique_sku, actor):
-    limited = TokenActor("nobody", frozenset({"product.read"}))
-    with pytest.raises(PermissionDeniedError, match="lot.read"):
+def test_scanning_needs_product_read(session, unique_sku, actor):
+    limited = TokenActor("nobody", frozenset({"stock.adjust"}))
+    with pytest.raises(PermissionDeniedError, match="product.read"):
         spoilage.scan_spoilage(session, limited, today=TODAY)
 
 
@@ -153,7 +153,7 @@ def test_a_proposal_carries_both_totals_for_the_human(session, actor, unique_sku
 
 
 def test_proposing_needs_draft_create(session, unique_sku, actor):
-    limited = TokenActor("nobody", frozenset({"lot.read"}))
+    limited = TokenActor("nobody", frozenset({"product.read"}))
     with pytest.raises(PermissionDeniedError, match="draft.create"):
         spoilage.propose_markdown(
             session, limited, client=ClientType.MCP_AGENT, today=TODAY
@@ -200,7 +200,7 @@ def test_an_agent_without_draft_decide_cannot_apply_its_own_proposal(
 
     agent = TokenActor(
         "agent",
-        frozenset({"lot.read", "draft.read", "draft.create", "product.update"}),
+        frozenset({"product.read", "draft.read", "draft.create", "product.update"}),
     )
     with pytest.raises(PermissionDeniedError, match="draft.decide"):
         drafts.approve_draft(

@@ -191,7 +191,7 @@ def scan_spoilage(
     Lots with no expiry date never appear here - `lots.expiring_lots` excludes
     them - so stock that predates expiry tracking can never be marked down.
     """
-    require_permission(actor, "lot.read")
+    require_permission(actor, "product.read")
 
     at_risk = lots.expiring_lots(
         session, actor, within_days=within_days, today=today

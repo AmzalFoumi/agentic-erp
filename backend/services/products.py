@@ -296,7 +296,7 @@ def create_product(
         # existed. Unknown expiry is never marked down and is consumed last.
         #
         # Written directly rather than through `lots.receive_lot`, because that
-        # function requires `lot.write` and creating a product with an opening
+        # function requires `stock.adjust` and creating a product with an opening
         # count requires `product.create`. Demanding both would break every
         # existing caller for no safety gain: the quantity is one this actor
         # was already authorised to set.

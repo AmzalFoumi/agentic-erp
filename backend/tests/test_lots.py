@@ -274,19 +274,19 @@ def test_a_lot_freezes_the_price_actually_paid(session, actor, unique_sku):
 # --- permissions -----------------------------------------------------------
 
 
-def test_reading_lots_needs_lot_read(session, unique_sku, actor):
+def test_reading_lots_needs_product_read(session, unique_sku, actor):
     product = _product(session, actor, unique_sku)
-    limited = TokenActor("nobody", frozenset({"product.read"}))
+    limited = TokenActor("nobody", frozenset({"stock.adjust"}))
 
-    with pytest.raises(PermissionDeniedError, match="lot.read"):
+    with pytest.raises(PermissionDeniedError, match="product.read"):
         lots.list_lots(session, limited, product_id=product.id)
 
 
-def test_receiving_needs_lot_write(session, unique_sku, actor):
+def test_receiving_needs_stock_adjust(session, unique_sku, actor):
     product = _product(session, actor, unique_sku)
-    limited = TokenActor("nobody", frozenset({"lot.read"}))
+    limited = TokenActor("nobody", frozenset({"product.read"}))
 
-    with pytest.raises(PermissionDeniedError, match="lot.write"):
+    with pytest.raises(PermissionDeniedError, match="stock.adjust"):
         lots.receive_lot(
             session, limited, client=ClientType.WEB_UI, product_id=product.id,
             lot_code="DN-1", quantity=1,

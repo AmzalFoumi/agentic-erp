@@ -5,7 +5,7 @@ and nothing operational - no lot, no credit memo, no order-status change,
 until a manager approves it), the approval boundary (approving is the only
 path that calls `_apply_receipt` for a draft-originated receipt, and an
 approver without `purchasing.write` cannot cross it even holding
-`draft.decide` and `lot.write`), and provenance (rows written on approval
+`draft.decide` and `stock.adjust`), and provenance (rows written on approval
 carry `source_draft_id` back to the draft that proposed them).
 """
 
@@ -131,7 +131,7 @@ def test_an_approver_without_purchasing_write_cannot_apply_a_receipt_draft(
 
     `_apply_receipt` is the shared core both doors call, and it must check
     `purchasing.write` itself - not just trust the caller to have checked it -
-    or an approver holding `draft.decide` and `lot.write` but not
+    or an approver holding `draft.decide` and `stock.adjust` but not
     `purchasing.write` could approve their way into receiving stock. Same
     shape as test_purchasing_drafts.py's
     test_an_approver_without_purchasing_write_is_refused for SUPPLIER_REORDER.
@@ -152,7 +152,7 @@ def test_an_approver_without_purchasing_write_cannot_apply_a_receipt_draft(
         ],
         reasoning="Dock worker said 40 of 50 cases arrived.",
     )
-    decider_only = _Actor("draft.read", "draft.decide", "lot.write")
+    decider_only = _Actor("draft.read", "draft.decide", "stock.adjust")
 
     with pytest.raises(PermissionDeniedError):
         draft_queue.approve_draft(

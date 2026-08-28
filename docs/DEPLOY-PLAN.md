@@ -458,27 +458,32 @@ both. That was harmless while every permission was one the agent legitimately ho
 harmless the moment a feature has a permission that is **deliberately human-only** — gate 27's
 `draft.decide` is the first, and gates 29–30 will add more.
 
-**Gate 28 added a second, for a different reason.** `lot.write` books a delivery in, and the
-agent deliberately does not hold it: receiving stock is a physical event a person witnesses, and
-an agent that could invent stock could invent a spoilage problem and then propose the solution
-to it. `lot.read` it does hold.
+**Gate 28 added a second — but it was retired on the final stretch.** `lot.read` and `lot.write`
+were never created on the login server, so rather than a role rebuild before the demo the checks
+were repointed onto permissions that already exist: reading lots and the spoilage scan onto
+`product.read`, and `services/lots.receive_lot` onto `stock.adjust`. Both are permissions the agent
+already holds, so the agent's `receive_stock_lot` MCP tool works — the "an agent must not invent
+stock" guard now rests on that tool pausing for in-conversation human approval (it is in neither
+allowlist in `agent/mcp_client.py`), not on a withheld permission. **Nothing about `lot.*` for the
+box seed to reproduce.**
 
 **Gate 29 adds a third human-only permission, for the same shape of reason as `lot.write`.**
 `purchasing.write` places an order and commits the shop's money — placing one is a decision a human
 makes, not something the agent should be able to trigger by proposing and then quietly holding the
 permission to also approve. `purchasing.read` the agent does hold, so it can look at suppliers and
 the reorder report and stage a proposal through `propose_reorder_order`, exactly the same shape as
-`draft.create`/`draft.decide` and `lot.read`/`lot.write` before it. So the running total of
-permissions the box's seed must reproduce is:
+`draft.create`/`draft.decide` before it. So the running total of permissions the box's seed must
+reproduce is:
 
 | Permission | Human role | Agent role |
 |---|---|---|
 | `draft.read`, `draft.create` | yes | yes |
 | `draft.decide` | yes | **no** |
-| `lot.read` | yes | yes |
-| `lot.write` | yes | **no** |
 | `purchasing.read` | yes | yes |
 | `purchasing.write` | yes | **no** |
+
+(`lot.read`/`lot.write` are not in this table: they never existed on the login server and the code
+was repointed off them — see the gate 28 note just above.)
 
 
 A permission that must not reach the agent needs the agent moved to its own role first. Putting it

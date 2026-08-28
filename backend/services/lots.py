@@ -52,10 +52,10 @@ def _get_product_or_raise(session: Session, product_id: int) -> Product:
     """The product, or NotFoundError.
 
     Private, and deliberately not routed through `products.get_product`: that
-    function performs its own `product.read` permission check, and a caller who
-    already holds `lot.write` should not additionally need `product.read` to
-    receive a delivery. Permissions are checked once, by the public function
-    the caller actually called.
+    function performs its own permission check, and a caller who already passed
+    the check on the public function it called should not be re-checked here.
+    Permissions are checked once, by the public function the caller actually
+    called.
     """
     product = session.get(Product, product_id)
     if product is None:
@@ -108,7 +108,7 @@ def list_lots(
     should agree, and the cheapest way to guarantee that is to write the
     ordering once.
     """
-    require_permission(actor, "lot.read")
+    require_permission(actor, "product.read")
     _get_product_or_raise(session, product_id)
 
     statement = select(InventoryLot).where(InventoryLot.product_id == product_id)
@@ -152,7 +152,7 @@ def receive_lot(
     and refusing it would leave the shop unable to record what is on its own
     shelf. The spoilage report is where already-expired stock gets noticed.
     """
-    require_permission(actor, "lot.write")
+    require_permission(actor, "stock.adjust")
 
     if quantity <= 0:
         raise ValidationError("A received lot must have a positive quantity.")
@@ -276,7 +276,7 @@ def expiring_lots(
     `today` is passed in rather than read from the clock so that the whole
     feature can be tested at a fixed point in time. See `pricing.days_until`.
     """
-    require_permission(actor, "lot.read")
+    require_permission(actor, "product.read")
 
     if within_days < 0:
         raise ValidationError("within_days cannot be negative.")
