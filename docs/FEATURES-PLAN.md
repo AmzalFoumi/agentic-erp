@@ -434,8 +434,8 @@ writes a queued suggestion and nothing operational.
 
 ## Gate 30 — delivery discrepancy and supplier credit
 
-**Design approved 2026-08-27, not yet built.** Full design (data model, the shared-core-two-doors
-shape, testing plan) in
+**Code complete 2026-08-28, on `feat/erp/standout`.** Full design (data model, the
+shared-core-two-doors shape, testing plan) in
 `docs/superpowers/specs/2026-08-27-gate30-delivery-discrepancy-design.md`. Summarised here because
 this file, not the spec, is the durable record.
 
@@ -450,6 +450,56 @@ path (`propose_receipt`, draft type `DELIVERY_RECEIPT`) always queues to `/appro
 exists to check the agent's guess before it becomes stock and money. This is a refinement of
 decision 1 above (which splits by item-count/financial-consequence), not a new rule: gate 30's two
 doors don't differ by what they do, only by whether there's a guess behind the numbers to review.
+
+### State of play — gate 30 code complete 2026-08-28
+
+Migration `34334348fe8e` (`create_credit_memos_table`) is **applied to Supabase**: `credit_memos`
+exists with RLS enabled, applied directly to the shared dev database the way every earlier gate's
+migration was. **300 backend tests collect cleanly** (`pytest --collect-only`) across the full
+suite, including 21 new/touched for this gate (`test_models_credit_memo.py`,
+`test_purchasing_receiving.py`, `test_purchasing_receiving_drafts.py`,
+`test_api_purchasing_receiving.py`); `lint-imports` reports all 4 contracts kept throughout every
+task.
+
+| Layer | What landed |
+|---|---|
+| `core/models.py` | `CreditMemo` — supplier, purchase order, reason, amount, status |
+| `services/purchasing/receiving.py` | The shared core: `_apply_receipt`, called by both doors, records received/damaged quantities per line, writes lots via `services/lots.py`'s `receive_lot`, opens a `CreditMemo` for any shortfall or damage, and moves the order to `received` or `partially_received` |
+| `services/purchasing/drafts.py` | `propose_receipt`, staging the second door as draft type `DELIVERY_RECEIPT` |
+| `api/routes/purchasing.py` | `POST` routes for the direct-receive door and the propose-receipt door |
+| `mcp_server/server.py` | `propose_delivery_receipt` — the only door reachable from the agent, and it only stages |
+| `api/schemas.py` | `PurchaseOrderRead` gained a `credit_memos: list[CreditMemoRead] = []` field, added in-flight (not in the original Task 4 brief) so the order detail page can show any credit a delivery generated without a second round trip |
+| `frontend/src/app/purchasing/[id]/receive/` | The delivery receiving screen: the dock-worker form that calls the direct-receive door |
+
+**No new permission.** Verified by grepping every `require_permission`/`.can(` call added across
+Tasks 1–6, not assumed from the design doc: `services/purchasing/receiving.py`'s `_apply_receipt`
+checks `purchasing.write` (the same permission `send_order`/`cancel_order` already use), and
+`receive_lot` — called internally from `services/lots.py`, unchanged since gate 28 — checks
+`lot.write`. `services/purchasing/drafts.py`'s `propose_receipt` reuses the existing
+`draft.create` check. Nothing new appears anywhere in the diff. This is unlike gates 28 and 29,
+which each introduced a fresh permission pair still missing from the login server — gate 30 adds no
+eighth or ninth item to that wait.
+
+**What is left, and none of it is business logic:**
+
+1. ⚠️ **The `credit_memos` table has not been carried into `deploy/aisle-box/`'s hand-maintained
+   copy.** The migration was applied directly to the shared dev Supabase database during
+   implementation (per the working agreement), but the box runs no migrations of its own — see
+   CLAUDE.md, "Before a feature is finished, check what it owes the demo box", and
+   `docs/DEPLOY-PLAN.md`'s "What a new feature has to update in the box" checklist. Unlike a missing
+   permission, a missing table is not silent: the box will fail with a real "column/table does not
+   exist" error the first time a delivery is received there. Recorded here so it is a decision to
+   pick up, not a surprise.
+2. The browser walkthrough for the two receiving doors, not yet done.
+3. The demo box seed generally, still deferred until all features stop changing — see
+   `deploy/SEED-REBUILD.md`.
+
+**Deferred idea, not built: agent-suggested credit application.** Once a purchase order's reorder
+suggestion exists (gate 29) and an open credit memo exists (this gate), the agent could someday
+*suggest* applying that credit toward the new order — surfaced for a human to opt into, never
+applied automatically. Not designed or built; noted here as a candidate for a future gate, alongside
+this section's own "Credit memos applied against a future order" entry below, which already defers
+the general credit-application workflow this idea would sit on top of.
 
 ### Alternatives considered, and deferred rather than rejected
 
