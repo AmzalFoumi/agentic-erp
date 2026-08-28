@@ -6,6 +6,7 @@ import { ThunderIDProvider } from "@thunderid/nextjs/server";
 
 import { AgentPanel } from "@/components/shell/agent-panel";
 import { DensityToggle } from "@/components/shell/density-toggle";
+import { Logo } from "@/components/shell/logo";
 import { Nav } from "@/components/shell/nav";
 import { ThemeProvider } from "@/components/shell/theme-provider";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
@@ -34,7 +35,7 @@ const fontMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Inventory",
+  title: "AIsle",
   description: "Supermarket inventory and purchasing",
 };
 
@@ -117,7 +118,7 @@ export default function RootLayout({
             <SignedIn>
               {/* App header */}
               <div className="flex items-center justify-between border-b border-border bg-card px-5 py-3">
-                <div className="text-sm font-semibold">Inventory</div>
+                <Logo className="h-5" />
                 <div className="flex items-center gap-4">
                   <DensityToggle />
                   <ThemeToggle />

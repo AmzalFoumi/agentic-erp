@@ -64,6 +64,10 @@ import { createRouteMatcher, thunderIDProxy } from "@thunderid/nextjs/server";
  */
 const isPublicRoute = createRouteMatcher([
   "/",
+  // The AIsle wordmark, rendered on the signed-out landing page itself - see
+  // the note above this list on why a genuinely public asset must be added
+  // here rather than relying on the matcher's static-asset exclusions.
+  "/aisle-wordmark.png",
 ]);
 
 export default thunderIDProxy(async (thunderid, request) => {

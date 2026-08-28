@@ -1,6 +1,7 @@
 import { SignInButton, SignedIn, SignedOut } from "@thunderid/nextjs";
 
 import { AfterSignInRedirect } from "@/components/shell/after-sign-in-redirect";
+import { Logo } from "@/components/shell/logo";
 
 /**
  * The signed-out landing page, and the only route the app serves that is not
@@ -37,7 +38,9 @@ export default function Home() {
 
       <SignedOut>
         <div className="flex flex-col items-center gap-stack text-center">
-          <h1 className="text-lg font-semibold">Inventory</h1>
+          <h1>
+            <Logo href={null} className="h-12" />
+          </h1>
           <p className="text-sm text-muted-foreground">Sign in to continue.</p>
           <SignInButton className="h-control rounded-(--radius) bg-primary px-4 text-sm font-medium text-primary-foreground">
             Sign in
