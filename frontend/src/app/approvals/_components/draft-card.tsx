@@ -23,7 +23,7 @@ type Draft = components["schemas"]["DraftRead"];
 const TYPE_LABELS: Record<string, string> = {
   BATCH_PRICE_MARKDOWN: "Markdown expiring stock",
   SUPPLIER_REORDER: "Reorder from a supplier",
-  DELIVERY_RECONCILIATION: "Delivery discrepancy",
+  DELIVERY_RECEIPT: "Delivery discrepancy",
 };
 
 /**

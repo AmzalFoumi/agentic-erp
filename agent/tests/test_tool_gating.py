@@ -85,6 +85,11 @@ def test_staging_only_holds_exactly_the_draft_tools() -> None:
         # Gate 29. Stages one draft row and places no order; the manager still
         # sees every line, the supplier's minimum, and the cost before send.
         "propose_reorder_order",
+        # Gate 30. Stages one draft row for a delivery receipt proposal and
+        # records no credit until the manager approves; the manager still sees
+        # every line and every expiry date before anything happens. The draft
+        # carries no cost_at_risk - the credit amount is derived at approval.
+        "propose_delivery_receipt",
     }
 
 
@@ -96,6 +101,12 @@ def test_the_two_allowlists_do_not_overlap() -> None:
     silently do nothing.
     """
     assert READ_ONLY.isdisjoint(STAGING_ONLY)
+
+
+def test_propose_delivery_receipt_is_staging_only() -> None:
+    """Gate 30. Stages a delivery receipt proposal for human approval."""
+    assert "propose_delivery_receipt" in STAGING_ONLY
+    assert "propose_delivery_receipt" not in READ_ONLY
 
 
 def test_a_tool_that_decides_a_draft_would_still_be_gated() -> None:

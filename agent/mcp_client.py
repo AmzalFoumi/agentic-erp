@@ -136,6 +136,11 @@ STAGING_ONLY = frozenset(
         # manager makes on a screen showing every line, the supplier's
         # minimum, and what the order would cost.
         "propose_reorder_order",
+        # Gate 30. Writes one draft row for a delivery receipt proposal and
+        # records no credit until the manager approves. It clears the bar:
+        # approving it later is a real decision a manager makes on a screen
+        # showing every line, expiry dates, and the cost at risk.
+        "propose_delivery_receipt",
     }
 )
 

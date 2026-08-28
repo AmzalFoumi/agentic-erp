@@ -15,6 +15,7 @@ import { api } from "@/lib/api/client";
 import { formatDate, formatDateTime } from "@/lib/format";
 
 import { OrderActions } from "./_components/order-actions";
+import { ReceiveForm } from "./_components/receive-form";
 
 const HEAD = "h-auto px-cell-x py-cell-y";
 const CELL = "px-cell-x py-0";
@@ -131,7 +132,7 @@ export default async function PurchaseOrderDetailPage({
         </Table>
       </div>
 
-      <div className="flex items-center justify-between rounded-(--radius) border border-border bg-card p-section text-sm">
+      <div className="mb-section flex items-center justify-between rounded-(--radius) border border-border bg-card p-section text-sm">
         <span className="text-muted-foreground">
           Created {formatDateTime(order.created_at)} · {order.created_by ?? "system"}
         </span>
@@ -139,6 +140,22 @@ export default async function PurchaseOrderDetailPage({
           Total <MoneyDisplay value={order.total_value} />
         </span>
       </div>
+
+      {order.status === "sent" && <ReceiveForm orderId={order.id} lines={order.lines} />}
+
+      {order.credit_memos.length > 0 && (
+        <div className="rounded-(--radius) border border-border bg-card p-section">
+          <h2 className="mb-stack text-sm font-semibold">Supplier credit memos</h2>
+          <ul className="flex flex-col gap-2">
+            {order.credit_memos.map((memo) => (
+              <li key={memo.id} className="flex items-center justify-between text-sm">
+                <span className="text-foreground">{memo.reason}</span>
+                <MoneyDisplay value={memo.amount} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

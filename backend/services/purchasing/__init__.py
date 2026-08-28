@@ -40,7 +40,13 @@ from services.purchasing.orders import (
     list_orders,
     send_order,
 )
-from services.purchasing.drafts import SUPPLIER_REORDER, propose_reorder
+from services.purchasing.drafts import (
+    DELIVERY_RECEIPT,
+    SUPPLIER_REORDER,
+    propose_receipt,
+    propose_reorder,
+)
+from services.purchasing.receiving import receive_order
 from services.purchasing.reorder import (
     ReorderBundle,
     ReorderLine,
@@ -55,6 +61,7 @@ from services.purchasing.suppliers import (
 )
 
 __all__ = [
+    "DELIVERY_RECEIPT",
     "SUPPLIER_REORDER",
     "ReorderBundle",
     "ReorderLine",
@@ -68,7 +75,9 @@ __all__ = [
     "list_orders",
     "list_supplier_products",
     "list_suppliers",
+    "propose_receipt",
     "propose_reorder",
+    "receive_order",
     "scan_reorder",
     "send_order",
     "update_link",

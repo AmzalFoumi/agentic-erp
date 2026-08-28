@@ -31,15 +31,16 @@ from datetime import date
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 
 from core.actor import Actor
-from core.enums import ClientType
+from core.enums import ClientType, PurchaseOrderStatus
 from core.exceptions import ValidationError
 from core.models import ActionDraft
 from services import draft_types, drafts as draft_queue
 from services.guards import require_permission
-from services.purchasing import orders, reorder
+from services.purchasing import orders, reorder, receiving
 
 # A closed name from a closed list, never a function reference. See
 # docs/FEATURES-PLAN.md row 1 - a payload naming a function to call is a
@@ -210,4 +211,144 @@ draft_types.register(
     SUPPLIER_REORDER,
     schema=ReorderPayload,
     handler=_create_purchase_order,
+)
+
+
+# A second closed name from a closed list, exactly like SUPPLIER_REORDER above.
+DELIVERY_RECEIPT = "DELIVERY_RECEIPT"
+
+
+class ReceiptPayloadLine(BaseModel):
+    """What arrived for one product on the order."""
+
+    product_id: int
+    quantity_received: int = Field(..., ge=0)
+    quantity_damaged: int = Field(..., ge=0)
+    expiry_date: date
+    lot_code: str = Field(..., min_length=1, max_length=64)
+
+
+class ReceiptPayload(BaseModel):
+    """What a DELIVERY_RECEIPT draft carries."""
+
+    order_id: int
+    lines: list[ReceiptPayloadLine] = Field(..., min_length=1)
+
+    @field_validator("lines")
+    @classmethod
+    def _one_line_per_product(
+        cls, lines: list[ReceiptPayloadLine]
+    ) -> list[ReceiptPayloadLine]:
+        """Refuse a payload naming one product twice - the identical defect
+        ReorderPayload guards against above, for the identical reason: a
+        manager editing the payload on the approval screen is exactly how a
+        duplicate gets in."""
+        seen: set[int] = set()
+        for line in lines:
+            if line.product_id in seen:
+                raise ValueError(
+                    f"Product {line.product_id} appears more than once."
+                )
+            seen.add(line.product_id)
+        return lines
+
+
+def propose_receipt(
+    session: Session,
+    actor: Actor,
+    *,
+    client: ClientType,
+    order_id: int,
+    lines: list[dict],
+    reasoning: str,
+) -> ActionDraft:
+    """Stage what arrived as a draft for a human. **Writes nothing operational.**
+
+    Unlike propose_reorder, this always requires `reasoning` from the caller
+    rather than generating a default - the dock worker's own words are the
+    entire reason this feature exists, and losing them in favour of a
+    templated string would defeat the point.
+    """
+    require_permission(actor, "draft.create")
+
+    if not reasoning or not reasoning.strip():
+        raise ValidationError("A delivery receipt draft must carry a reason.")
+
+    # Confirms the order exists and is in `sent` before staging - a draft
+    # proposing to receive an order that cannot legally be received yet is
+    # noise nobody can approve.
+    order = orders._get_or_raise(session, order_id)
+    if order.status != PurchaseOrderStatus.SENT.value:
+        raise ValidationError(
+            f"Purchase order {order_id} is {order.status!r}, not 'sent', "
+            "and cannot be received."
+        )
+
+    payload = {"order_id": order_id, "lines": lines}
+    # Validate here too, before staging - the same reason ReorderPayload is
+    # validated inside propose_reorder: an obviously malformed draft should
+    # never reach the queue. Pydantic's own ValidationError is translated to
+    # ours, same as services/draft_types.py does at approval time - services/
+    # never lets a pydantic exception escape to a caller.
+    try:
+        parsed = ReceiptPayload.model_validate(payload)
+    except PydanticValidationError as exc:
+        raise ValidationError(str(exc)) from exc
+
+    # Shape-only (Pydantic) validation isn't enough - a payload can be
+    # well-formed and still name a product that isn't on this order, or a
+    # quantity above what was ordered. `_apply_receipt` catches that too, but
+    # only once a manager approves; catching it here means a draft that can
+    # never be approved never reaches the queue at all.
+    receiving.validate_receipt_against_order(order, parsed.lines)
+
+    return draft_queue.create_draft(
+        session,
+        actor,
+        client=client,
+        draft_type=DELIVERY_RECEIPT,
+        payload=payload,
+        reasoning=reasoning.strip(),
+        cost_at_risk=None,
+        projected_recovery=None,
+    )
+
+
+def _apply_delivery_receipt(
+    session: Session,
+    actor: Actor,
+    client: ClientType,
+    payload: ReceiptPayload,
+    draft: ActionDraft,
+) -> None:
+    """Runs only when a human approves. Records `source_draft_id` on every
+    lot and credit memo this creates, via `receiving._apply_receipt`.
+
+    Does not commit - `drafts.approve_draft` owns the transaction, same
+    contract as `_create_purchase_order` above.
+    """
+    order = orders._get_or_raise(session, payload.order_id)
+    receiving._apply_receipt(
+        session,
+        actor,
+        client=client,
+        order=order,
+        lines=[
+            receiving.ReceiptLineInput(
+                product_id=line.product_id,
+                quantity_received=line.quantity_received,
+                quantity_damaged=line.quantity_damaged,
+                expiry_date=line.expiry_date,
+                lot_code=line.lot_code,
+            )
+            for line in payload.lines
+        ],
+        source_draft_id=draft.id,
+    )
+
+
+draft_types.register(
+    DELIVERY_RECEIPT,
+    schema=ReceiptPayload,
+    handler=_apply_delivery_receipt,
 )

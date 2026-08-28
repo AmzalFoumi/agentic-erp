@@ -82,3 +82,31 @@ class PurchaseOrderStatus(str, Enum):
     PARTIALLY_RECEIVED = "partially_received"
     RECEIVED = "received"
     CANCELLED = "cancelled"
+
+
+class CreditMemoReason(str, Enum):
+    """Why the shop is owed money on a receipt.
+
+    Two reasons only, matching gate 30's design: a line either arrived short
+    of what was ordered, or arrived damaged. A line can carry both - a
+    shortfall and a damage credit are two separate rows, not one merged
+    figure, so a manager reading the supplier's credit list can tell which
+    problem is which.
+    """
+
+    SHORT_SHIPPED = "short_shipped"
+    DAMAGED = "damaged"
+
+
+class CreditMemoStatus(str, Enum):
+    """Where a credit memo stands.
+
+    One value today, on purpose. `docs/superpowers/specs/2026-08-27-gate30-
+    delivery-discrepancy-design.md`'s "Alternatives considered" defers
+    tracking a credit against a future order - that would need a second
+    status (e.g. APPLIED). A Python enum with one member costs nothing now
+    and needs no migration to grow later - it's persisted as a plain
+    `String(16)` column, same as every other status field in this codebase.
+    """
+
+    OPEN = "open"

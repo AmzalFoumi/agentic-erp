@@ -406,7 +406,9 @@ become packages in the same shape as `services/purchasing/`, for the same reason
 several distinct responsibilities living in one file. Not done as part of gate 29 — it moves
 roughly 40 import sites and needs the `import-linter` contracts in `backend/pyproject.toml` edited,
 two days before the submission deadline. Trigger: the next non-trivial change to any of the three
-files, or 2026-08-29, whichever comes first.
+files, or 2026-08-29, whichever comes first. ⚠️ **This trigger fires during gate 30** — receiving
+writes to `lots.py` — **and is deliberately not acted on anyway.** See gate 30's own "Alternatives
+considered" section below for why.
 
 80 backend tests were added this gate (271 total), all four `lint-imports` contracts hold, and the
 agent's pinned tool-gating set (34 tests) passes with the three new tools correctly split — two in
@@ -429,6 +431,96 @@ money. The agent proposes; only a human's approval, checked by `purchasing.write
 second and separate check, turns that into a placed one. `agent/mcp_client.py` requests
 `purchasing.read` only, via `READ_ONLY`; `propose_reorder_order` sits in `STAGING_ONLY`, which
 writes a queued suggestion and nothing operational.
+
+## Gate 30 — delivery discrepancy and supplier credit
+
+**Code complete 2026-08-28, on `feat/erp/standout`.** Full design (data model, the
+shared-core-two-doors shape, testing plan) in
+`docs/superpowers/specs/2026-08-27-gate30-delivery-discrepancy-design.md`. Summarised here because
+this file, not the spec, is the durable record.
+
+**One new table, `credit_memos`** (`supplier_id`, `purchase_order_id`, `reason`
+`short_shipped`/`damaged`, `amount`, `status` — one value, `open`, today). No new permissions: it
+reuses `purchasing.write` (moves the order to `received`/`partially_received`) and `lot.write`
+(writes the receiving lots), so it does not join the "seven places" list below with an eighth.
+
+**A shared core, two doors, split by who produced the numbers, not by item count.** The plain form
+(`receive_order`) applies immediately — a human typing the numbers already **is** the check. The AI
+path (`propose_receipt`, draft type `DELIVERY_RECEIPT`) always queues to `/approvals` — the queue
+exists to check the agent's guess before it becomes stock and money. This is a refinement of
+decision 1 above (which splits by item-count/financial-consequence), not a new rule: gate 30's two
+doors don't differ by what they do, only by whether there's a guess behind the numbers to review.
+
+### State of play — gate 30 code complete 2026-08-28
+
+Migration `34334348fe8e` (`create_credit_memos_table`) is **applied to Supabase**: `credit_memos`
+exists with RLS enabled, applied directly to the shared dev database the way every earlier gate's
+migration was. **291 backend tests collect cleanly** (`pytest --collect-only`) across the full
+suite, including 15 new for this gate (`test_models_credit_memo.py`,
+`test_purchasing_receiving.py`, `test_purchasing_receiving_drafts.py`,
+`test_api_purchasing_receiving.py`); `lint-imports` reports all 4 contracts kept throughout every
+task.
+
+| Layer | What landed |
+|---|---|
+| `core/models.py` | `CreditMemo` — supplier, purchase order, reason, amount, status |
+| `services/purchasing/receiving.py` | The shared core: `_apply_receipt`, called by both doors, records received/damaged quantities per line, writes lots via `services/lots.py`'s `receive_lot`, opens a `CreditMemo` for any shortfall or damage, and moves the order to `received` or `partially_received` |
+| `services/purchasing/drafts.py` | `propose_receipt`, staging the second door as draft type `DELIVERY_RECEIPT` |
+| `api/routes/purchasing.py` | `POST` routes for the direct-receive door and the propose-receipt door |
+| `mcp_server/server.py` | `propose_delivery_receipt` — the only door reachable from the agent, and it only stages |
+| `api/schemas.py` | `PurchaseOrderRead` gained a `credit_memos: list[CreditMemoRead] = []` field, added in-flight (not in the original Task 4 brief) so the order detail page can show any credit a delivery generated without a second round trip |
+| `frontend/src/app/purchasing/orders/[id]/_components/receive-form.tsx` | The delivery receiving form, embedded in the existing order detail page: the dock-worker form that calls the direct-receive door |
+
+**No new permission.** Verified by grepping every `require_permission`/`.can(` call added across
+Tasks 1–6, not assumed from the design doc: `services/purchasing/receiving.py`'s `_apply_receipt`
+checks `purchasing.write` (the same permission `send_order`/`cancel_order` already use), and
+`receive_lot` — called internally from `services/lots.py`, unchanged since gate 28 — checks
+`lot.write`. `services/purchasing/drafts.py`'s `propose_receipt` reuses the existing
+`draft.create` check. Nothing new appears anywhere in the diff. This is unlike gates 28 and 29,
+which each introduced a fresh permission pair still missing from the login server — gate 30 adds no
+eighth or ninth item to that wait.
+
+**What is left, and none of it is business logic:**
+
+1. **The box needs nothing further for this gate.** Verified live, not assumed:
+   `deploy/aisle-box/docker-compose.yml` points every Python service at the same shared Supabase
+   database the `34334348fe8e` migration was already applied to, so the box sees `credit_memos`
+   without running any migration of its own. `aisle_demo`'s DB role already has `select`/`insert` on
+   `credit_memos` and `usage` on its sequence, granted automatically via the existing `alter default
+   privileges` — the same mechanism that covers every other table, not a one-off grant. Combined with
+   "no new ThunderID permission" above, gate 30's box debt is genuinely zero. An earlier version of
+   this item warned the box was missing the table and would fail loudly on first use — that was
+   wrong; corrected here.
+2. The browser walkthrough for the two receiving doors, not yet done.
+3. The demo box seed generally, still deferred until all features stop changing — see
+   `deploy/SEED-REBUILD.md`.
+
+**Deferred idea, not built: agent-suggested credit application.** Once a purchase order's reorder
+suggestion exists (gate 29) and an open credit memo exists (this gate), the agent could someday
+*suggest* applying that credit toward the new order — surfaced for a human to opt into, never
+applied automatically. Not designed or built; noted here as a candidate for a future gate, alongside
+this section's own "Credit memos applied against a future order" entry below, which already defers
+the general credit-application workflow this idea would sit on top of.
+
+### Alternatives considered, and deferred rather than rejected
+
+Recorded so a return trip to any of these is a decision to revisit, not one to re-litigate from
+nothing. Full reasoning for each is in the design spec; summarised here:
+
+- **Off-order arrivals** (a delivery with no matching purchase order) — a separate future gate, not
+  part of this one. `adjust_stock` already covers "just add stock" with no order involved.
+- **Credit memos applied against a future order** — `credit_memos.status` is a real enum with one
+  value today specifically so this can be added later as a new status plus consuming logic, no
+  migration required.
+- **Damaged units sold anyway, at a discount** — always excluded from stock instead; overlaps with
+  gate 28's markdown machinery in a way that wants its own design pass.
+- **Multiple deliveries against one order** — one delivery closes it; no partial-receipt-then-top-up
+  tracking.
+- **Overshipment** (more arrives than was ordered) — not representable; a receipt where
+  `quantity_received + quantity_damaged` exceeds `quantity_ordered` for any line is rejected
+  outright, not silently truncated to the ordered amount.
+- **Repackaging `products.py`/`spoilage.py`/`lots.py` into packages** — the existing trigger above
+  fires during this gate and is knowingly not acted on; see that note.
 
 ## Permissions these gates add
 

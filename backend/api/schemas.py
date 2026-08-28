@@ -610,6 +610,20 @@ class PurchaseOrderLineRead(BaseModel):
     quantity_ordered: int
     unit_cost: Decimal
     line_total: Decimal
+    quantity_received: int
+    quantity_damaged: int
+
+
+class CreditMemoRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    supplier_id: int
+    purchase_order_id: int
+    reason: str
+    amount: Decimal
+    status: str
+    created_at: datetime
 
 
 class PurchaseOrderRead(BaseModel):
@@ -625,6 +639,7 @@ class PurchaseOrderRead(BaseModel):
     created_at: datetime
     created_by: str | None
     lines: list[PurchaseOrderLineRead]
+    credit_memos: list[CreditMemoRead] = []
 
 
 class PurchaseOrderList(BaseModel):
@@ -644,3 +659,29 @@ class PurchaseOrderCreate(BaseModel):
     supplier_id: int
     lines: list[PurchaseOrderLineCreate] = Field(..., min_length=1)
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class ReceiptLineCreate(BaseModel):
+    """What arrived for one line on a purchase order.
+
+    `quantity_received` is the count of GOOD units only - it does not
+    include `quantity_damaged`. The two are separate counts that both come
+    out of the same `quantity_ordered`; their sum must not exceed it.
+    """
+
+    product_id: int
+    quantity_received: int = Field(..., ge=0)
+    quantity_damaged: int = Field(..., ge=0)
+    expiry_date: date
+    lot_code: str = Field(..., min_length=1, max_length=64)
+
+
+class PurchaseOrderReceive(BaseModel):
+    lines: list[ReceiptLineCreate] = Field(..., min_length=1)
+
+
+class ReceiptDraftCreate(BaseModel):
+    lines: list[ReceiptLineCreate] = Field(..., min_length=1)
+    reasoning: str = Field(..., min_length=1, max_length=2000)
+
+
