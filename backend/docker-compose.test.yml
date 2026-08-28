@@ -22,9 +22,12 @@ name: aisle-test-db
 services:
   db:
     # Pinned to 17 to match Supabase's engine version (checked live via the
-    # Supabase dashboard on 2026-08-28: postgres_engine "17"), so a migration
-    # that applies cleanly here behaves the same way against the real project.
-    # `alpine` just means a smaller image; it changes nothing about behavior.
+    # Supabase dashboard on 2026-08-28: postgres_engine "17"), so migrations
+    # are validated against the same PostgreSQL major version Supabase runs.
+    # This does not make the container equivalent to Supabase itself - no
+    # extensions, roles, or RLS - see backend/tests/README.md's "What this
+    # does not do". `alpine` just means a smaller image; it changes nothing
+    # about behavior.
     image: postgres:17-alpine
     restart: "no"
     environment:
@@ -44,11 +47,13 @@ services:
       # Nothing in deploy/aisle-box/ uses 5433 either (it publishes only 3000
       # and 8090), so there is no cross-project collision to worry about.
       - "127.0.0.1:5433:5432"
-    # Deliberately NO `volumes:` entry. Data lives only inside the container's
-    # writable layer, so `docker compose down` actually erases it - there is
-    # no stale state to debug days later, and every fresh `up` starts from a
-    # truly empty database (which is why the migration step below is a
-    # required part of the workflow, not an optional one).
+    # Deliberately NO `volumes:` entry of our own - but the postgres image
+    # declares one internally, so Compose still creates an anonymous volume
+    # for it. `docker compose down` alone leaves that volume orphaned; use
+    # `down -v` (see backend/tests/README.md) to actually remove it. Either
+    # way every fresh `up` starts from a truly empty database (which is why
+    # the migration step below is a required part of the workflow, not an
+    # optional one).
     healthcheck:
       # `--wait` (see backend/tests/README.md) blocks on this rather than on
       # the container merely existing, so `alembic upgrade head` never runs

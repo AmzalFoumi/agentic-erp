@@ -56,6 +56,14 @@ start there:
 $env:DATABASE_URL="postgresql+psycopg://aisle:aisle@127.0.0.1:5433/aisle_test"; alembic upgrade head; Remove-Item Env:\DATABASE_URL
 ```
 
+If your terminal is Git Bash, `$env:` doesn't work (see the note below) and
+`alembic` silently falls back to `backend/.env`, migrating the real Supabase
+project instead of this container. Use this form there instead:
+
+```bash
+DATABASE_URL="postgresql+psycopg://aisle:aisle@127.0.0.1:5433/aisle_test" alembic upgrade head
+```
+
 ## Running tests against it
 
 Tests use a **different** variable, `TEST_DATABASE_URL`, read directly by
@@ -98,14 +106,17 @@ to a different database.
 ## Tearing it down
 
 ```powershell
-docker compose -f docker-compose.test.yml down
+docker compose -f docker-compose.test.yml down -v
 ```
 
-This deletes the container and everything in it - there is no volume backing
-it, on purpose, so there's never stale data left to debug days later. The next
-`up` starts from empty again, which means the migration step above is not
-optional after a `down`; skipping it shows up as a query failing on a table
-that doesn't exist.
+This deletes the container and its data. `docker-compose.test.yml` has no
+`volumes:` entry of its own, but the `postgres:17-alpine` image declares one
+internally, so Compose still creates an anonymous volume behind the scenes -
+`down` alone leaves that volume orphaned on disk; `-v` is what actually
+removes it. Either way the next `up` starts from an empty database (a fresh
+anonymous volume, or the container's own layer), which means the migration
+step above is not optional after a `down`; skipping it shows up as a query
+failing on a table that doesn't exist.
 
 ## Which one should I actually use?
 
@@ -131,9 +142,11 @@ Before running backend tests, work through this in order:
 1. **Is the Docker engine running?**
    `docker info` (exits non-zero / errors if the engine itself is down).
    - **No** → don't try to start Docker Desktop or the engine yourself, that's
-     an OS-level action outside this container's scope. Fall back to plain
-     `pytest` (live Supabase) and tell the developer you did, since it's the
-     slower path.
+     an OS-level action outside this container's scope, and don't fall back to
+     plain `pytest` either — that would run against live Supabase, which is
+     outside the standing exception's scope. Stop and tell the developer Docker
+     isn't running; let them choose whether to start it or explicitly ask for
+     the Supabase path.
    - **Yes** → continue.
 
 2. **Is the container up and healthy?**
@@ -145,9 +158,9 @@ Before running backend tests, work through this in order:
 3. **Is it migrated?** A fresh or just-recreated container has no tables —
    there's no volume, so this is lost on every `down`. Check directly:
    `docker exec aisle-test-db-db-1 psql -U aisle -d aisle_test -c "\dt"`.
-   - **No relations found** → migrate it yourself, using the self-cleaning
-     one-liner from step "One-time: bring the container up and migrate it"
-     above (sets `DATABASE_URL` for that single command, then removes it).
+   - **No relations found** → migrate it yourself, using the Bash form from
+     step "One-time: bring the container up and migrate it" above (sets
+     `DATABASE_URL` for that single command only).
 
 4. **Run the tests**, using the Bash form (the developer's shell is Git Bash
    — see the note under "Running tests against it" for why the PowerShell
@@ -159,8 +172,9 @@ Before running backend tests, work through this in order:
 
 Steps 1–3 are idempotent — safe to run every time without checking history
 first. Do this automatically, without asking first, whenever backend tests
-need to run; only fall back to Supabase (step 1's "no" branch) or surface an
-error if something in steps 2–3 doesn't recover on the first attempt.
+need to run; only stop and report to the developer (step 1's "no" branch) or
+surface an error if something in steps 2–3 doesn't recover on the first
+attempt.
 
 ## What this does *not* do
 

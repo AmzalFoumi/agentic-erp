@@ -111,7 +111,11 @@ This one is manual — it needs a browser — but it is one button and one paste
                    "roles","groups","agents","serverConfigs"]) body[k] = ["*"];
   const r = await fetch("/export", {method: "POST", body: JSON.stringify(body),
     headers: {Authorization: "Bearer " + t, "Content-Type": "application/json"}});
+  if (!r.ok) throw new Error(`Export failed: ${r.status} ${r.statusText}`);
   const j = await r.json();
+  if (typeof j.resources !== "string") {
+    throw new Error("Export response did not contain resources");
+  }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([j.resources], {type: "text/yaml"}));
   a.download = "thunderid-config.yml";
@@ -267,11 +271,11 @@ something. It should carry `openid` plus every permission the backend checks.
 
 > Script equivalent: `bash deploy/aisle-box/seed-build/rebuild-seed.sh verify`
 
-#### If sign-in fails, check these two things before suspecting the login-server data
+#### If sign-in fails, check these three things before suspecting the login-server data
 
 This rebuild only touches ThunderID's identity data (the two `.db` files). It never rebuilds
-the box's application images or touches your host machine's ports. Two problems that look
-like a broken rebuild are actually neither, and both were hit for real on 2026-08-28:
+the box's application images or touches your host machine's ports. Three problems that look
+like a broken rebuild are actually neither, and all three were hit for real on 2026-08-28:
 
 **1. The box's own images are stale.** If a feature branch changed anything under
 `docker-compose.yml`'s `args:` — most commonly `NEXT_PUBLIC_THUNDERID_SCOPES`, a build-time
