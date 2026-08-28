@@ -455,8 +455,8 @@ doors don't differ by what they do, only by whether there's a guess behind the n
 
 Migration `34334348fe8e` (`create_credit_memos_table`) is **applied to Supabase**: `credit_memos`
 exists with RLS enabled, applied directly to the shared dev database the way every earlier gate's
-migration was. **300 backend tests collect cleanly** (`pytest --collect-only`) across the full
-suite, including 21 new/touched for this gate (`test_models_credit_memo.py`,
+migration was. **291 backend tests collect cleanly** (`pytest --collect-only`) across the full
+suite, including 15 new for this gate (`test_models_credit_memo.py`,
 `test_purchasing_receiving.py`, `test_purchasing_receiving_drafts.py`,
 `test_api_purchasing_receiving.py`); `lint-imports` reports all 4 contracts kept throughout every
 task.
@@ -469,7 +469,7 @@ task.
 | `api/routes/purchasing.py` | `POST` routes for the direct-receive door and the propose-receipt door |
 | `mcp_server/server.py` | `propose_delivery_receipt` — the only door reachable from the agent, and it only stages |
 | `api/schemas.py` | `PurchaseOrderRead` gained a `credit_memos: list[CreditMemoRead] = []` field, added in-flight (not in the original Task 4 brief) so the order detail page can show any credit a delivery generated without a second round trip |
-| `frontend/src/app/purchasing/[id]/receive/` | The delivery receiving screen: the dock-worker form that calls the direct-receive door |
+| `frontend/src/app/purchasing/orders/[id]/_components/receive-form.tsx` | The delivery receiving form, embedded in the existing order detail page: the dock-worker form that calls the direct-receive door |
 
 **No new permission.** Verified by grepping every `require_permission`/`.can(` call added across
 Tasks 1–6, not assumed from the design doc: `services/purchasing/receiving.py`'s `_apply_receipt`
