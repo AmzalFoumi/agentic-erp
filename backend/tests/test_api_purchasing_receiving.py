@@ -117,6 +117,37 @@ def test_order_detail_includes_credit_memos_from_a_short_shipment(client, sent_o
     assert memo["amount"] == "15.00"  # 3 short * 5.00 unit_cost
 
 
+def test_list_endpoint_includes_credit_memos_without_erroring(client, sent_order_id, product):
+    """Gate 30 Task 4b follow-up: `list_orders` must eager-load
+    `credit_memos` the same way it already does for `lines`. Without that,
+    `PurchaseOrderRead` (which now requires `credit_memos`) forces a lazy
+    load per order while serializing the list route - a silent N+1, and one
+    that would raise outside the session context entirely once the response
+    is built after the session closes."""
+    receive_response = client.post(
+        f"/purchase-orders/{sent_order_id}/receive",
+        json={
+            "lines": [
+                {
+                    "product_id": product.id,
+                    "quantity_received": 7,
+                    "quantity_damaged": 0,
+                    "expiry_date": "2026-09-15",
+                    "lot_code": "DN-API-5",
+                }
+            ]
+        },
+    )
+    assert receive_response.status_code == 200
+
+    list_response = client.get("/purchase-orders")
+    assert list_response.status_code == 200
+    body = list_response.json()
+    order = next(o for o in body["items"] if o["id"] == sent_order_id)
+    assert len(order["credit_memos"]) == 1
+    assert order["credit_memos"][0]["reason"] == "short_shipped"
+
+
 def test_an_unknown_order_is_not_found(client, product):
     response = client.post(
         "/purchase-orders/999999/receive",

@@ -180,7 +180,10 @@ def list_orders(
     rows = session.execute(
         select(PurchaseOrder)
         .where(*filters)
-        .options(selectinload(PurchaseOrder.lines))
+        .options(
+            selectinload(PurchaseOrder.lines),
+            selectinload(PurchaseOrder.credit_memos),
+        )
         .order_by(PurchaseOrder.id.desc())
         .limit(limit)
         .offset(offset)
