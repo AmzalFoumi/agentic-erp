@@ -482,14 +482,15 @@ eighth or ninth item to that wait.
 
 **What is left, and none of it is business logic:**
 
-1. ⚠️ **The `credit_memos` table has not been carried into `deploy/aisle-box/`'s hand-maintained
-   copy.** The migration was applied directly to the shared dev Supabase database during
-   implementation (per the working agreement), but the box runs no migrations of its own — see
-   CLAUDE.md, "Before a feature is finished, check what it owes the demo box", and
-   `docs/DEPLOY-PLAN.md`'s "What a new feature has to update in the box" checklist. Unlike a missing
-   permission, a missing table is not silent: the box will fail with a real "column/table does not
-   exist" error the first time a delivery is received there. Recorded here so it is a decision to
-   pick up, not a surprise.
+1. **The box needs nothing further for this gate.** Verified live, not assumed:
+   `deploy/aisle-box/docker-compose.yml` points every Python service at the same shared Supabase
+   database the `34334348fe8e` migration was already applied to, so the box sees `credit_memos`
+   without running any migration of its own. `aisle_demo`'s DB role already has `select`/`insert` on
+   `credit_memos` and `usage` on its sequence, granted automatically via the existing `alter default
+   privileges` — the same mechanism that covers every other table, not a one-off grant. Combined with
+   "no new ThunderID permission" above, gate 30's box debt is genuinely zero. An earlier version of
+   this item warned the box was missing the table and would fail loudly on first use — that was
+   wrong; corrected here.
 2. The browser walkthrough for the two receiving doors, not yet done.
 3. The demo box seed generally, still deferred until all features stop changing — see
    `deploy/SEED-REBUILD.md`.

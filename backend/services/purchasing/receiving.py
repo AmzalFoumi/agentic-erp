@@ -2,11 +2,12 @@
 
 ### The one rule this module exists to enforce
 
-Damaged units never become stock. Only `quantity_received - quantity_damaged`
-units become an InventoryLot; damaged units are a number on a credit memo
-only. This is checked in exactly one place, `_apply_receipt`, so the two
-public doors below - a human typing a form, or a manager approving the AI's
-parse of what the dock worker said - can never disagree about it.
+Damaged units never become stock. Only `quantity_received` units become an
+InventoryLot; `quantity_damaged` is a separate count out of the same ordered
+quantity, and never becomes stock - it is a number on a credit memo only.
+This is checked in exactly one place, `_apply_receipt`, so the two public
+doors below - a human typing a form, or a manager approving the AI's parse of
+what the dock worker said - can never disagree about it.
 
 ### Reuses services.lots.receive_lot rather than writing stock twice
 
@@ -78,7 +79,17 @@ def _apply_receipt(
     No commit: like every gate 29 core function, the caller (`receive_order`
     directly, or `drafts.approve_draft` via the DELIVERY_RECEIPT handler)
     owns the transaction.
+
+    Checks `purchasing.write` itself rather than trusting the caller to have
+    done it: `receive_order` below checks it too (harmless, self-documenting),
+    but the draft-approval door only checked `draft.decide` before landing
+    here, which meant an approver with `draft.decide` and `lot.write` but not
+    `purchasing.write` could apply a DELIVERY_RECEIPT draft. Both public doors
+    to this function must agree on what it takes to receive an order, and the
+    check belongs where it cannot be bypassed.
     """
+    require_permission(actor, "purchasing.write")
+
     if order.status != PurchaseOrderStatus.SENT.value:
         raise ValidationError(
             f"A purchase order that is {order.status!r} cannot be received."
