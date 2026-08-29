@@ -101,6 +101,27 @@ export function ReceiveLotForm({ id }: { id: number }) {
         </p>
       </div>
 
+      <div>
+        <label htmlFor="sell_price" className="mb-1 block text-xs text-muted-foreground">
+          Sell price <span className="text-muted-foreground">(optional)</span>
+        </label>
+        <input
+          id="sell_price"
+          name="sell_price"
+          type="number"
+          step="0.01"
+          min="0"
+          placeholder="uses the product's catalogue price"
+          aria-invalid={Boolean(state.fieldErrors.sell_price)}
+          className={`${FIELD_CLASS} font-mono`}
+        />
+        <FieldError message={state.fieldErrors.sell_price} />
+        <p className="mt-1 text-xs text-muted-foreground">
+          The shelf price for this batch. A spoilage markdown later discounts
+          this batch alone, not the whole product.
+        </p>
+      </div>
+
       <FormError message={state.formError} />
 
       <div className="mt-1 flex gap-2">

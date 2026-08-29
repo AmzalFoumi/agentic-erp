@@ -14,6 +14,7 @@ export async function receiveLot(
   const quantity = Number(formData.get("quantity"));
   const expiryRaw = String(formData.get("expiry_date") ?? "").trim();
   const costRaw = String(formData.get("cost_price") ?? "").trim();
+  const sellRaw = String(formData.get("sell_price") ?? "").trim();
 
   // `cost_price` crosses the wire as a string — the money convention, so the
   // exact cents the user typed reach the backend untouched by float parsing.
@@ -25,6 +26,7 @@ export async function receiveLot(
       quantity,
       ...(expiryRaw ? { expiry_date: expiryRaw } : {}),
       ...(costRaw ? { cost_price: costRaw } : {}),
+      ...(sellRaw ? { sell_price: sellRaw } : {}),
     },
   });
 

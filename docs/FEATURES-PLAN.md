@@ -260,6 +260,20 @@ carton off the shelf is the one from the most urgent lot. The report still shows
 a manager wants the whole picture. Pinned by
 `test_two_lots_of_one_product_are_priced_at_the_deepest_discount`.
 
+> **Amendment 2026-08-29 — the price moved onto the lot, and the collapse is gone.** The developer's
+> call: discounting one expiring batch should not reprice next week's delivery of the same product.
+> So `InventoryLot` gained `sell_price` (the shelf price for that batch, inherited from the product's
+> catalogue price at receive) and `discount_percent` (what a markdown took off). `_apply_markdown`
+> now writes `lot.sell_price`, never `product.sell_price`; `_lines_for()` emits one line **per lot**
+> and `MarkdownPayload` rejects a duplicate `lot_id` instead of a duplicate `product_id`. Because
+> prices now vary by lot, `products` gained six nullable roll-up columns —
+> `min_/max_/avg_cost_price` and the `sell_price` trio — over the lots that still have stock,
+> maintained by the new **single write path** `services/lots.recalculate_price_stats` (guarded by a
+> source-level test the same way `recalculate_on_hand` is). Migration `a7f3c1e94b28`. Frontend: the
+> products list and detail page show a price **range**, the product detail lots table shows each
+> lot's sell price and `−N%` badge, and the receive-lot form/tool take an optional `sell_price`.
+> `test_two_lots_of_one_product_get_their_own_prices` replaces the deepest-discount test.
+
 **The catalogue now has dated lots.** `backend/seed/2026-08-27-dated-lots.sql` carves 14 dated
 batches out of the products' `OPENING` lots — **splitting rather than deleting**, so product ids
 survive and every total is unchanged. Dates are `CURRENT_DATE + n`, never literal, so the data does
@@ -383,8 +397,10 @@ it came from, so it had no way to record `PurchaseOrder.source_draft_id`. The id
 in the payload — the payload is editable by the approving manager, so an id inside it is a number a
 browser can set, and provenance you can forge is not provenance. `DraftHandler` gained a fifth
 argument, `ActionDraft`, threaded through `drafts.py`'s call site and every handler, including gate
-28's `_apply_markdown`, which takes it and ignores it — a markdown changes prices on `products`,
-which has no `source_draft_id` column to write to.
+28's `_apply_markdown`, which takes it and ignores it — a markdown changes `sell_price` on the
+`inventory_lots` it names (see the 2026-08-29 amendment above), and while a lot *has* a
+`source_draft_id`, that column records the delivery the lot came from, not a later repricing of it,
+so there is still nowhere here to write the draft id.
 
 ### State of play — gate 29 code complete 2026-08-27
 

@@ -516,6 +516,15 @@ simply has nothing to show: an empty supplier list, a reorder screen with nothin
 added `backend/seed/2026-08-27-suppliers.sql`; run it against Supabase by hand the same way as a
 migration, before a judge runs the box, or `/purchasing` is correct and empty.
 
+**Final stretch (2026-08-29): lot-level markdowns add migration `a7f3c1e94b28`.** It adds
+`sell_price` + `discount_percent` to `inventory_lots` and six price roll-up columns to `products`,
+and backfills them. Apply it to Supabase by hand before a judge runs the box — the symptom of
+missing it is `/products` failing on `min_sell_price does not exist`. `backend/seed/2026-08-27-dated-lots.sql`
+was updated in the same change to set `sell_price` on the batches it creates; re-running it against
+Supabase is safe (idempotent) and makes the seeded lots price-consistent, but is not required for
+the box to start. **No new permission and no new setting** — markdown approval still uses
+`product.update`, receiving still uses `stock.adjust`, so sections 1 and 3 have nothing to carry.
+
 ### 3. A new setting has to be added to the compose file by hand
 
 `backend/`, `agent/` and `frontend/` each read settings from their own `.env`, which the box does

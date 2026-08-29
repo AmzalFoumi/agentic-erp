@@ -5,7 +5,7 @@ import { ExpiryBadge } from "@/components/domain/expiry-badge";
 import { MoneyDisplay } from "@/components/domain/money-display";
 import { StockBadge } from "@/components/domain/stock-badge";
 import { api } from "@/lib/api/client";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, priceRange } from "@/lib/format";
 
 function BackToList() {
   return (
@@ -127,11 +127,23 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
       <div className="mb-section grid grid-cols-2 gap-x-section gap-y-stack rounded-(--radius) border border-border bg-card p-section">
         <Field label="Category">{product.category ?? "—"}</Field>
         <Field label="Unit">{product.unit}</Field>
-        <Field label="Cost price">
+        <Field label="Cost price (catalogue)">
           <MoneyDisplay value={product.cost_price} />
+          {product.min_cost_price !== null &&
+          product.min_cost_price !== product.max_cost_price ? (
+            <div className="text-xs text-muted-foreground">
+              lots {priceRange(product.min_cost_price, product.max_cost_price, product.cost_price)}
+            </div>
+          ) : null}
         </Field>
-        <Field label="Sell price">
+        <Field label="Sell price (catalogue)">
           <MoneyDisplay value={product.sell_price} />
+          {product.min_sell_price !== null &&
+          product.min_sell_price !== product.max_sell_price ? (
+            <div className="text-xs text-muted-foreground">
+              lots {priceRange(product.min_sell_price, product.max_sell_price, product.sell_price)}
+            </div>
+          ) : null}
         </Field>
         <Field label="Created">
           {formatDateTime(product.created_at)} · {product.created_by ?? "system"}
@@ -176,6 +188,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                   <th className="py-2 pr-3 font-medium">Expiry</th>
                   <th className="py-2 pr-3 text-right font-medium">Quantity</th>
                   <th className="py-2 pr-3 text-right font-medium">Unit cost</th>
+                  <th className="py-2 pr-3 text-right font-medium">Sell price</th>
                   <th className="py-2 font-medium">Received</th>
                 </tr>
               </thead>
@@ -189,6 +202,14 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                     <td className="py-2 pr-3 text-right font-mono tabular-nums">{lot.quantity}</td>
                     <td className="py-2 pr-3 text-right">
                       <MoneyDisplay value={lot.cost_price} />
+                    </td>
+                    <td className="py-2 pr-3 text-right">
+                      <MoneyDisplay value={lot.sell_price} />
+                      {lot.discount_percent > 0 ? (
+                        <div className="text-xs text-muted-foreground">
+                          −{lot.discount_percent}%
+                        </div>
+                      ) : null}
                     </td>
                     <td className="py-2 text-xs text-muted-foreground">
                       {formatDateTime(lot.created_at)} · {lot.created_via}
