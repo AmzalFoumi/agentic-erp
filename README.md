@@ -11,14 +11,15 @@ exactly once** and reused by different front doors:
 ## The core idea
 
 ```
-                 ┌──────────────┐
-   Next.js UI ──▶│  api/        │──┐
-                 └──────────────┘  │      ┌─────────────┐      ┌──────────┐
-                       ▲           ├─────▶│  services/  │─────▶│  core/   │──▶ Postgres
-                       │           │      │ (the logic) │      │ (models) │
-              ┌────────────┐  ┌──────────────┐ └─────────────┘  └──────────┘
-   agent panel│  agent/    │─▶│ mcp_server/  │──┘
-              └────────────┘  └──────────────┘
+                        ┌──────────────┐
+          Next.js UI──▶│  api/        │──┐
+                        └──────────────┘  │               ┌─────────────┐      ┌──────────┐
+                                          ├─────────────▶│  services/   │────▶│  core/   │──▶ Postgres
+                                          │               │ (the logic) │      │ (models) │
+                                          │               └─────────────┘      └──────────┘
+                    ┌────────────┐   ┌──────────────┐  
+   agent panel  ──▶│  agent/    │─▶│ mcp_server/  │
+                    └────────────┘   └──────────────┘
 ```
 
 A service function is just a plain Python function. FastAPI wraps it in an HTTP route; MCP wraps it
