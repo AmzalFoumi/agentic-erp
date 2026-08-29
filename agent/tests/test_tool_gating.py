@@ -109,6 +109,15 @@ def test_propose_delivery_receipt_is_staging_only() -> None:
     assert "propose_delivery_receipt" not in READ_ONLY
 
 
+def test_receive_stock_lot_needs_in_conversation_approval() -> None:
+    """Final stretch. Booking a delivery into stock is a real write, not a
+    proposal, so it must pause for a human every call - it is in neither
+    allowlist."""
+    assert "receive_stock_lot" not in READ_ONLY
+    assert "receive_stock_lot" not in STAGING_ONLY
+    assert tool_kind("receive_stock_lot") == "unapproved"
+
+
 def test_a_tool_that_decides_a_draft_would_still_be_gated() -> None:
     """No such tool exists, and the backend has a test keeping it that way.
 

@@ -458,27 +458,32 @@ both. That was harmless while every permission was one the agent legitimately ho
 harmless the moment a feature has a permission that is **deliberately human-only** — gate 27's
 `draft.decide` is the first, and gates 29–30 will add more.
 
-**Gate 28 added a second, for a different reason.** `lot.write` books a delivery in, and the
-agent deliberately does not hold it: receiving stock is a physical event a person witnesses, and
-an agent that could invent stock could invent a spoilage problem and then propose the solution
-to it. `lot.read` it does hold.
+**Gate 28 added a second — but it was retired on the final stretch.** `lot.read` and `lot.write`
+were never created on the login server, so rather than a role rebuild before the demo the checks
+were repointed onto permissions that already exist: reading lots and the spoilage scan onto
+`product.read`, and `services/lots.receive_lot` onto `stock.adjust`. Both are permissions the agent
+already holds, so the agent's `receive_stock_lot` MCP tool works — the "an agent must not invent
+stock" guard now rests on that tool pausing for in-conversation human approval (it is in neither
+allowlist in `agent/mcp_client.py`), not on a withheld permission. **Nothing about `lot.*` for the
+box seed to reproduce.**
 
 **Gate 29 adds a third human-only permission, for the same shape of reason as `lot.write`.**
 `purchasing.write` places an order and commits the shop's money — placing one is a decision a human
 makes, not something the agent should be able to trigger by proposing and then quietly holding the
 permission to also approve. `purchasing.read` the agent does hold, so it can look at suppliers and
 the reorder report and stage a proposal through `propose_reorder_order`, exactly the same shape as
-`draft.create`/`draft.decide` and `lot.read`/`lot.write` before it. So the running total of
-permissions the box's seed must reproduce is:
+`draft.create`/`draft.decide` before it. So the running total of permissions the box's seed must
+reproduce is:
 
 | Permission | Human role | Agent role |
 |---|---|---|
 | `draft.read`, `draft.create` | yes | yes |
 | `draft.decide` | yes | **no** |
-| `lot.read` | yes | yes |
-| `lot.write` | yes | **no** |
 | `purchasing.read` | yes | yes |
 | `purchasing.write` | yes | **no** |
+
+(`lot.read`/`lot.write` are not in this table: they never existed on the login server and the code
+was repointed off them — see the gate 28 note just above.)
 
 
 A permission that must not reach the agent needs the agent moved to its own role first. Putting it
@@ -510,6 +515,15 @@ not — the box starts cleanly, every endpoint answers, and the feature it is me
 simply has nothing to show: an empty supplier list, a reorder screen with nothing to bundle. Gate 29
 added `backend/seed/2026-08-27-suppliers.sql`; run it against Supabase by hand the same way as a
 migration, before a judge runs the box, or `/purchasing` is correct and empty.
+
+**Final stretch (2026-08-29): lot-level markdowns add migration `a7f3c1e94b28`.** It adds
+`sell_price` + `discount_percent` to `inventory_lots` and six price roll-up columns to `products`,
+and backfills them. Apply it to Supabase by hand before a judge runs the box — the symptom of
+missing it is `/products` failing on `min_sell_price does not exist`. `backend/seed/2026-08-27-dated-lots.sql`
+was updated in the same change to set `sell_price` on the batches it creates; re-running it against
+Supabase is safe (idempotent) and makes the seeded lots price-consistent, but is not required for
+the box to start. **No new permission and no new setting** — markdown approval still uses
+`product.update`, receiving still uses `stock.adjust`, so sections 1 and 3 have nothing to carry.
 
 ### 3. A new setting has to be added to the compose file by hand
 

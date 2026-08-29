@@ -108,8 +108,32 @@ class Product(Base):
     # float in one expression raises. Keep money in Decimal end to end.
     #
     # (10, 2) = up to 10 total digits, 2 after the point: max 99,999,999.99.
+    #
+    # As of the lot-pricing change these two are the **catalogue price** - the
+    # default a new lot inherits and the number the product screens show as the
+    # headline price. The price a customer actually pays lives on the lot
+    # (`InventoryLot.sell_price`), because a spoilage markdown discounts one
+    # expiring batch, not every carton of the product. Editing these here does
+    # NOT reprice lots that already exist.
     cost_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
     sell_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+
+    # --- lot price roll-ups ----------------------------------------------------
+    #
+    # Min / max / average of the price columns across this product's lots that
+    # still have stock (`quantity > 0`). Stored, not computed on read, and
+    # maintained in exactly ONE place - `services/lots.py::recalculate_price_stats`
+    # - alongside `recalculate_on_hand`, for the same reason: every screen wants
+    # them and nobody wants to pay for the aggregate each time.
+    #
+    # Nullable: NULL means "this product has no lots with stock", so the screens
+    # fall back to the catalogue price above.
+    min_cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    max_cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    avg_cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    min_sell_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    max_sell_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    avg_sell_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
 
     # --- stock -------------------------------------------------------------
 
@@ -393,6 +417,17 @@ class InventoryLot(Base):
     # raises their price in September. `cost_at_risk` is only truthful if it
     # uses what was actually paid for the stock in question.
     cost_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+
+    # The shelf price for *this* batch. Set from `Product.sell_price` (the
+    # catalogue price) when the lot is received, unless a price is given
+    # explicitly. A spoilage markdown lowers this one lot's price and records
+    # how much it took off in `discount_percent` - it never touches the product.
+    sell_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"))
+
+    # How many percent a markdown has taken off this lot's price. 0 = full
+    # price. Set by the BATCH_PRICE_MARKDOWN approval handler; this is the only
+    # record kept of a markdown once it is applied.
+    discount_percent: Mapped[int] = mapped_column(default=0)
 
     # --- provenance --------------------------------------------------------
     #

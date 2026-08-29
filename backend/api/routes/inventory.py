@@ -169,6 +169,7 @@ def receive_lot(
         lot_code=delivery.lot_code,
         quantity=delivery.quantity,
         cost_price=delivery.cost_price,
+        sell_price=delivery.sell_price,
         expiry_date=delivery.expiry_date,
     )
     return LotRead.model_validate(lot)

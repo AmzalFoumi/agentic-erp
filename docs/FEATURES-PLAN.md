@@ -260,6 +260,20 @@ carton off the shelf is the one from the most urgent lot. The report still shows
 a manager wants the whole picture. Pinned by
 `test_two_lots_of_one_product_are_priced_at_the_deepest_discount`.
 
+> **Amendment 2026-08-29 — the price moved onto the lot, and the collapse is gone.** The developer's
+> call: discounting one expiring batch should not reprice next week's delivery of the same product.
+> So `InventoryLot` gained `sell_price` (the shelf price for that batch, inherited from the product's
+> catalogue price at receive) and `discount_percent` (what a markdown took off). `_apply_markdown`
+> now writes `lot.sell_price`, never `product.sell_price`; `_lines_for()` emits one line **per lot**
+> and `MarkdownPayload` rejects a duplicate `lot_id` instead of a duplicate `product_id`. Because
+> prices now vary by lot, `products` gained six nullable roll-up columns —
+> `min_/max_/avg_cost_price` and the `sell_price` trio — over the lots that still have stock,
+> maintained by the new **single write path** `services/lots.recalculate_price_stats` (guarded by a
+> source-level test the same way `recalculate_on_hand` is). Migration `a7f3c1e94b28`. Frontend: the
+> products list and detail page show a price **range**, the product detail lots table shows each
+> lot's sell price and `−N%` badge, and the receive-lot form/tool take an optional `sell_price`.
+> `test_two_lots_of_one_product_get_their_own_prices` replaces the deepest-discount test.
+
 **The catalogue now has dated lots.** `backend/seed/2026-08-27-dated-lots.sql` carves 14 dated
 batches out of the products' `OPENING` lots — **splitting rather than deleting**, so product ids
 survive and every total is unchanged. Dates are `CURRENT_DATE + n`, never literal, so the data does
@@ -268,18 +282,31 @@ rungs, with the day-9 and day-14 batches correctly excluded.
 
 **What is left, and none of it is business logic:**
 
-1. ⚠️ **`lot.read` and `lot.write` do not exist on the login server.** Until they are created, a
-   real token cannot carry them, and every spoilage screen and tool answers 403 for a signed-in
-   user. Tests pass regardless — they build actors directly. This is the silent-failure mode the
-   whole permissions table below warns about.
-2. `frontend/src/lib/api/schema.d.ts` needs regenerating (`npm run api:types` against a running
+1. `frontend/src/lib/api/schema.d.ts` needs regenerating (`npm run api:types` against a running
    uvicorn). It is build output, committed but never hand-edited.
-3. The browser walkthrough — now finally meaningful, because `/approvals` has something to show.
-4. The demo box seed, still deferred until all features stop changing. See `deploy/SEED-REBUILD.md`.
+2. The browser walkthrough — now finally meaningful, because `/approvals` has something to show,
+   and `/products/[id]` now lists each product's lots and has an **Add lot** sub-page
+   (`/products/[id]/lots/new`).
+3. The demo box seed, still deferred until all features stop changing. See `deploy/SEED-REBUILD.md`.
 
-**`lot.write` is deliberately NOT given to the agent.** Receiving a delivery is a physical event a
-person witnesses. An agent that could invent stock could invent a spoilage problem and then propose
-the solution to it. `agent/config.py` requests `lot.read` only.
+**Lot permissions were repointed onto gate-6 permissions (final stretch).** `lot.read` and
+`lot.write` were never created on the login server, so every lot screen and tool answered 403 for a
+signed-in user. Rather than a role rebuild before the demo, the checks now ride permissions that
+already exist:
+
+- reading lots / the spoilage scan → `product.read`
+- receiving a lot (`services/lots.receive_lot`, and therefore the gate-30 delivery-receipt
+  approver) → `stock.adjust`
+
+`backend/tests/test_lots.py`, `test_spoilage.py` and `test_purchasing_receiving_drafts.py` assert
+the new strings. The `lot.*` rows are gone from the box-debt list — nothing to seed.
+
+**The agent can now book a delivery into stock**, via the `receive_stock_lot` MCP tool, on
+`stock.adjust` (which it already holds). The old guard — "an agent that could invent stock could
+invent a spoilage problem and then propose the solution" — now rests on a different mechanism:
+`receive_stock_lot` is in **neither** `READ_ONLY` nor `STAGING_ONLY` in `agent/mcp_client.py`, so
+every call pauses for a human to confirm or cancel before anything is written. `agent/config.py` no
+longer requests `lot.read`.
 
 ### Known and deliberately deferred: concurrent decisions are not serialised
 
@@ -370,8 +397,10 @@ it came from, so it had no way to record `PurchaseOrder.source_draft_id`. The id
 in the payload — the payload is editable by the approving manager, so an id inside it is a number a
 browser can set, and provenance you can forge is not provenance. `DraftHandler` gained a fifth
 argument, `ActionDraft`, threaded through `drafts.py`'s call site and every handler, including gate
-28's `_apply_markdown`, which takes it and ignores it — a markdown changes prices on `products`,
-which has no `source_draft_id` column to write to.
+28's `_apply_markdown`, which takes it and ignores it — a markdown changes `sell_price` on the
+`inventory_lots` it names (see the 2026-08-29 amendment above), and while a lot *has* a
+`source_draft_id`, that column records the delivery the lot came from, not a later repricing of it,
+so there is still nowhere here to write the draft id.
 
 ### State of play — gate 29 code complete 2026-08-27
 
@@ -419,8 +448,9 @@ agent's pinned tool-gating set (34 tests) passes with the three new tools correc
 
 1. ⚠️ **`purchasing.read` and `purchasing.write` do not exist on the login server.** Until they are
    created, a real token cannot carry them, and the feature 403s for a signed-in user — the same
-   silent-failure mode gate 28's `lot.read`/`lot.write` carries. Batched with those two for after
-   gate 30, to avoid a seed rebuild per gate.
+   silent-failure mode gate 28's lot permissions carried before they were repointed onto
+   `product.read`/`stock.adjust` (see gate 28's section). `purchasing.*` could be repointed the same
+   way if a rebuild stays out of reach; not done yet.
 2. The browser walkthrough is blocked by the same permissions gap — `/suppliers` and `/purchasing`
    redirect the same way `/products` does for a session without them.
 3. The demo box seed, still deferred until all features stop changing. See `deploy/SEED-REBUILD.md`.
@@ -441,8 +471,9 @@ this file, not the spec, is the durable record.
 
 **One new table, `credit_memos`** (`supplier_id`, `purchase_order_id`, `reason`
 `short_shipped`/`damaged`, `amount`, `status` — one value, `open`, today). No new permissions: it
-reuses `purchasing.write` (moves the order to `received`/`partially_received`) and `lot.write`
-(writes the receiving lots), so it does not join the "seven places" list below with an eighth.
+reuses `purchasing.write` (moves the order to `received`/`partially_received`) and `stock.adjust`
+(writes the receiving lots, via `services/lots.receive_lot` — repointed off `lot.write` on the final
+stretch), so it does not join the "seven places" list below with an eighth.
 
 **A shared core, two doors, split by who produced the numbers, not by item count.** The plain form
 (`receive_order`) applies immediately — a human typing the numbers already **is** the check. The AI
@@ -474,8 +505,9 @@ task.
 **No new permission.** Verified by grepping every `require_permission`/`.can(` call added across
 Tasks 1–6, not assumed from the design doc: `services/purchasing/receiving.py`'s `_apply_receipt`
 checks `purchasing.write` (the same permission `send_order`/`cancel_order` already use), and
-`receive_lot` — called internally from `services/lots.py`, unchanged since gate 28 — checks
-`lot.write`. `services/purchasing/drafts.py`'s `propose_receipt` reuses the existing
+`receive_lot` — called internally from `services/lots.py` — checked `lot.write` here (since
+repointed to `stock.adjust` on the final stretch, when `lot.*` proved absent from the login
+server). `services/purchasing/drafts.py`'s `propose_receipt` reuses the existing
 `draft.create` check. Nothing new appears anywhere in the diff. This is unlike gates 28 and 29,
 which each introduced a fresh permission pair still missing from the login server — gate 30 adds no
 eighth or ninth item to that wait.
@@ -533,8 +565,8 @@ difference between them is negligible and the maintenance difference is not.
 | `draft.read` | human, agent | see the queue |
 | `draft.create` | human, agent | stage a proposal |
 | `draft.decide` | human **only** | approve or reject — see decision 1 |
-| `lot.read` | human, agent | expiry and spoilage views |
-| `lot.write` | human, agent | receive stock into a lot |
+| ~~`lot.read`~~ | — | **never created on the login server; repointed to `product.read`** (see gate 28) |
+| ~~`lot.write`~~ | — | **never created; repointed to `stock.adjust`.** The agent's `receive_stock_lot` tool rides it, guarded instead by in-conversation approval |
 | `purchasing.read` | human, agent | suppliers, price lists, the reorder report, orders |
 | `purchasing.write` | human **only** | create/edit suppliers and links, place and send/cancel orders — see gate 29's note above |
 

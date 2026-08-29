@@ -271,22 +271,113 @@ def test_a_lot_freezes_the_price_actually_paid(session, actor, unique_sku):
     assert lot.cost_price == Decimal("1.00")
 
 
+# --- the sell price on a lot ---------------------------------------------
+
+
+def test_a_lot_takes_the_catalogue_sell_price_and_freezes_it(
+    session, actor, unique_sku
+):
+    """A new lot starts at the product's catalogue sell price, then holds it -
+    editing the catalogue price later does not reprice a delivery on the shelf.
+    """
+    product = _product(session, actor, unique_sku, sell_price=Decimal("2.00"))
+    lot = lots.receive_lot(
+        session, actor, client=ClientType.WEB_UI, product_id=product.id,
+        lot_code="DN-1", quantity=5,
+    )
+    assert lot.sell_price == Decimal("2.00")
+    assert lot.discount_percent == 0
+
+    products.update_product(
+        session, actor, product_id=product.id, sell_price=Decimal("9.99")
+    )
+    session.refresh(lot)
+    assert lot.sell_price == Decimal("2.00")
+
+
+def test_a_lot_can_be_received_at_an_explicit_sell_price(session, actor, unique_sku):
+    product = _product(session, actor, unique_sku, sell_price=Decimal("2.00"))
+    lot = lots.receive_lot(
+        session, actor, client=ClientType.WEB_UI, product_id=product.id,
+        lot_code="DN-1", quantity=5, sell_price=Decimal("3.49"),
+    )
+    assert lot.sell_price == Decimal("3.49")
+
+
+def test_a_negative_sell_price_is_refused(session, actor, unique_sku):
+    product = _product(session, actor, unique_sku)
+    with pytest.raises(ValidationError):
+        lots.receive_lot(
+            session, actor, client=ClientType.WEB_UI, product_id=product.id,
+            lot_code="DN-1", quantity=1, sell_price=Decimal("-1.00"),
+        )
+
+
+# --- the product price roll-ups ----------------------------------------
+
+
+def test_price_stats_span_the_lots_that_have_stock(session, actor, unique_sku):
+    product = _product(session, actor, unique_sku, sell_price=Decimal("5.00"))
+    lots.receive_lot(
+        session, actor, client=ClientType.WEB_UI, product_id=product.id,
+        lot_code="A", quantity=10, sell_price=Decimal("4.00"),
+    )
+    lots.receive_lot(
+        session, actor, client=ClientType.WEB_UI, product_id=product.id,
+        lot_code="B", quantity=10, sell_price=Decimal("6.00"),
+    )
+    session.refresh(product)
+    assert product.min_sell_price == Decimal("4.00")
+    assert product.max_sell_price == Decimal("6.00")
+    assert product.avg_sell_price == Decimal("5.00")
+
+
+def test_price_stats_drop_a_lot_once_it_is_emptied(session, actor, unique_sku):
+    product = _product(session, actor, unique_sku, sell_price=Decimal("5.00"))
+    lots.receive_lot(
+        session, actor, client=ClientType.WEB_UI, product_id=product.id,
+        lot_code="CHEAP", quantity=3, sell_price=Decimal("1.00"),
+    )
+    lots.receive_lot(
+        session, actor, client=ClientType.WEB_UI, product_id=product.id,
+        lot_code="DEAR", quantity=10, sell_price=Decimal("9.00"),
+    )
+    # Drain the cheap lot. FEFO takes the earlier-received lot first when both
+    # are undated. Go through adjust_stock so the change is committed.
+    products.adjust_stock(session, actor, product_id=product.id, delta=-3)
+    session.refresh(product)
+    assert product.min_sell_price == Decimal("9.00")
+    assert product.max_sell_price == Decimal("9.00")
+
+
+def test_price_stats_are_null_when_no_lot_has_stock(session, actor, unique_sku):
+    product = _product(session, actor, unique_sku, sell_price=Decimal("5.00"))
+    lots.receive_lot(
+        session, actor, client=ClientType.WEB_UI, product_id=product.id,
+        lot_code="A", quantity=4, sell_price=Decimal("4.00"),
+    )
+    products.adjust_stock(session, actor, product_id=product.id, delta=-4)
+    session.refresh(product)
+    assert product.min_sell_price is None
+    assert product.avg_cost_price is None
+
+
 # --- permissions -----------------------------------------------------------
 
 
-def test_reading_lots_needs_lot_read(session, unique_sku, actor):
+def test_reading_lots_needs_product_read(session, unique_sku, actor):
     product = _product(session, actor, unique_sku)
-    limited = TokenActor("nobody", frozenset({"product.read"}))
+    limited = TokenActor("nobody", frozenset({"stock.adjust"}))
 
-    with pytest.raises(PermissionDeniedError, match="lot.read"):
+    with pytest.raises(PermissionDeniedError, match="product.read"):
         lots.list_lots(session, limited, product_id=product.id)
 
 
-def test_receiving_needs_lot_write(session, unique_sku, actor):
+def test_receiving_needs_stock_adjust(session, unique_sku, actor):
     product = _product(session, actor, unique_sku)
-    limited = TokenActor("nobody", frozenset({"lot.read"}))
+    limited = TokenActor("nobody", frozenset({"product.read"}))
 
-    with pytest.raises(PermissionDeniedError, match="lot.write"):
+    with pytest.raises(PermissionDeniedError, match="stock.adjust"):
         lots.receive_lot(
             session, limited, client=ClientType.WEB_UI, product_id=product.id,
             lot_code="DN-1", quantity=1,
@@ -367,4 +458,32 @@ def test_nothing_but_recalculate_on_hand_assigns_the_summary():
         "goes through a lot. If you moved that function, update this test's "
         "expected location; if you added a write, remove it.\n"
         f"Found: {offenders}"
+    )
+
+
+def test_nothing_but_recalculate_price_stats_assigns_the_price_roll_ups():
+    """The same crude source guard, for the six price roll-up columns.
+
+    `Product.min_/max_/avg_cost_price` and the `sell_price` trio are a summary
+    of the lots, maintained only by `services/lots.py::recalculate_price_stats`.
+    A second writer would let the range drift from the lots it describes.
+    """
+    import pathlib
+    import re
+
+    services_dir = pathlib.Path(__file__).resolve().parents[1] / "services"
+
+    pattern = re.compile(
+        r"\.(min|max|avg)_(cost|sell)_price\s*=(?!=)"
+    )
+    offenders: set[str] = set()
+    for path in services_dir.glob("*.py"):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if pattern.search(line):
+                offenders.add(path.name)
+
+    assert offenders == {"lots.py"}, (
+        "a product price roll-up is assigned outside services/lots.py. It must "
+        "be written only by recalculate_price_stats.\n"
+        f"Found: {sorted(offenders)}"
     )

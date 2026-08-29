@@ -296,7 +296,7 @@ def create_product(
         # existed. Unknown expiry is never marked down and is consumed last.
         #
         # Written directly rather than through `lots.receive_lot`, because that
-        # function requires `lot.write` and creating a product with an opening
+        # function requires `stock.adjust` and creating a product with an opening
         # count requires `product.create`. Demanding both would break every
         # existing caller for no safety gain: the quantity is one this actor
         # was already authorised to set.
@@ -307,12 +307,14 @@ def create_product(
                 expiry_date=None,
                 quantity=quantity_on_hand,
                 cost_price=cost_price,
+                sell_price=sell_price,
                 created_by=actor.id,
                 created_via=ClientType.SYSTEM.value,
             )
         )
         session.flush()
         lots.recalculate_on_hand(session, product)
+        lots.recalculate_price_stats(session, product)
 
     session.commit()
 
@@ -444,6 +446,7 @@ def adjust_stock(
         lot.updated_by = actor.id
         session.flush()
         lots.recalculate_on_hand(session, product)
+        lots.recalculate_price_stats(session, product)
 
     product.updated_by = actor.id
 
@@ -479,6 +482,7 @@ def _correction_lot(session: Session, actor: Actor, *, product: Product) -> Inve
         expiry_date=None,
         quantity=0,
         cost_price=product.cost_price,
+        sell_price=product.sell_price,
         created_by=actor.id,
         created_via=ClientType.SYSTEM.value,
     )

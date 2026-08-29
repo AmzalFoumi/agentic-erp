@@ -22,6 +22,28 @@ export function formatMoney(value: string): string {
 }
 
 /**
+ * A price that can vary by lot, shown as one figure or a range.
+ *
+ * The price a customer pays now lives on the lot, so a product has a spread
+ * rather than a single number: `min` and `max` are the server-computed
+ * roll-ups over the lots that still have stock. When they are null (the
+ * product has no such lots) we fall back to `fallback`, the catalogue price.
+ *
+ * All string comparison and `formatMoney` — no `Number()` on money, per the
+ * DESIGN.md rule. `min === max` is a safe string compare because both come
+ * from the same `Numeric(10,2)` column, so "4.00" is never "4" here.
+ */
+export function priceRange(
+  min: string | null,
+  max: string | null,
+  fallback: string,
+): string {
+  if (min === null || max === null) return formatMoney(fallback);
+  if (min === max) return formatMoney(min);
+  return `${formatMoney(min)} – ${formatMoney(max)}`;
+}
+
+/**
  * Absolute, Asia/Colombo, to the minute — never relative, never the
  * browser's zone. See DESIGN.md's Timestamps section for why.
  */

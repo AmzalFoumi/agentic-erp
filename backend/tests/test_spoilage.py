@@ -101,9 +101,9 @@ def test_scanning_changes_nothing(session, actor, unique_sku):
     assert drafts.count_drafts(session, actor, status=DraftStatus.PENDING) == pending_before
 
 
-def test_scanning_needs_lot_read(session, unique_sku, actor):
-    limited = TokenActor("nobody", frozenset({"product.read"}))
-    with pytest.raises(PermissionDeniedError, match="lot.read"):
+def test_scanning_needs_product_read(session, unique_sku, actor):
+    limited = TokenActor("nobody", frozenset({"stock.adjust"}))
+    with pytest.raises(PermissionDeniedError, match="product.read"):
         spoilage.scan_spoilage(session, limited, today=TODAY)
 
 
@@ -153,7 +153,7 @@ def test_a_proposal_carries_both_totals_for_the_human(session, actor, unique_sku
 
 
 def test_proposing_needs_draft_create(session, unique_sku, actor):
-    limited = TokenActor("nobody", frozenset({"lot.read"}))
+    limited = TokenActor("nobody", frozenset({"product.read"}))
     with pytest.raises(PermissionDeniedError, match="draft.create"):
         spoilage.propose_markdown(
             session, limited, client=ClientType.MCP_AGENT, today=TODAY
@@ -173,8 +173,8 @@ def test_nothing_at_risk_is_refused_rather_than_staged_empty(session, actor):
 # --- approving -------------------------------------------------------------
 
 
-def test_approving_is_what_finally_moves_the_price(session, actor, unique_sku):
-    product, _ = _product_with_lot(session, actor, unique_sku, days=1)
+def test_approving_moves_the_lot_price_not_the_product_price(session, actor, unique_sku):
+    product, lot = _product_with_lot(session, actor, unique_sku, days=1)
     draft = spoilage.propose_markdown(
         session, actor, client=ClientType.MCP_AGENT, today=TODAY
     )
@@ -184,7 +184,13 @@ def test_approving_is_what_finally_moves_the_price(session, actor, unique_sku):
     )
 
     session.refresh(product)
-    assert product.sell_price == Decimal("2.00")
+    session.refresh(lot)
+    # The markdown lands on the expiring batch, not the catalogue price.
+    assert lot.sell_price == Decimal("2.00")
+    assert lot.discount_percent == 50
+    assert product.sell_price == Decimal("4.00"), "the catalogue price must not move"
+    # The product's roll-up range now reflects the discounted lot.
+    assert product.min_sell_price == Decimal("2.00")
 
 
 def test_an_agent_without_draft_decide_cannot_apply_its_own_proposal(
@@ -200,7 +206,7 @@ def test_an_agent_without_draft_decide_cannot_apply_its_own_proposal(
 
     agent = TokenActor(
         "agent",
-        frozenset({"lot.read", "draft.read", "draft.create", "product.update"}),
+        frozenset({"product.read", "draft.read", "draft.create", "product.update"}),
     )
     with pytest.raises(PermissionDeniedError, match="draft.decide"):
         drafts.approve_draft(
@@ -243,8 +249,8 @@ def test_a_manager_can_edit_the_price_before_approving(session, actor, unique_sk
         session, actor, client=ClientType.WEB_UI, draft_id=draft.id, payload=edited
     )
 
-    session.refresh(product)
-    assert product.sell_price == Decimal("3.50")
+    session.refresh(lot)
+    assert lot.sell_price == Decimal("3.50")
 
 
 def test_an_edited_payload_cannot_price_a_lot_onto_another_product(
@@ -315,39 +321,32 @@ def test_the_draft_type_is_registered_by_importing_the_service_package():
     assert spoilage.BATCH_PRICE_MARKDOWN in draft_types.registered_types()
 
 
-# --- two lots, one shelf price ---------------------------------------------
+# --- two lots of one product, priced independently ------------------------
 
 
-def test_two_lots_of_one_product_are_priced_at_the_deepest_discount(
+def test_two_lots_of_one_product_get_their_own_prices(
     session, actor, unique_sku
 ):
-    """A shelf has one price label, so two lots cannot carry two prices.
-
-    ⚠️ The failure this pins is silent and backwards. The report is ordered
-    soonest-expiry-first, so without deduplication the payload would carry two
-    lines for one product and the handler would apply them in order - the LAST
-    one winning. The last line is the *least* urgent, so bread expiring today
-    would end up discounted 50% instead of 70%, and the most urgent stock in
-    the shop would be the least marked down.
+    """The price lives on the lot now, so two batches of one product carry two
+    prices: the batch expiring today at 70% off, the batch expiring tomorrow at
+    50% off. The catalogue price on the product does not move at all.
     """
     product = products.create_product(
         session, actor, sku=unique_sku, name="Sourdough",
         cost_price=Decimal("1.00"), sell_price=Decimal("400.00"),
     )
     # Expiring today -> 70% off -> 120.00
-    lots.receive_lot(
+    today_lot = lots.receive_lot(
         session, actor, client=ClientType.WEB_UI, product_id=product.id,
         lot_code="TODAY", quantity=40, expiry_date=TODAY,
     )
     # Expiring tomorrow -> 50% off -> 200.00
-    lots.receive_lot(
+    tomorrow_lot = lots.receive_lot(
         session, actor, client=ClientType.WEB_UI, product_id=product.id,
         lot_code="TOMORROW", quantity=60, expiry_date=TODAY + timedelta(days=1),
     )
 
     report = spoilage.scan_spoilage(session, actor, today=TODAY)
-    # The REPORT still shows both lots - a manager wants to see the whole
-    # picture, and the two lots have genuinely different amounts at risk.
     assert len(_mine(report, product.id)) == 2
 
     draft = spoilage.propose_markdown(
@@ -356,28 +355,36 @@ def test_two_lots_of_one_product_are_priced_at_the_deepest_discount(
     lines = [
         line for line in draft.payload["lines"] if line["product_id"] == product.id
     ]
-    assert len(lines) == 1, "one product must get one price change"
-    assert Decimal(lines[0]["new_price"]) == Decimal("120.00")
+    assert len(lines) == 2, "each expiring lot gets its own price change"
+    priced = {line["lot_id"]: Decimal(line["new_price"]) for line in lines}
+    assert priced[today_lot.id] == Decimal("120.00")
+    assert priced[tomorrow_lot.id] == Decimal("200.00")
 
     drafts.approve_draft(
         session, actor, client=ClientType.WEB_UI, draft_id=draft.id
     )
     session.refresh(product)
-    assert product.sell_price == Decimal("120.00")
+    session.refresh(today_lot)
+    session.refresh(tomorrow_lot)
+    assert today_lot.sell_price == Decimal("120.00")
+    assert tomorrow_lot.sell_price == Decimal("200.00")
+    assert product.sell_price == Decimal("400.00"), "catalogue price untouched"
+    assert product.min_sell_price == Decimal("120.00")
+    assert product.max_sell_price == Decimal("200.00")
 
 
-def test_an_edited_payload_cannot_price_one_product_twice(session, actor, unique_sku):
-    """The same last-wins bug as `_lines_for`, but arriving from the screen.
+def test_an_edited_payload_cannot_price_one_lot_twice(session, actor, unique_sku):
+    """The same last-wins bug as before, but arriving from the screen.
 
-    A generated payload can never contain a duplicate. An edited one can, and
-    the handler applies lines in order - so the last entry would silently set
-    the price while the manager reads the first one on screen.
+    A generated payload can never contain a duplicate lot. An edited one can,
+    and the handler applies lines in order - so the last entry would silently
+    set the price while the manager reads the first one on screen.
     """
     product, lot = _product_with_lot(session, actor, unique_sku, days=1)
     draft = spoilage.propose_markdown(
         session, actor, client=ClientType.WEB_UI, today=TODAY
     )
-    before = product.sell_price
+    before = lot.sell_price
 
     # A bare ValidationError, not a matched message: `validate_payload`
     # deliberately reports "N problem(s)" without naming them, the same way
@@ -392,5 +399,5 @@ def test_an_edited_payload_cannot_price_one_product_twice(session, actor, unique
             ]},
         )
 
-    session.refresh(product)
-    assert product.sell_price == before
+    session.refresh(lot)
+    assert lot.sell_price == before
