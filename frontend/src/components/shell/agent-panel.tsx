@@ -91,7 +91,10 @@ export function AgentPanel() {
       key={conversationId}
       conversationId={conversationId}
       initialMessages={initialMessages}
-      onConversationChange={setConversationId}
+      onConversationChange={(newId) => {
+        setInitialMessages([]);
+        setConversationId(newId);
+      }}
     />
   );
 }
@@ -126,7 +129,6 @@ function ConnectedAgentPanel({
   const handleClearChat = async () => {
     setIsClearing(true);
     try {
-      window.localStorage.removeItem(CONVERSATION_STORAGE_KEY);
       const newId = await startAgentConversation();
       window.localStorage.setItem(CONVERSATION_STORAGE_KEY, String(newId));
       onConversationChange(newId);
