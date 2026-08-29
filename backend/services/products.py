@@ -307,12 +307,14 @@ def create_product(
                 expiry_date=None,
                 quantity=quantity_on_hand,
                 cost_price=cost_price,
+                sell_price=sell_price,
                 created_by=actor.id,
                 created_via=ClientType.SYSTEM.value,
             )
         )
         session.flush()
         lots.recalculate_on_hand(session, product)
+        lots.recalculate_price_stats(session, product)
 
     session.commit()
 
@@ -444,6 +446,7 @@ def adjust_stock(
         lot.updated_by = actor.id
         session.flush()
         lots.recalculate_on_hand(session, product)
+        lots.recalculate_price_stats(session, product)
 
     product.updated_by = actor.id
 
@@ -479,6 +482,7 @@ def _correction_lot(session: Session, actor: Actor, *, product: Product) -> Inve
         expiry_date=None,
         quantity=0,
         cost_price=product.cost_price,
+        sell_price=product.sell_price,
         created_by=actor.id,
         created_via=ClientType.SYSTEM.value,
     )

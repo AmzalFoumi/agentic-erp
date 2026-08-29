@@ -152,6 +152,22 @@ class ProductRead(BaseModel):
     sell_price: Decimal
     quantity_on_hand: int
     reorder_level: int
+
+    # Min / max / average of the price columns across this product's lots that
+    # still have stock. Maintained by `services/lots.recalculate_price_stats`.
+    # Null when the product has no lots with stock - the client then falls back
+    # to `cost_price` / `sell_price` above, which are the catalogue price.
+    #
+    # These exist because a spoilage markdown now discounts one expiring lot,
+    # not the whole product, so a single `sell_price` no longer tells the whole
+    # story on a product list or detail screen.
+    min_cost_price: Decimal | None
+    max_cost_price: Decimal | None
+    avg_cost_price: Decimal | None
+    min_sell_price: Decimal | None
+    max_sell_price: Decimal | None
+    avg_sell_price: Decimal | None
+
     created_at: datetime
     updated_at: datetime
     created_by: str | None
@@ -332,6 +348,12 @@ class LotRead(BaseModel):
     quantity: int
     cost_price: Decimal
 
+    # The shelf price for this batch. Starts at the product's catalogue price;
+    # a spoilage markdown lowers it and records how far in `discount_percent`
+    # (0 = full price).
+    sell_price: Decimal
+    discount_percent: int
+
     # Computed on the model, not stored. Included so a client never has to do
     # date arithmetic against its own clock - which would disagree with the
     # server's for anyone in another timezone.
@@ -363,6 +385,9 @@ class LotReceive(BaseModel):
     quantity: int = Field(..., gt=0)
     expiry_date: date | None = Field(default=None)
     cost_price: Decimal | None = Field(
+        default=None, ge=0, max_digits=10, decimal_places=2
+    )
+    sell_price: Decimal | None = Field(
         default=None, ge=0, max_digits=10, decimal_places=2
     )
 

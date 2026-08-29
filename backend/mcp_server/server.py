@@ -528,6 +528,11 @@ def _describe_lot(lot: Any) -> dict[str, Any]:
         "expiry_date": lot.expiry_date.isoformat() if lot.expiry_date else None,
         "quantity": lot.quantity,
         "cost_price": str(lot.cost_price),
+        # The shelf price for this batch. `discount_percent` is how far a
+        # spoilage markdown has taken it below the product's catalogue price;
+        # 0 means full price.
+        "sell_price": str(lot.sell_price),
+        "discount_percent": lot.discount_percent,
         "is_expired": lot.is_expired,
     }
 
@@ -782,6 +787,10 @@ def check_spoilage_risk(within_days: int | None = None) -> dict[str, Any]:
     nobody knows when it goes off, so it is not a spoilage risk anyone can act
     on.
 
+    A markdown discounts the one expiring batch, not the whole product: a later
+    delivery of the same product keeps its normal price. So two batches of one
+    product can appear as two rows with two different proposed prices.
+
     Args:
         within_days: How far ahead to look. Leave it out to use the shop's own
             discount policy, which is the answer you usually want.
@@ -880,6 +889,7 @@ def receive_stock_lot(
     quantity: int,
     expiry_date: str | None = None,
     cost_price: str | None = None,
+    sell_price: str | None = None,
 ) -> dict[str, Any]:
     """Book a delivery of one product into stock as a new lot.
 
@@ -906,6 +916,9 @@ def receive_stock_lot(
             "18.50". Leave out to use the product's current cost price. Once
             set it is frozen on the lot, so a later price change does not
             rewrite what this delivery actually cost.
+        sell_price: The shelf price for this batch, as a string like "24.99".
+            Leave out to use the product's catalogue sell price. A spoilage
+            markdown later discounts this one batch, not the whole product.
 
     Returns:
         The new lot, including its id and the resulting quantity.
@@ -921,6 +934,7 @@ def receive_stock_lot(
             ) from None
 
     parsed_cost = _price(cost_price, "cost_price") if cost_price is not None else None
+    parsed_sell = _price(sell_price, "sell_price") if sell_price is not None else None
 
     with get_session() as session:
         lot = lot_service.receive_lot(
@@ -931,6 +945,7 @@ def receive_stock_lot(
             lot_code=lot_code,
             quantity=quantity,
             cost_price=parsed_cost,
+            sell_price=parsed_sell,
             expiry_date=parsed_expiry,
         )
         return _describe_lot(lot)

@@ -139,29 +139,27 @@ class MarkdownPayload(BaseModel):
 
     @field_validator("lines")
     @classmethod
-    def _one_line_per_product(cls, lines: list[MarkdownLine]) -> list[MarkdownLine]:
-        """Refuse a payload that prices the same product twice.
+    def _one_line_per_lot(cls, lines: list[MarkdownLine]) -> list[MarkdownLine]:
+        """Refuse a payload that prices the same lot twice.
 
-        ⚠️ `_lines_for()` already collapses to one line per product, so a
-        generated payload can never trip this. An **edited** one can, and that
-        is the whole point: the handler applies lines in order, so a duplicate
-        would let the last entry silently decide the price while the manager
-        reads the first one on screen.
+        Each markdown line moves one lot's `sell_price`. Two lines for one lot
+        would let the handler apply them in order and the last one silently
+        win, while the manager reads the first on screen.
 
-        The same class of bug already bit once, between the scan and the
-        payload. Catching it in the schema means it is refused before any
-        price moves, rather than depending on the handler looping carefully.
+        Two lots of the SAME product are fine now, and expected: the batch
+        expiring today and the batch expiring next week each get their own
+        price. That is the whole point of pricing on the lot.
         """
         seen: set[int] = set()
         duplicated: list[int] = []
         for line in lines:
-            if line.product_id in seen:
-                duplicated.append(line.product_id)
-            seen.add(line.product_id)
+            if line.lot_id in seen:
+                duplicated.append(line.lot_id)
+            seen.add(line.lot_id)
 
         if duplicated:
             raise ValueError(
-                "A product may only appear once; a shelf has one price. "
+                "A lot may only appear once in a markdown. "
                 f"Duplicated: {sorted(set(duplicated))}."
             )
         return lines
@@ -217,7 +215,10 @@ def scan_spoilage(
         if product is None:
             continue
 
-        proposed = pricing.discounted_price(product.sell_price, tier)
+        # The price that would move is the LOT's own shelf price, not the
+        # product's catalogue price. A markdown discounts this one expiring
+        # batch; a later delivery of the same product keeps its full price.
+        proposed = pricing.discounted_price(lot.sell_price, tier)
         items.append(
             SpoilageItem(
                 lot_id=lot.id,
@@ -228,7 +229,7 @@ def scan_spoilage(
                 expiry_date=lot.expiry_date,
                 days_remaining=pricing.days_until(lot.expiry_date, today=today),
                 quantity=lot.quantity,
-                current_price=product.sell_price,
+                current_price=lot.sell_price,
                 proposed_price=proposed,
                 discount_percent=int(tier.discount * 100),
                 tier_label=tier.label,
@@ -304,40 +305,24 @@ def propose_markdown(
 
 
 def _lines_for(report: SpoilageReport) -> list[MarkdownLine]:
-    """One price change per PRODUCT, at the deepest discount any of its lots earns.
+    """One price change per LOT - each expiring batch priced on its own.
 
-    ⚠️ This function exists because of a mismatch that is easy to miss: the
-    report has one row per **lot**, but `sell_price` lives on the **product**.
-    A shelf has one price label, so two lots of the same bread - one expiring
-    today at 70% off, one tomorrow at 50% - cannot carry different prices.
+    The price now lives on the lot (`InventoryLot.sell_price`), so there is no
+    longer a collapse step: two lots of the same bread, one expiring today at
+    70% off and one tomorrow at 50% off, become two lines carrying two prices.
+    That is exactly what the shop wants - it marks down the batch that is about
+    to go, not next week's delivery.
 
-    Without this, the payload would hold two lines for the same product and the
-    handler would apply them in order, so the LAST one would win. The report is
-    ordered soonest-expiry-first, which means the last line is the *least*
-    urgent - the 70%-off bread would end up marked down only 50%, quietly, and
-    the most urgent stock would be the least discounted.
-
-    The deepest discount is the right answer rather than an arbitrary
-    tie-break: stock is sold soonest-expiry-first, so the next carton off the
-    shelf is the one from the most urgent lot. Pricing for that lot prices what
-    the customer is actually about to buy.
-
-    `lot_id` names the lot that justified the price, which is what the approval
-    screen shows the manager and what `_apply_markdown` re-checks.
+    `product_id` rides along on each line so `_apply_markdown` can re-check the
+    lot still belongs to the product the proposal named.
     """
-    best: dict[int, SpoilageItem] = {}
-    for item in report.items:
-        current = best.get(item.product_id)
-        if current is None or item.proposed_price < current.proposed_price:
-            best[item.product_id] = item
-
     return [
         MarkdownLine(
             lot_id=item.lot_id,
             product_id=item.product_id,
             new_price=item.proposed_price,
         )
-        for item in best.values()
+        for item in report.items
     ]
 
 
@@ -374,8 +359,8 @@ def _apply_markdown(
     """Move the prices. Called by `drafts.approve_draft`, never directly.
 
     `actor` is the **approving human**, not the agent that proposed - so the
-    `updated_by` stamped on every product names who authorised the change,
-    which is the question an audit actually asks.
+    `updated_by` stamped on every lot names who authorised the change, which is
+    the question an audit actually asks.
 
     ⚠️ It does not commit. `approve_draft` owns the transaction, so the price
     changes and the draft's status change land together or not at all. A commit
@@ -386,14 +371,18 @@ def _apply_markdown(
     lot could have sold out, or been consumed, or belong to another product
     entirely.
 
-    `draft` is unused here. A markdown changes prices on `products`, which
-    carries no source_draft_id column - there is nowhere to record it. The
-    parameter is part of the handler contract because gate 29's purchase
-    orders and gate 30's received lots both do have somewhere to put it.
+    The markdown lands on the **lot**, not the product: `lot.sell_price` drops
+    and `lot.discount_percent` records how far below the catalogue price that
+    is. `draft` is still unused - a lot does have a `source_draft_id`, but it
+    names the delivery the lot came from, not a repricing of it, so there is
+    still nowhere here to record the draft. The parameter stays part of the
+    handler contract for the gates that do use it.
     """
     require_permission(actor, "product.update")
 
     assert isinstance(payload, MarkdownPayload)
+
+    touched_products: dict[int, Product] = {}
 
     for line in payload.lines:
         lot = session.get(InventoryLot, line.lot_id)
@@ -411,7 +400,16 @@ def _apply_markdown(
         if product is None:
             raise ValidationError(f"Product {line.product_id} no longer exists.")
 
-        product.sell_price = pricing.to_money(line.new_price)
+        new_price = pricing.to_money(line.new_price)
+        base = product.sell_price or new_price
+        lot.sell_price = new_price
+        lot.discount_percent = max(0, int(round((1 - new_price / base) * 100)))
+        lot.updated_by = actor.id
+        touched_products[product.id] = product
+
+    # The lots that just changed price shift each product's min/max/avg range.
+    for product in touched_products.values():
+        lots.recalculate_price_stats(session, product)
         product.updated_by = actor.id
 
 

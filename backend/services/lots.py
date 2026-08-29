@@ -89,6 +89,47 @@ def recalculate_on_hand(session: Session, product: Product) -> int:
     return int(total)
 
 
+def recalculate_price_stats(session: Session, product: Product) -> None:
+    """Reset the product's price roll-ups from its lots that still have stock.
+
+    ⚠️ **THE SINGLE WRITE PATH** for `products.min_/max_/avg_cost_price` and the
+    three `sell_price` equivalents, the same way `recalculate_on_hand` is the
+    only writer of `quantity_on_hand`. Every operation that changes a lot's
+    price or empties a lot calls it.
+
+    Prices vary by lot now - a spoilage markdown discounts one expiring batch,
+    not the product - so these six numbers are what the product screens show
+    instead of a single figure that would no longer be true.
+
+    Lots with `quantity == 0` are excluded: a sold-out batch's price is history,
+    not a price anything can be bought at. When no lot has stock, every roll-up
+    is set to NULL and the screens fall back to the catalogue price.
+
+    Does not commit and does not check permissions - a step inside the caller's
+    unit of work, exactly like `recalculate_on_hand`.
+    """
+    row = session.execute(
+        select(
+            func.min(InventoryLot.cost_price),
+            func.max(InventoryLot.cost_price),
+            func.round(func.avg(InventoryLot.cost_price), 2),
+            func.min(InventoryLot.sell_price),
+            func.max(InventoryLot.sell_price),
+            func.round(func.avg(InventoryLot.sell_price), 2),
+        ).where(
+            InventoryLot.product_id == product.id,
+            InventoryLot.quantity > 0,
+        )
+    ).one()
+
+    product.min_cost_price = row[0]
+    product.max_cost_price = row[1]
+    product.avg_cost_price = row[2]
+    product.min_sell_price = row[3]
+    product.max_sell_price = row[4]
+    product.avg_sell_price = row[5]
+
+
 def list_lots(
     session: Session,
     actor: Actor,
@@ -134,6 +175,7 @@ def receive_lot(
     lot_code: str,
     quantity: int,
     cost_price: Decimal | None = None,
+    sell_price: Decimal | None = None,
     expiry_date: date | None = None,
     source_draft_id: int | None = None,
 ) -> InventoryLot:
@@ -143,6 +185,11 @@ def receive_lot(
     does not know it. It is then **frozen on the lot**: when the supplier
     raises their price next month, this lot still records what was actually
     paid, which is the only thing that makes "cost at risk" a truthful number.
+
+    `sell_price` is the shelf price for this batch. It defaults to the
+    product's catalogue `sell_price` and is likewise frozen on the lot -
+    changing the catalogue price later does not reprice a delivery already on
+    the shelf. A spoilage markdown lowers this, on this lot alone.
 
     `expiry_date` is optional, and None genuinely means "unknown" rather than
     "never expires". The spoilage scan skips those lots rather than guessing.
@@ -168,12 +215,18 @@ def receive_lot(
     if cost_price < 0:
         raise ValidationError("Cost price cannot be negative.")
 
+    if sell_price is None:
+        sell_price = product.sell_price
+    if sell_price < 0:
+        raise ValidationError("Sell price cannot be negative.")
+
     lot = InventoryLot(
         product_id=product.id,
         lot_code=lot_code,
         expiry_date=expiry_date,
         quantity=quantity,
         cost_price=cost_price,
+        sell_price=sell_price,
         created_by=actor.id,
         created_via=client.value,
         source_draft_id=source_draft_id,
@@ -186,6 +239,7 @@ def receive_lot(
     session.flush()
 
     recalculate_on_hand(session, product)
+    recalculate_price_stats(session, product)
     product.updated_by = actor.id
 
     session.commit()
@@ -251,6 +305,7 @@ def consume(
 
     session.flush()
     recalculate_on_hand(session, product)
+    recalculate_price_stats(session, product)
     product.updated_by = actor.id
     return touched
 
