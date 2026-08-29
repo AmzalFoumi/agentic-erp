@@ -1,5 +1,5 @@
-import { MoneyDisplay } from "@/components/domain/money-display";
 import { StockBadge } from "@/components/domain/stock-badge";
+import { priceRange } from "@/lib/format";
 import {
   Table,
   TableBody,
@@ -45,11 +45,17 @@ export function ProductsTable({ products }: { products: Product[] }) {
               <TableCell className={`${CELL} text-muted-foreground`}>
                 {product.category ?? "—"}
               </TableCell>
-              <TableCell className={`${CELL} text-right`}>
-                <MoneyDisplay value={product.cost_price} />
+              <TableCell
+                data-numeric
+                className={`${CELL} text-right font-mono tabular-nums`}
+              >
+                {priceRange(product.min_cost_price, product.max_cost_price, product.cost_price)}
               </TableCell>
-              <TableCell className={`${CELL} text-right`}>
-                <MoneyDisplay value={product.sell_price} />
+              <TableCell
+                data-numeric
+                className={`${CELL} text-right font-mono tabular-nums`}
+              >
+                {priceRange(product.min_sell_price, product.max_sell_price, product.sell_price)}
               </TableCell>
               <TableCell data-numeric className={`${CELL} text-right font-mono`}>
                 {product.quantity_on_hand}

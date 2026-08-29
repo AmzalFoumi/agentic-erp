@@ -250,12 +250,14 @@ class Settings(BaseSettings):
     thunderid_scopes: str = (
         "product.read product.create product.update stock.adjust "
         "draft.read draft.create "
-        # Gate 28. `lot.read` lets the agent see expiry dates and run a
-        # spoilage scan. `lot.write` is deliberately ABSENT: receiving a
-        # delivery is a physical event a person witnesses, and an agent
-        # that could invent stock could invent a spoilage problem to
-        # solve.
-        "lot.read "
+        # Gate 28 / final stretch. Lots are read behind `product.read` and
+        # written behind `stock.adjust` - both already above - because the
+        # login server never got `lot.read`/`lot.write` and a demo will not
+        # wait for a role rebuild. So the agent CAN book a delivery into
+        # stock (`receive_stock_lot`), but every call still stops for a human
+        # to confirm: that tool is in neither allowlist in mcp_client.py.
+        # The old rule "an agent must not invent stock" now rests on that
+        # in-conversation prompt rather than on a missing permission.
         # Gate 29. Same shape again: the agent may read suppliers and the
         # reorder report and stage a proposal, but `purchasing.write` places
         # an order and commits the shop's money, so it is ABSENT too.

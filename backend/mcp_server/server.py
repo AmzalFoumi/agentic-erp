@@ -528,6 +528,11 @@ def _describe_lot(lot: Any) -> dict[str, Any]:
         "expiry_date": lot.expiry_date.isoformat() if lot.expiry_date else None,
         "quantity": lot.quantity,
         "cost_price": str(lot.cost_price),
+        # The shelf price for this batch. `discount_percent` is how far a
+        # spoilage markdown has taken it below the product's catalogue price;
+        # 0 means full price.
+        "sell_price": str(lot.sell_price),
+        "discount_percent": lot.discount_percent,
         "is_expired": lot.is_expired,
     }
 
@@ -782,6 +787,10 @@ def check_spoilage_risk(within_days: int | None = None) -> dict[str, Any]:
     nobody knows when it goes off, so it is not a spoilage risk anyone can act
     on.
 
+    A markdown discounts the one expiring batch, not the whole product: a later
+    delivery of the same product keeps its normal price. So two batches of one
+    product can appear as two rows with two different proposed prices.
+
     Args:
         within_days: How far ahead to look. Leave it out to use the shop's own
             discount policy, which is the answer you usually want.
@@ -870,6 +879,76 @@ def list_product_lots(product_id: int) -> list[dict[str, Any]]:
                 session, _actor(), product_id=product_id
             )
         ]
+
+
+@mcp.tool()
+@translated
+def receive_stock_lot(
+    product_id: int,
+    lot_code: str,
+    quantity: int,
+    expiry_date: str | None = None,
+    cost_price: str | None = None,
+    sell_price: str | None = None,
+) -> dict[str, Any]:
+    """Book a delivery of one product into stock as a new lot.
+
+    Use this when someone tells you stock physically arrived - "we just got 30
+    cartons of milk, batch M-2026-08, they expire on the 5th". It creates one
+    lot and raises the product's quantity on hand by that amount.
+
+    This is a real write, not a proposal. Every call pauses for a human to
+    confirm or cancel before anything is saved - so record exactly what you
+    were told and do not invent a number you were not given.
+
+    One call is one delivery of one product. If three different products
+    arrived, call this three times.
+
+    Args:
+        product_id: Which product arrived.
+        lot_code: The batch or delivery code, as printed on the carton or
+            paperwork. Required - if you were not given one, ask for it.
+        quantity: How many units arrived. Must be positive.
+        expiry_date: The date this batch goes off, as "YYYY-MM-DD". Leave out
+            if genuinely unknown - do not guess. Unknown-expiry stock is never
+            marked down and is sold last.
+        cost_price: What one unit cost on this delivery, as a string like
+            "18.50". Leave out to use the product's current cost price. Once
+            set it is frozen on the lot, so a later price change does not
+            rewrite what this delivery actually cost.
+        sell_price: The shelf price for this batch, as a string like "24.99".
+            Leave out to use the product's catalogue sell price. A spoilage
+            markdown later discounts this one batch, not the whole product.
+
+    Returns:
+        The new lot, including its id and the resulting quantity.
+    """
+    parsed_expiry: date | None = None
+    if expiry_date is not None:
+        try:
+            parsed_expiry = date.fromisoformat(expiry_date)
+        except ValueError:
+            raise ValidationError(
+                'expiry_date must be a calendar date written as "YYYY-MM-DD" - '
+                f"got {expiry_date!r}."
+            ) from None
+
+    parsed_cost = _price(cost_price, "cost_price") if cost_price is not None else None
+    parsed_sell = _price(sell_price, "sell_price") if sell_price is not None else None
+
+    with get_session() as session:
+        lot = lot_service.receive_lot(
+            session,
+            _actor(),
+            client=ClientType.MCP_AGENT,
+            product_id=product_id,
+            lot_code=lot_code,
+            quantity=quantity,
+            cost_price=parsed_cost,
+            sell_price=parsed_sell,
+            expiry_date=parsed_expiry,
+        )
+        return _describe_lot(lot)
 
 
 @mcp.tool()

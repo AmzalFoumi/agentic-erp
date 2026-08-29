@@ -797,6 +797,10 @@ export interface components {
             quantity: number;
             /** Cost Price */
             cost_price: string;
+            /** Sell Price */
+            sell_price: string;
+            /** Discount Percent */
+            discount_percent: number;
             /** Is Expired */
             is_expired: boolean;
             /**
@@ -829,6 +833,8 @@ export interface components {
             expiry_date?: string | null;
             /** Cost Price */
             cost_price?: number | string | null;
+            /** Sell Price */
+            sell_price?: number | string | null;
         };
         /**
          * MarkdownProposal
@@ -966,6 +972,18 @@ export interface components {
             quantity_on_hand: number;
             /** Reorder Level */
             reorder_level: number;
+            /** Min Cost Price */
+            min_cost_price: string | null;
+            /** Max Cost Price */
+            max_cost_price: string | null;
+            /** Avg Cost Price */
+            avg_cost_price: string | null;
+            /** Min Sell Price */
+            min_sell_price: string | null;
+            /** Max Sell Price */
+            max_sell_price: string | null;
+            /** Avg Sell Price */
+            avg_sell_price: string | null;
             /**
              * Created At
              * Format: date-time
@@ -1103,7 +1121,14 @@ export interface components {
             /** Reasoning */
             reasoning: string;
         };
-        /** ReceiptLineCreate */
+        /**
+         * ReceiptLineCreate
+         * @description What arrived for one line on a purchase order.
+         *
+         *     `quantity_received` is the count of GOOD units only - it does not
+         *     include `quantity_damaged`. The two are separate counts that both come
+         *     out of the same `quantity_ordered`; their sum must not exceed it.
+         */
         ReceiptLineCreate: {
             /** Product Id */
             product_id: number;

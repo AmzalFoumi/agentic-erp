@@ -56,6 +56,12 @@ EXPECTED_TOOLS = {
     "check_spoilage_risk",
     "propose_spoilage_markdown",
     "list_product_lots",
+    # Added on the final stretch: the agent can book a delivery into stock when
+    # told one arrived. It is a real write, not a proposal - `agent/mcp_client.py`
+    # keeps it out of READ_ONLY/STAGING_ONLY, so every call pauses for a human
+    # to confirm. It rides `stock.adjust` (not a `lot.*` permission, which the
+    # login server never got).
+    "receive_stock_lot",
     # Gate 29, added the same way and for the same reason. Two read, one
     # stages a draft; there is still no tool that creates, sends, or cancels
     # an order - see FORBIDDEN_TOOL_NAMES below.

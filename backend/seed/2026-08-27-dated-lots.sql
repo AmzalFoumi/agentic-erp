@@ -71,7 +71,8 @@ WITH wanted (sku, lot_code, days, qty) AS (
         ('2004-1004', 'DN-VEG-C',   14, 20)    -- Carrots
 ),
 resolved AS (
-    SELECT p.id AS product_id, p.cost_price, w.lot_code, w.days, w.qty
+    SELECT p.id AS product_id, p.cost_price, p.sell_price,
+           w.lot_code, w.days, w.qty
     FROM wanted w
     JOIN products p ON p.sku = w.sku
     -- Only carve out batches the product can actually spare.
@@ -99,10 +100,13 @@ resolved AS (
 ),
 inserted AS (
     INSERT INTO inventory_lots (
-        product_id, lot_code, expiry_date, quantity, cost_price,
+        product_id, lot_code, expiry_date, quantity, cost_price, sell_price,
         created_by, created_via
     )
-    SELECT product_id, lot_code, CURRENT_DATE + days, qty, cost_price,
+    -- `sell_price` copied from the product's catalogue price, exactly as the
+    -- migration backfilled the OPENING lots and as `receive_lot` does for a
+    -- real delivery. `discount_percent` takes its column default of 0.
+    SELECT product_id, lot_code, CURRENT_DATE + days, qty, cost_price, sell_price,
            'seed', 'system'
     FROM resolved
     RETURNING product_id, quantity
@@ -132,6 +136,29 @@ SET quantity_on_hand = COALESCE(
     ),
     0
 );
+
+-- Same idea for the lot-price roll-ups (`services/lots.recalculate_price_stats`
+-- is the runtime equivalent). Every seeded lot took its product's catalogue
+-- price, so this leaves min = max = avg = the catalogue price - correct, and
+-- it means the product screens do not show a stale range from before the seed.
+UPDATE products p
+SET min_cost_price = s.min_cost,
+    max_cost_price = s.max_cost,
+    avg_cost_price = round(s.avg_cost, 2),
+    min_sell_price = s.min_sell,
+    max_sell_price = s.max_sell,
+    avg_sell_price = round(s.avg_sell, 2)
+FROM (
+    SELECT product_id,
+           MIN(cost_price) AS min_cost, MAX(cost_price) AS max_cost,
+           AVG(cost_price) AS avg_cost,
+           MIN(sell_price) AS min_sell, MAX(sell_price) AS max_sell,
+           AVG(sell_price) AS avg_sell
+    FROM inventory_lots
+    WHERE quantity > 0
+    GROUP BY product_id
+) s
+WHERE p.id = s.product_id;
 
 COMMIT;
 

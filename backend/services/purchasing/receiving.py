@@ -135,7 +135,7 @@ def _apply_receipt(
     Checks `purchasing.write` itself rather than trusting the caller to have
     done it: `receive_order` below checks it too (harmless, self-documenting),
     but the draft-approval door only checked `draft.decide` before landing
-    here, which meant an approver with `draft.decide` and `lot.write` but not
+    here, which meant an approver with `draft.decide` and `stock.adjust` but not
     `purchasing.write` could apply a DELIVERY_RECEIPT draft. Both public doors
     to this function must agree on what it takes to receive an order, and the
     check belongs where it cannot be bypassed.

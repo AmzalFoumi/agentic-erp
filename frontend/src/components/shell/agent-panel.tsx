@@ -3,6 +3,7 @@
 import { useChat, type UIMessage } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 
 import { IdleState } from "./agent-panel/idle-state";
 import { MessageList } from "./agent-panel/message-list";
@@ -85,17 +86,31 @@ export function AgentPanel() {
     );
   }
 
-  return <ConnectedAgentPanel conversationId={conversationId} initialMessages={initialMessages} />;
+  return (
+    <ConnectedAgentPanel
+      key={conversationId}
+      conversationId={conversationId}
+      initialMessages={initialMessages}
+      onConversationChange={(newId) => {
+        setInitialMessages([]);
+        setConversationId(newId);
+      }}
+    />
+  );
 }
 
 function ConnectedAgentPanel({
   conversationId,
   initialMessages,
+  onConversationChange,
 }: {
   conversationId: number;
   initialMessages: UIMessage[];
+  onConversationChange: (id: number) => void;
 }) {
   const [input, setInput] = useState("");
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
   const { messages, sendMessage, addToolApprovalResponse, status, error } = useChat({
     id: String(conversationId),
@@ -110,6 +125,20 @@ function ConnectedAgentPanel({
 
   const [refetchError, setRefetchError] = useState<string | null>(null);
   const [isRefetching, setIsRefetching] = useState(false);
+
+  const handleClearChat = async () => {
+    setIsClearing(true);
+    try {
+      const newId = await startAgentConversation();
+      window.localStorage.setItem(CONVERSATION_STORAGE_KEY, String(newId));
+      onConversationChange(newId);
+      setShowClearConfirm(false);
+    } catch (err: unknown) {
+      console.error("Failed to clear chat:", err);
+    } finally {
+      setIsClearing(false);
+    }
+  };
 
   const handleRefetch = async () => {
     setIsRefetching(true);
@@ -164,7 +193,47 @@ function ConnectedAgentPanel({
 
   return (
     <aside className="flex h-full w-64 min-h-0 shrink-0 flex-col gap-stack border-l border-border bg-card p-section">
-      <div className="text-sm font-semibold">Assistant</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">Assistant</div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowClearConfirm(true)}
+          title="Clear chat"
+          className="h-6 w-6 p-0"
+        >
+          <X className="size-4" />
+        </Button>
+      </div>
+
+      {showClearConfirm && (
+        <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/50 p-3">
+          <p className="text-xs text-foreground">Start a new chat session?</p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={handleClearChat}
+              disabled={isClearing}
+              className="flex-1"
+            >
+              {isClearing ? "Clearing…" : "Clear"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowClearConfirm(false)}
+              disabled={isClearing}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col gap-stack overflow-y-auto">
         {state === "idle" && <IdleState onPickExample={setInput} />}

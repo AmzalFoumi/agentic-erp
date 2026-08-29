@@ -136,9 +136,13 @@ export default function RootLayout({
             </SignedIn>
 
             <SignedOut>
-              <main className="flex flex-1 items-center justify-center overflow-auto p-section">
-                {children}
-              </main>
+              {/*
+                Not centered/flex-boxed like the old one-button card: the
+                landing page (app/page.tsx) is now a full scrollable marketing
+                page with its own header, so it gets normal document flow and
+                manages its own top-level padding per section.
+              */}
+              <main className="flex-1 overflow-auto">{children}</main>
             </SignedOut>
           </ThemeProvider>
         </ThunderIDProvider>
