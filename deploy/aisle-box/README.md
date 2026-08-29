@@ -1,5 +1,8 @@
 # Aisle in a box
 
+> If you got here from the root `README.md`, this is the detailed version — same steps, plus
+> the certificate explanation, what's running, and troubleshooting.
+
 Aisle is a supermarket stock and purchasing system with an AI assistant built into it. This
 folder runs the whole thing — website, two back-end services, the AI agent, and its own
 login server — on your machine with one command.
