@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useSyncExternalStore, type ReactNode } from "react";
 
 import { AgentPanel } from "./agent-panel";
 import {
@@ -19,37 +19,49 @@ import { cn } from "@/lib/utils";
  * (display:none, still mounted — no unmount, no route change, nothing for
  * ThunderID to re-evaluate) and lets the panel fill the content area.
  *
- * Hydration: the server has no localStorage, so it always renders "docked".
- * `mode` uses a lazy `useState` initializer (the same pattern as
- * density-toggle.tsx) so a returning user's stored "expanded" is applied on
- * the client's first render — no set-state-in-effect. The two elements whose
- * className depends on `mode` (`<main>` here, the panel `<aside>`) carry
- * `suppressHydrationWarning` so that client-vs-server className difference is
- * not reported as a mismatch; everything inside them hydrates normally.
+ * Hydration: `mode` comes from `useSyncExternalStore` — the server snapshot is
+ * always "docked" (no localStorage there), the client snapshot is
+ * `readStoredMode()`. React renders the server snapshot during hydration and
+ * only swaps to the stored value on the following commit, so a returning
+ * "expanded" user gets no hydration mismatch anywhere in the tree (not the
+ * `<aside>` className, not the `ExpandToggle` icon/aria inside it). Subscribing
+ * to the `storage` event also keeps two open tabs in step for free.
  */
-function persistMode(mode: ChatMode) {
+const listeners = new Set<() => void>();
+
+function subscribe(onStoreChange: () => void): () => void {
+  listeners.add(onStoreChange);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === CHAT_MODE_STORAGE_KEY) onStoreChange();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    listeners.delete(onStoreChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+function getServerSnapshot(): ChatMode {
+  return "docked";
+}
+
+function writeMode(mode: ChatMode) {
   try {
     window.localStorage.setItem(CHAT_MODE_STORAGE_KEY, mode);
   } catch {
     // Storage unavailable (private mode / disabled) — the choice just won't
     // survive a reload this session.
   }
+  // The `storage` event does not fire in the tab that made the change, so
+  // notify local subscribers explicitly.
+  listeners.forEach((listener) => listener());
 }
 
 export function ChatShell({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState<ChatMode>(readStoredMode);
-
-  const setModePersisted = useCallback((next: ChatMode) => {
-    setMode(next);
-    persistMode(next);
-  }, []);
+  const mode = useSyncExternalStore(subscribe, readStoredMode, getServerSnapshot);
 
   const toggleMode = useCallback(() => {
-    setMode((current) => {
-      const next = nextMode(current);
-      persistMode(next);
-      return next;
-    });
+    writeMode(nextMode(readStoredMode()));
   }, []);
 
   // Esc collapses, but only while expanded, so it never competes with a
@@ -57,11 +69,11 @@ export function ChatShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (mode !== "expanded") return;
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setModePersisted("docked");
+      if (event.key === "Escape") writeMode("docked");
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, setModePersisted]);
+  }, [mode]);
 
   const expanded = mode === "expanded";
 
@@ -73,7 +85,6 @@ export function ChatShell({ children }: { children: ReactNode }) {
           "flex-1 min-w-0 overflow-auto p-section",
           expanded && "hidden",
         )}
-        suppressHydrationWarning
       >
         {children}
       </main>

@@ -88,7 +88,6 @@ export function AgentPanel({
           "flex h-full min-h-0 flex-col gap-stack border-l border-border bg-card p-section",
           mode === "expanded" ? "flex-1" : "w-64 shrink-0",
         )}
-        suppressHydrationWarning
       >
         <div className="flex items-center justify-between gap-2">
           <div className="text-sm font-semibold">Assistant</div>
@@ -220,7 +219,6 @@ function ConnectedAgentPanel({
         "flex h-full min-h-0 flex-col gap-stack border-l border-border bg-card p-section",
         mode === "expanded" ? "flex-1" : "w-64 shrink-0",
       )}
-      suppressHydrationWarning
     >
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">Assistant</div>
@@ -274,48 +272,48 @@ function ConnectedAgentPanel({
             mode === "expanded" && "mx-auto w-full max-w-3xl",
           )}
         >
-        {state === "idle" && <IdleState onPickExample={setInput} />}
-        {messages.length > 0 && (
-          <MessageList messages={messages} isStreaming={status === "streaming"} />
-        )}
-        {showThinking && <ThinkingIndicator />}
-        {state === "approval" && pendingApprovalPart && (
-          <ToolCallCard
-            part={pendingApprovalPart}
-            onRespond={(approved) => {
-              if (pendingApprovalPart.approval?.id) {
-                addToolApprovalResponse({ id: pendingApprovalPart.approval.id, approved });
-              }
-            }}
-          />
-        )}
-        {state === "success" &&
-          (() => {
-            const outputPart = last?.parts
-              .filter((part) => part.type.startsWith("tool-"))
-              .findLast((part) => {
-                const toolPart = part as unknown as ToolUIPart;
-                return toolPart.state === "output-available" && toolPart.approval?.approved === true;
-              }) as ToolUIPart | undefined;
-            return outputPart ? <SuccessCard part={outputPart} /> : null;
-          })()}
-        {status === "error" && (
-          <div className="flex flex-col gap-2 rounded-(--radius) border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <div className="font-semibold">Error</div>
-            <div>{error?.message ?? "An error occurred"}</div>
-            {refetchError && <div className="text-xs">Refetch failed: {refetchError}</div>}
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={handleRefetch}
-              disabled={isRefetching}
-              className="mt-1"
-            >
-              {isRefetching ? "Refetching…" : "Retry"}
-            </Button>
-          </div>
-        )}
+          {state === "idle" && <IdleState onPickExample={setInput} />}
+          {messages.length > 0 && (
+            <MessageList messages={messages} isStreaming={status === "streaming"} />
+          )}
+          {showThinking && <ThinkingIndicator />}
+          {state === "approval" && pendingApprovalPart && (
+            <ToolCallCard
+              part={pendingApprovalPart}
+              onRespond={(approved) => {
+                if (pendingApprovalPart.approval?.id) {
+                  addToolApprovalResponse({ id: pendingApprovalPart.approval.id, approved });
+                }
+              }}
+            />
+          )}
+          {state === "success" &&
+            (() => {
+              const outputPart = last?.parts
+                .filter((part) => part.type.startsWith("tool-"))
+                .findLast((part) => {
+                  const toolPart = part as unknown as ToolUIPart;
+                  return toolPart.state === "output-available" && toolPart.approval?.approved === true;
+                }) as ToolUIPart | undefined;
+              return outputPart ? <SuccessCard part={outputPart} /> : null;
+            })()}
+          {status === "error" && (
+            <div className="flex flex-col gap-2 rounded-(--radius) border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <div className="font-semibold">Error</div>
+              <div>{error?.message ?? "An error occurred"}</div>
+              {refetchError && <div className="text-xs">Refetch failed: {refetchError}</div>}
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={handleRefetch}
+                disabled={isRefetching}
+                className="mt-1"
+              >
+                {isRefetching ? "Refetching…" : "Retry"}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
