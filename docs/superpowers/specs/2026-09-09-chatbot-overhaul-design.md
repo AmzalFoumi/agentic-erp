@@ -322,12 +322,16 @@ State this explicitly in `docs/DEPLOY-PLAN.md`'s "what a new feature has to upda
 **Deferred / verify-at-implementation (durable — do not drop across a compaction):**
 - `DraftOut.payload` left as a loose object; a discriminated union keyed on `draft_type` is a
   later refinement, not gate 33.
-- Verify how Pydantic-AI's `VercelAIAdapter` (`dump_messages` / `encode_stream`) serializes a
-  **dict** tool-return into the streamed `tool-output-available.output` field — expected to be a
-  clean JSON value, must confirm at implementation. (This is the pre-existing open question in
-  the section below, now owned by gate 33.)
-- Verify the chosen JSON-Schema→TS generator resolves `$ref`/`$defs` and keeps string-typed money
-  as `string` (never widened to `number`).
+- ~~Verify how Pydantic-AI's `VercelAIAdapter` serializes a **dict** tool-return into the streamed
+  `tool-output-available.output` field.~~ **RESOLVED 2026-09-10.** `pydantic_ai.ui.vercel_ai._utils.tool_return_output`
+  is `tool_return_ta.dump_python(part.content, mode="json")` — a plain dict passes through unchanged
+  (verified empirically in the agent venv, both directions). So `output` is now a JSON object where
+  pre-gate-33 it was the `}\n{`-concatenated string. Same function serves the live stream and the
+  `dump_messages` history path.
+- ~~Verify the chosen JSON-Schema→TS generator resolves `$ref`/`$defs` and keeps string-typed money
+  as `string`.~~ **RESOLVED 2026-09-10.** `json-schema-to-typescript@16` via a wrapper script
+  (`frontend/scripts/gen-mcp-types.mjs`); money fields are `string` in `mcp-types.d.ts`, `$defs`
+  resolve to named interfaces.
 - Bare-list / non-str-key returns still trigger the SDK's `{"result": …}` auto-wrap. We avoid it
   by using models everywhere; `call_tool` keeps only the text fallback, not a de-wrap. If a
   future tool returns a bare collection, revisit.
@@ -424,10 +428,11 @@ and even then, structured tool output is preferred.
 
 - Streamdown vs `react-markdown` current versions + Tailwind v4 compat (gate 32). **Resolved —
   gate 32 shipped on Streamdown 2.6.0.**
-- Gate 33's verify-at-implementation items now live in the **Gate 33** section above ("Deferred /
-  verify-at-implementation"). The `mcp` SDK's structured-output behaviour was read from source
-  2026-09-10 and written up there; the one still-open question — how `VercelAIAdapter` serializes
-  a dict tool-return into the streamed `output` field — is listed there.
+- Gate 33 **shipped 2026-09-10** (commits `e306d05..09b5714` on `feat/client/chatbot`). All its
+  verify-at-implementation items in the Gate 33 section above are now resolved, including the
+  `VercelAIAdapter` dict-serialization question (`tool_return_output` passes a dict through as a
+  JSON object). End-to-end browser check deferred — the frontend dev server was not hydrating at
+  the time; the wire behaviour was confirmed at the serializer instead.
 - Whether `VercelAIAdapter.dump_messages` on the GET path already round-trips tool parts when
   they are present in `provider_data` (gate 34).
 - Tool dict shapes are captured (table above); re-capture at gate 33 start only if `server.py`
