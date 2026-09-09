@@ -1,6 +1,20 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "streamdown/styles.css";
+
+/*
+ * Streamdown ships its prose styling as Tailwind utility classes baked into its
+ * compiled JS (dist/*.js), not as a stylesheet. This @source line tells
+ * Tailwind v4 to scan that file so those classes — including the streaming
+ * caret's `after:content-[var(--streamdown-caret)]` — actually get generated.
+ *
+ * The path is relative from THIS file (frontend/src/app/globals.css) to
+ * frontend/node_modules. `../../` climbs src/app → src → frontend. If Streamdown
+ * renders as an unstyled wall of text in the browser, this path is wrong: count
+ * the directories again.
+ */
+@source "../../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 

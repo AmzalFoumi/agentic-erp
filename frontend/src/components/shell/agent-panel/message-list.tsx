@@ -2,6 +2,8 @@
 
 import type { UIMessage } from "@ai-sdk/react";
 
+import { Markdown } from "./markdown";
+
 function textOf(message: UIMessage): string {
   return message.parts
     .filter((part) => part.type === "text")
@@ -22,6 +24,8 @@ export function MessageList({
         const text = textOf(message);
         if (!text) return null;
         const isLast = index === messages.length - 1;
+        const isAssistant = message.role === "assistant";
+        const streamingHere = isLast && isStreaming && isAssistant;
         return (
           <div
             key={message.id}
@@ -31,11 +35,10 @@ export function MessageList({
                 : "self-start rounded-(--radius) bg-secondary px-3 py-2 text-sm text-secondary-foreground"
             }
           >
-            {text}
-            {isLast && isStreaming && message.role === "assistant" && (
-              <span className="animate-blink" aria-hidden="true">
-                ▍
-              </span>
+            {isAssistant ? (
+              <Markdown isAnimating={streamingHere}>{text}</Markdown>
+            ) : (
+              text
             )}
           </div>
         );
