@@ -6,11 +6,19 @@ and 5.53 seconds against the local container — same tests, same assertions,
 same rollback-per-test behavior, the only difference is the network hop to
 `eu-west-3` on every query. There is no reason to default to the slow path.
 
-Plain `pytest`, with no extra setup, still keeps working exactly as it always
-has: it reads `backend/.env` and runs every test against the real, hosted
-Supabase project. Keep using that path for the final check before a push (see
-"Which one should I actually use?" below) — just not as the everyday default
-anymore.
+Plain `pytest` with no `TEST_DATABASE_URL` and no local `DATABASE_URL` now
+**stops with an error** instead of silently connecting to hosted Supabase — a
+plain run used to do that by accident, which was slow and needlessly loaded a
+shared database. `conftest.py` refuses a remote database unless you opt in.
+Two ways in:
+
+- **Everyday:** set `TEST_DATABASE_URL` to the local container (below).
+- **The pre-push check against real Supabase:** export `PYTEST_ALLOW_REMOTE_DB=1`
+  (see "Which one should I actually use?" below). The suite prints a "running
+  against remote database, expect this to be slow" line and proceeds.
+
+CI is unaffected — it points `DATABASE_URL` at its own `localhost` Postgres,
+and an explicitly local host is always allowed without either variable.
 
 ## Why a second database at all
 
@@ -97,11 +105,11 @@ about the tests themselves changes - same fixtures, same rollback behavior -
 only the address got faster.
 
 `$env:TEST_DATABASE_URL=...` only lasts for the current PowerShell window.
-Close it and open a new one, and plain `pytest` goes back to hitting Supabase
-automatically, because `conftest.py` falls back to the app's real engine
-(built from `DATABASE_URL` in `backend/.env`) whenever `TEST_DATABASE_URL`
-isn't set. That's deliberate: nobody's normal workflow should silently change
-to a different database.
+Close it and open a new one, and plain `pytest` no longer silently reaches
+Supabase — `conftest.py` still falls back to the app's real engine (built from
+`DATABASE_URL` in `backend/.env`), but if that engine points at a remote host
+the suite now **errors out** and tells you to set `TEST_DATABASE_URL` or export
+`PYTEST_ALLOW_REMOTE_DB=1`. Nobody's workflow changes database by accident.
 
 ## Tearing it down
 
@@ -125,9 +133,11 @@ failing on a table that doesn't exist.
   trip to `eu-west-3` and a call to `127.0.0.1`, for every one of the ~300
   tests in the suite (10 minutes vs. 5.53 seconds, measured 2026-08-28).
 - **Before pushing, or when you want the closest thing to a real check:**
-  plain `pytest` against Supabase. It's the same database `backend/`,
-  `mcp_server/`, and the deployed box actually share, and CI runs against it
-  too (see `docs/CI-PLAN.md`).
+  `PYTEST_ALLOW_REMOTE_DB=1 pytest` against Supabase. It's the same database
+  `backend/`, `mcp_server/`, and the deployed box actually share, and CI runs
+  against it too (see `docs/CI-PLAN.md`). The `PYTEST_ALLOW_REMOTE_DB=1` prefix
+  is the deliberate opt-in — without it a plain `pytest` whose `DATABASE_URL`
+  is Supabase stops with an error instead of connecting.
 
 ## For Claude Code / an agent running these tests
 
@@ -142,11 +152,12 @@ Before running backend tests, work through this in order:
 1. **Is the Docker engine running?**
    `docker info` (exits non-zero / errors if the engine itself is down).
    - **No** → don't try to start Docker Desktop or the engine yourself, that's
-     an OS-level action outside this container's scope, and don't fall back to
-     plain `pytest` either — that would run against live Supabase, which is
-     outside the standing exception's scope. Stop and tell the developer Docker
-     isn't running; let them choose whether to start it or explicitly ask for
-     the Supabase path.
+     an OS-level action outside this container's scope, and don't reach for
+     `PYTEST_ALLOW_REMOTE_DB=1` either — that runs against live Supabase, which
+     is outside the standing exception's scope (and `conftest.py` will refuse a
+     plain `pytest` without it). Stop and tell the developer Docker isn't
+     running; let them choose whether to start it or explicitly ask for the
+     Supabase path.
    - **Yes** → continue.
 
 2. **Is the container up and healthy?**
