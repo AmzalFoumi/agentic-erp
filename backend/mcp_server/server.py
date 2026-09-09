@@ -66,6 +66,23 @@ from core.exceptions import AuthenticationError, ValidationError
 from core.models import ActionDraft, Product
 from mcp_server.auth import ThunderIDTokenVerifier
 from mcp_server.errors import translated
+from mcp_server.schemas import (
+    DraftListOut,
+    DraftOut,
+    LotListOut,
+    LotOut,
+    POLineOut,
+    ProductListOut,
+    ProductOut,
+    PurchaseOrderListOut,
+    PurchaseOrderOut,
+    ReorderBundleOut,
+    ReorderLineOut,
+    ReorderReportOut,
+    SpoilageItemOut,
+    SpoilageReportOut,
+    UnsourcedOut,
+)
 from services import drafts as draft_service
 from services import lots as lot_service
 from services import products as product_service
@@ -184,7 +201,7 @@ def _actor() -> Actor:
     return TokenActor(actor_id=token.subject, scopes=frozenset(token.scopes))
 
 
-def _describe(product: Product) -> dict[str, Any]:
+def _describe(product: Product) -> ProductOut:
     """Turn a Product ORM object into a plain dict the protocol can send.
 
     This is the MCP counterpart of a Pydantic response schema: the boundary
@@ -206,21 +223,21 @@ def _describe(product: Product) -> dict[str, Any]:
     money the same way, which is convergence rather than coordination: both
     adapters hit the same constraint and there is only one correct answer.
     """
-    return {
-        "id": product.id,
-        "sku": product.sku,
-        "name": product.name,
-        "category": product.category,
-        "unit": product.unit,
-        "cost_price": str(product.cost_price),
-        "sell_price": str(product.sell_price),
-        "quantity_on_hand": product.quantity_on_hand,
-        "reorder_level": product.reorder_level,
+    return ProductOut(
+        id=product.id,
+        sku=product.sku,
+        name=product.name,
+        category=product.category,
+        unit=product.unit,
+        cost_price=str(product.cost_price),
+        sell_price=str(product.sell_price),
+        quantity_on_hand=product.quantity_on_hand,
+        reorder_level=product.reorder_level,
         # Read from the model, not computed here. It was briefly computed in
         # this file, which was the wrong call: "needs reordering" is a rule the
         # business owns, so it belongs where both adapters can reach it. See
         # Product.needs_reorder in core/models.py.
-        "needs_reorder": product.needs_reorder,
+        needs_reorder=product.needs_reorder,
         # Published at gate 25, and per this docstring that is a decision rather
         # than a leak. Two reasons it earns its place:
         #
@@ -236,8 +253,8 @@ def _describe(product: Product) -> dict[str, Any]:
         #    a token for this resource server.
         #
         # Nullable: rows written before the audit columns existed carry None.
-        "updated_by": product.updated_by,
-    }
+        updated_by=product.updated_by,
+    )
 
 
 def _price(value: str, field: str) -> Decimal:
@@ -274,7 +291,7 @@ def list_products(
     search: str | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> list[dict[str, Any]]:
+) -> ProductListOut:
     """List products in the catalogue, newest first.
 
     Use this to answer questions about what the shop stocks, to find a product
@@ -291,19 +308,24 @@ def list_products(
         stock has fallen to or below the product's reorder level.
     """
     with get_session() as session:
+        actor = _actor()
         found = product_service.list_products(
             session,
-            _actor(),
+            actor,
             search=search,
             limit=limit,
             offset=offset,
         )
-        return [_describe(product) for product in found]
+        total = product_service.count_products(session, actor, search=search)
+        return ProductListOut(
+            products=[_describe(product) for product in found],
+            total=total,
+        )
 
 
 @mcp.tool()
 @translated
-def get_product(product_id: int) -> dict[str, Any]:
+def get_product(product_id: int) -> ProductOut:
     """Get one product by its numeric id.
 
     Prefer get_product_by_sku when you have a shelf-label code rather than an
@@ -326,7 +348,7 @@ def get_product(product_id: int) -> dict[str, Any]:
 
 @mcp.tool()
 @translated
-def get_product_by_sku(sku: str) -> dict[str, Any]:
+def get_product_by_sku(sku: str) -> ProductOut:
     """Get one product by its SKU, the code printed on the shelf label.
 
     Matching ignores case and surrounding spaces, so "rice-1kg" finds
@@ -358,7 +380,7 @@ def create_product(
     sell_price: str = "0.00",
     quantity_on_hand: int = 0,
     reorder_level: int = 0,
-) -> dict[str, Any]:
+) -> ProductOut:
     """Add a new product to the catalogue.
 
     Check first with get_product_by_sku or list_products that the product does
@@ -416,7 +438,7 @@ def update_product(
     cost_price: str | None = None,
     sell_price: str | None = None,
     reorder_level: int | None = None,
-) -> dict[str, Any]:
+) -> ProductOut:
     """Change details of an existing product. Omitted fields are left alone.
 
     Send only the fields being changed. Sending a field its current value is
@@ -462,7 +484,7 @@ def update_product(
 
 @mcp.tool()
 @translated
-def adjust_stock(product_id: int, delta: int, reason: str | None = None) -> dict[str, Any]:
+def adjust_stock(product_id: int, delta: int, reason: str | None = None) -> ProductOut:
     """Move a product's stock up or down by a given amount.
 
     This is the only way stock changes. `delta` is a **change**, not a new
@@ -513,64 +535,64 @@ def adjust_stock(product_id: int, delta: int, reason: str | None = None) -> dict
 # property this whole feature exists to create.
 
 
-def _describe_lot(lot: Any) -> dict[str, Any]:
+def _describe_lot(lot: Any) -> LotOut:
     """One lot, in the shape a model reads best.
 
     Money as a string, for the same reason it crosses every other boundary that
     way: a float cannot hold 10.10 exactly, and a model asked to reason about
     prices should not be handed 10.099999999999999.
     """
-    return {
-        "lot_id": lot.id,
-        "product_id": lot.product_id,
-        "lot_code": lot.lot_code,
+    return LotOut(
+        lot_id=lot.id,
+        product_id=lot.product_id,
+        lot_code=lot.lot_code,
         # None is meaningful: "we do not know when this expires", not "missing".
-        "expiry_date": lot.expiry_date.isoformat() if lot.expiry_date else None,
-        "quantity": lot.quantity,
-        "cost_price": str(lot.cost_price),
+        expiry_date=lot.expiry_date.isoformat() if lot.expiry_date else None,
+        quantity=lot.quantity,
+        cost_price=str(lot.cost_price),
         # The shelf price for this batch. `discount_percent` is how far a
         # spoilage markdown has taken it below the product's catalogue price;
         # 0 means full price.
-        "sell_price": str(lot.sell_price),
-        "discount_percent": lot.discount_percent,
-        "is_expired": lot.is_expired,
-    }
+        sell_price=str(lot.sell_price),
+        discount_percent=lot.discount_percent,
+        is_expired=lot.is_expired,
+    )
 
 
-def _describe_spoilage(report: Any) -> dict[str, Any]:
+def _describe_spoilage(report: Any) -> SpoilageReportOut:
     """A spoilage report, flattened for a model.
 
     The two totals are separate keys and are never combined here. See the tool
     docstrings: netting them would turn a forecast into an apparent fact.
     """
-    return {
-        "scanned_on": report.scanned_on.isoformat(),
-        "within_days": report.within_days,
-        "total_cost_at_risk": str(report.total_cost_at_risk),
-        "total_projected_recovery": str(report.total_projected_recovery),
-        "items": [
-            {
-                "lot_id": item.lot_id,
-                "product_id": item.product_id,
-                "sku": item.sku,
-                "product_name": item.product_name,
-                "lot_code": item.lot_code,
-                "expiry_date": item.expiry_date.isoformat(),
-                "days_remaining": item.days_remaining,
-                "quantity": item.quantity,
-                "current_price": str(item.current_price),
-                "proposed_price": str(item.proposed_price),
-                "discount_percent": item.discount_percent,
-                "why": item.tier_label,
-                "cost_at_risk": str(item.cost_at_risk),
-                "projected_recovery": str(item.projected_recovery),
-            }
+    return SpoilageReportOut(
+        scanned_on=report.scanned_on.isoformat(),
+        within_days=report.within_days,
+        total_cost_at_risk=str(report.total_cost_at_risk),
+        total_projected_recovery=str(report.total_projected_recovery),
+        items=[
+            SpoilageItemOut(
+                lot_id=item.lot_id,
+                product_id=item.product_id,
+                sku=item.sku,
+                product_name=item.product_name,
+                lot_code=item.lot_code,
+                expiry_date=item.expiry_date.isoformat(),
+                days_remaining=item.days_remaining,
+                quantity=item.quantity,
+                current_price=str(item.current_price),
+                proposed_price=str(item.proposed_price),
+                discount_percent=item.discount_percent,
+                why=item.tier_label,
+                cost_at_risk=str(item.cost_at_risk),
+                projected_recovery=str(item.projected_recovery),
+            )
             for item in report.items
         ],
-    }
+    )
 
 
-def _describe_draft(draft: ActionDraft) -> dict[str, Any]:
+def _describe_draft(draft: ActionDraft) -> DraftOut:
     """Turn an ActionDraft into a plain dict the protocol can send.
 
     Same job as `_describe` above, same two reasons - a SQLAlchemy object is
@@ -582,89 +604,89 @@ def _describe_draft(draft: ActionDraft) -> dict[str, Any]:
     "nothing is at stake" are different facts, and a model reading the second
     when the first is true would report a confident zero.
     """
-    return {
-        "id": draft.id,
-        "draft_type": draft.draft_type,
-        "status": draft.status,
-        "payload": draft.payload,
-        "reasoning": draft.reasoning,
-        "cost_at_risk": (
+    return DraftOut(
+        id=draft.id,
+        draft_type=draft.draft_type,
+        status=draft.status,
+        payload=draft.payload,
+        reasoning=draft.reasoning,
+        cost_at_risk=(
             str(draft.cost_at_risk) if draft.cost_at_risk is not None else None
         ),
-        "projected_recovery": (
+        projected_recovery=(
             str(draft.projected_recovery)
             if draft.projected_recovery is not None
             else None
         ),
-        "expires_at": draft.expires_at.isoformat() if draft.expires_at else None,
+        expires_at=draft.expires_at.isoformat() if draft.expires_at else None,
         # Computed on the model and shipped as an answer, not as inputs - the
         # same call `needs_reorder` represents. A model asked to work out
         # whether a timestamp has passed will sometimes get it wrong, and there
         # is no reason to make it try.
-        "is_expired": draft.is_expired,
-        "created_by": draft.created_by,
-        "created_via": draft.created_via,
-        "decided_by": draft.decided_by,
-        "decided_via": draft.decided_via,
-    }
+        is_expired=draft.is_expired,
+        created_by=draft.created_by,
+        created_via=draft.created_via,
+        decided_by=draft.decided_by,
+        decided_via=draft.decided_via,
+    )
 
 
-def _describe_reorder(report: Any) -> dict[str, Any]:
+def _describe_reorder(report: Any) -> ReorderReportOut:
     """A reorder report, flattened for a model. Same shape as `_describe_spoilage`."""
-    return {
-        "total_value": str(report.total_value),
-        "bundles": [
-            {
-                "supplier_id": bundle.supplier_id,
-                "supplier_name": bundle.supplier_name,
-                "lead_time_days": bundle.lead_time_days,
-                "minimum_order_value": str(bundle.minimum_order_value),
-                "bundle_value": str(bundle.bundle_value),
-                "below_minimum": bundle.below_minimum,
-                "shortfall": str(bundle.shortfall),
-                "lines": [
-                    {
-                        "product_id": line.product_id,
-                        "sku": line.sku,
-                        "name": line.name,
-                        "quantity_on_hand": line.quantity_on_hand,
-                        "reorder_level": line.reorder_level,
-                        "quantity": line.quantity,
-                        "unit_cost": str(line.unit_cost),
-                        "pack_size": line.pack_size,
-                        "line_total": str(line.line_total),
-                        "is_top_up": line.is_top_up,
-                    }
+    return ReorderReportOut(
+        total_value=str(report.total_value),
+        bundles=[
+            ReorderBundleOut(
+                supplier_id=bundle.supplier_id,
+                supplier_name=bundle.supplier_name,
+                lead_time_days=bundle.lead_time_days,
+                minimum_order_value=str(bundle.minimum_order_value),
+                bundle_value=str(bundle.bundle_value),
+                below_minimum=bundle.below_minimum,
+                shortfall=str(bundle.shortfall),
+                lines=[
+                    ReorderLineOut(
+                        product_id=line.product_id,
+                        sku=line.sku,
+                        name=line.name,
+                        quantity_on_hand=line.quantity_on_hand,
+                        reorder_level=line.reorder_level,
+                        quantity=line.quantity,
+                        unit_cost=str(line.unit_cost),
+                        pack_size=line.pack_size,
+                        line_total=str(line.line_total),
+                        is_top_up=line.is_top_up,
+                    )
                     for line in bundle.lines
                 ],
-            }
+            )
             for bundle in report.bundles
         ],
-        "unsourced": [dict(item) for item in report.unsourced],
-    }
+        unsourced=[UnsourcedOut(**dict(item)) for item in report.unsourced],
+    )
 
 
-def _describe_order(order: Any) -> dict[str, Any]:
+def _describe_order(order: Any) -> PurchaseOrderOut:
     """A purchase order, flattened for a model."""
-    return {
-        "id": order.id,
-        "supplier_id": order.supplier_id,
-        "status": order.status,
-        "expected_date": order.expected_date.isoformat() if order.expected_date else None,
-        "total_value": str(order.total_value),
-        "notes": order.notes,
-        "source_draft_id": order.source_draft_id,
-        "created_by": order.created_by,
-        "lines": [
-            {
-                "product_id": line.product_id,
-                "quantity_ordered": line.quantity_ordered,
-                "unit_cost": str(line.unit_cost),
-                "line_total": str(line.line_total),
-            }
+    return PurchaseOrderOut(
+        id=order.id,
+        supplier_id=order.supplier_id,
+        status=order.status,
+        expected_date=order.expected_date.isoformat() if order.expected_date else None,
+        total_value=str(order.total_value),
+        notes=order.notes,
+        source_draft_id=order.source_draft_id,
+        created_by=order.created_by,
+        lines=[
+            POLineOut(
+                product_id=line.product_id,
+                quantity_ordered=line.quantity_ordered,
+                unit_cost=str(line.unit_cost),
+                line_total=str(line.line_total),
+            )
             for line in order.lines
         ],
-    }
+    )
 
 
 @mcp.tool()
@@ -675,7 +697,7 @@ def create_action_draft(
     reasoning: str,
     cost_at_risk: str | None = None,
     projected_recovery: str | None = None,
-) -> dict[str, Any]:
+) -> DraftOut:
     """Propose a change for a human to approve. Nothing happens until they do.
 
     Use this for anything that affects many items at once or involves money:
@@ -736,7 +758,7 @@ def create_action_draft(
 
 @mcp.tool()
 @translated
-def list_pending_drafts(limit: int = 20) -> list[dict[str, Any]]:
+def list_pending_drafts(limit: int = 20) -> DraftListOut:
     """List proposals still waiting for a human decision.
 
     Use this to check whether something you proposed has been decided yet, or
@@ -758,16 +780,14 @@ def list_pending_drafts(limit: int = 20) -> list[dict[str, Any]]:
         The pending proposals, newest first.
     """
     with get_session() as session:
-        return [
-            _describe_draft(draft)
-            for draft in draft_service.list_drafts(
-                session, _actor(), status=DraftStatus.PENDING, limit=limit
-            )
-        ]
+        drafts = draft_service.list_drafts(
+            session, _actor(), status=DraftStatus.PENDING, limit=limit
+        )
+        return DraftListOut(drafts=[_describe_draft(draft) for draft in drafts])
 
 @mcp.tool()
 @translated
-def check_spoilage_risk(within_days: int | None = None) -> dict[str, Any]:
+def check_spoilage_risk(within_days: int | None = None) -> SpoilageReportOut:
     """Find stock that is about to expire and what discounting it would recover.
 
     Read-only: this looks, and changes nothing. Use it freely while you are
@@ -812,7 +832,7 @@ def check_spoilage_risk(within_days: int | None = None) -> dict[str, Any]:
 @translated
 def propose_spoilage_markdown(
     reasoning: str, within_days: int | None = None
-) -> dict[str, Any]:
+) -> DraftOut:
     """Propose discounting everything that is about to expire. A human approves it.
 
     This stages one proposal covering every at-risk item and puts it in the
@@ -855,7 +875,7 @@ def propose_spoilage_markdown(
 
 @mcp.tool()
 @translated
-def list_product_lots(product_id: int) -> list[dict[str, Any]]:
+def list_product_lots(product_id: int) -> LotListOut:
     """The separate deliveries making up one product's stock, soonest expiry first.
 
     A product is "Milk 2L". A lot is the thirty cartons that arrived on Tuesday
@@ -873,12 +893,8 @@ def list_product_lots(product_id: int) -> list[dict[str, Any]]:
         The lots that still hold stock, soonest expiry first.
     """
     with get_session() as session:
-        return [
-            _describe_lot(lot)
-            for lot in lot_service.list_lots(
-                session, _actor(), product_id=product_id
-            )
-        ]
+        lots = lot_service.list_lots(session, _actor(), product_id=product_id)
+        return LotListOut(lots=[_describe_lot(lot) for lot in lots])
 
 
 @mcp.tool()
@@ -890,7 +906,7 @@ def receive_stock_lot(
     expiry_date: str | None = None,
     cost_price: str | None = None,
     sell_price: str | None = None,
-) -> dict[str, Any]:
+) -> LotOut:
     """Book a delivery of one product into stock as a new lot.
 
     Use this when someone tells you stock physically arrived - "we just got 30
@@ -953,7 +969,7 @@ def receive_stock_lot(
 
 @mcp.tool()
 @translated
-def suggest_reorder_bundles() -> dict[str, Any]:
+def suggest_reorder_bundles() -> ReorderReportOut:
     """Work out what to buy today, grouped by supplier.
 
     Read-only: this looks and changes nothing. Use it freely while working out
@@ -984,7 +1000,7 @@ def suggest_reorder_bundles() -> dict[str, Any]:
 
 @mcp.tool()
 @translated
-def propose_reorder_order(supplier_id: int, reasoning: str) -> dict[str, Any]:
+def propose_reorder_order(supplier_id: int, reasoning: str) -> DraftOut:
     """Propose one supplier's order for a manager to approve.
 
     This writes a proposal into the approvals queue and **places no order**.
@@ -1018,7 +1034,7 @@ def propose_reorder_order(supplier_id: int, reasoning: str) -> dict[str, Any]:
 @translated
 def propose_delivery_receipt(
     order_id: int, lines: list[dict[str, Any]], reasoning: str
-) -> dict[str, Any]:
+) -> DraftOut:
     """Stage what arrived for a sent purchase order as a proposal for a human to approve.
 
     Call this after the dock worker (or whoever is telling you) describes
@@ -1062,7 +1078,7 @@ def propose_delivery_receipt(
 @translated
 def list_purchase_orders(
     status: str | None = None, limit: int = 20
-) -> dict[str, Any]:
+) -> PurchaseOrderListOut:
     """List purchase orders, newest first.
 
     Read-only. Statuses are: draft (raised, not placed), sent (placed with the
@@ -1083,10 +1099,10 @@ def list_purchase_orders(
         orders, total = purchasing_service.list_orders(
             session, _actor(), status=status, limit=limit
         )
-        return {
-            "orders": [_describe_order(order) for order in orders],
-            "total": total,
-        }
+        return PurchaseOrderListOut(
+            orders=[_describe_order(order) for order in orders],
+            total=total,
+        )
 
 
 def main(argv: list[str] | None = None) -> None:
