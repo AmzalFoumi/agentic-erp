@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2, X } from "lucide-react";
 
 import type { ChatMode } from "./chat-mode";
+import { ChatModeProvider } from "./agent-panel/chat-mode-context";
 import { IdleState } from "./agent-panel/idle-state";
 import { MessageList } from "./agent-panel/message-list";
 import { SuccessCard } from "./agent-panel/success-card";
@@ -214,6 +215,7 @@ function ConnectedAgentPanel({
   }, [messages.length, lastText, state, pendingApprovalPart]);
 
   return (
+    <ChatModeProvider mode={mode}>
     <aside
       className={cn(
         "flex h-full min-h-0 flex-col gap-stack border-border bg-card p-section",
@@ -339,6 +341,7 @@ function ConnectedAgentPanel({
         </Button>
       </form>
     </aside>
+    </ChatModeProvider>
   );
 }
 
