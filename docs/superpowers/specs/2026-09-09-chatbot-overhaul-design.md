@@ -1,7 +1,9 @@
 # Chatbot overhaul — design spec
 
-> **Status:** IMPLEMENTATION IN PROGRESS (2026-09-09). Chat mode (gate 31) and Markdown rendering
-> (gate 32) are complete and pending review; gates 33–34 have not started, per `docs/PLAN.md`.
+> **Status:** IMPLEMENTATION IN PROGRESS. Gate 31 (chat mode) and gate 32 (Markdown rendering)
+> complete on branch `feat/client/chatbot`, pending review. Gate 33 (structured tool-output
+> contract) design finalised 2026-09-10 — see that section; plan at
+> `docs/superpowers/plans/2026-09-10-gate33-structured-tool-output.md`. Gate 34 not started.
 > **Owner doc.** This is the single source of truth for the chatbot overhaul. `docs/PLAN.md`
 > gates 31–34 point here and carry only one-line summaries. Do not restate decisions in other
 > docs — link to this file.
@@ -230,31 +232,108 @@ dedicated "render" agent tools. See the rejected alternative and its ramificatio
 
 ### Gate 33 — structured tool-output contract (backend + generated types)
 
-**Problem:** `output` is a string of newline-concatenated JSON (finding 2). Parsing it
-client-side is fragile, and there is no type check the way `schema.d.ts` gives the REST client.
+> **Design finalised 2026-09-10** (brainstorm this session). Three decisions locked (Q1–Q3
+> below). Supersedes the "Fix" sketch that was here before. Implementation plan:
+> `docs/superpowers/plans/2026-09-10-gate33-structured-tool-output.md`.
 
-**Fix:**
-- Give the MCP **read** tools (`list_products`, `get_product`, `get_product_by_sku`,
-  `check_spoilage_risk`, `list_product_lots`, `suggest_reorder_bundles`, `list_pending_drafts`,
-  `list_purchase_orders`) Pydantic return models / MCP `outputSchema` so the SDK emits
-  `structuredContent` — `output` becomes a real array/object.
-- This is a serialization/declaration change in `backend/mcp_server/`. **`services/` untouched;
-  `_describe()` already picks the fields; no auth path touched.** Verify against the installed
-  `mcp` SDK's `outputSchema` / `structuredContent` API at implementation (verify-docs rule — the
-  SDK is new).
-- **Generate TypeScript types** from those schemas into `frontend/src/lib/api/` (a sibling of
-  `schema.d.ts`), plus a **drift check** mirroring the existing `api:types` check. This is the
-  card registry's contract — the thing that makes a backend field rename a failed check, not a
-  silently broken card.
-- Keep MCP tool **descriptions** (the docstrings the model reads) unchanged — only the return
-  declaration changes.
+**Problem, restated after reading the installed `mcp` 2.0.0 SDK source.** The spec's finding 2
+("`output` is a string of newline-concatenated JSON objects") is a real symptom but the cause is
+**not** the backend. `@mcp.tool()` already builds a structured-output object for every read tool,
+from the return-type hint — the SDK's `func_metadata.convert_result` populates
+`CallToolResult.structured_content` today, and `backend/tests/test_mcp_products.py` already reads
+`.structured_content` as a dict. The concatenated-JSON string is produced **entirely** by
+`agent/mcp_client.py:call_tool`, which does `"\n".join(block.text …)` over the *unstructured*
+`result.content` blocks and discards `structured_content`.
 
-**Shapes are already captured** (see the "Tool return shapes" table above — all 7 read tools
-captured live 2026-09-09). At gate start, re-capture only if `server.py` / `_describe()` has
-changed since, and diff against the table.
+So gate 33 is two coordinated changes, not the big backend lift the earlier sketch implied:
 
-**Test:** each read tool's `structuredContent` matches its declared schema; existing MCP tests
-still pass; the drift check fails on a deliberate schema change.
+1. **Agent:** `call_tool` prefers `structured_content`. This alone fixes the wire format.
+2. **Backend:** replace the loose `-> dict[str, Any]` / `-> list[dict[str, Any]]` return hints
+   with **named Pydantic models**. The loose hints *do* produce `structured_content`, but the
+   JSON Schema attached to it is useless for a type contract (`{"type": "object"}` with no named
+   properties; and a bare `list[...]` return is auto-wrapped by the SDK as `{"result": […]}`).
+   Named models give a real schema to generate TypeScript from, and a real contract to drift-check.
+
+**Q1 — list-tool output shape (decided: named field + count where cheap).**
+- `list_products` → `{ "products": [ProductOut, …], "total": int }` — `total` from the **existing**
+  `services/products.py:count_products` (no new query, no service change).
+- `list_product_lots` → `{ "lots": [LotOut, …] }`
+- `list_pending_drafts` → `{ "drafts": [DraftOut, …] }`
+- `list_purchase_orders` → `{ "orders": [PurchaseOrderOut, …], "total": int }` — shape unchanged.
+- Rejected: adding `total` to lots/drafts (needs count queries in `services/` — over the line);
+  a generic `{ "items": [...] }` envelope (loses the self-describing field name in the raw JSON
+  the model reads).
+
+**Q2 — TypeScript generation (decided: offline, via a committed schema file).**
+- New `backend/mcp_server/dump_schemas.py`, run as `python -m mcp_server.dump_schemas`. Pure model
+  introspection — no server, no DB. Writes a deterministic JSON Schema document to
+  `frontend/src/lib/api/mcp-schema.json` (backend writes into the frontend tree, exactly as the
+  REST `schema.d.ts` already lives there).
+- Frontend `npm run mcp:types` turns `mcp-schema.json` → `src/lib/api/mcp-types.d.ts` with a
+  standard JSON-Schema→TypeScript generator (one new **dev** dependency; exact package chosen at
+  implementation per verify-docs).
+- **Drift check is two halves**, because regenerating the schema needs Python: CI's backend job
+  runs `dump_schemas` and `git diff --exit-code` on `mcp-schema.json`; CI's frontend job runs
+  `mcp:types` and diffs `mcp-types.d.ts`. `npm run mcp:types:check` is the frontend half.
+- Both generated files: **committed, never hand-edited** — same rule as `schema.d.ts`.
+- Rejected: generating from a live MCP server (mirrors `api:types` but the MCP server now needs
+  auth, so it needs a dedicated `AUTH_ENABLED=false` run in CI); backend emitting the `.d.ts`
+  directly (backend then owns frontend codegen + a generator in the backend venv).
+
+**Q3 — scope: write/proposal tools too (decided: yes, type the shared helpers).**
+The `_describe` / `_describe_lot` / `_describe_draft` helpers are shared by read tools **and** by
+`create_product`, `update_product`, `adjust_stock`, `receive_stock_lot`, `create_action_draft`,
+`propose_spoilage_markdown`, `propose_reorder_order`, `propose_delivery_receipt`. Typing the
+helpers is the least-code path and it hands those helpers a single source of truth for the field
+list. All ~15 tool outputs get named models + generated TS. This slightly exceeds the earlier
+"read tools" wording but is still pure serialization — no `services/`, `core/`, `authn/`, or
+auth-path file is touched, and MCP tool **descriptions** (docstrings) are unchanged.
+
+**Components.**
+- `backend/mcp_server/schemas.py` (new) — `ProductOut`, `LotOut`, `DraftOut` and the nested row
+  models (`SpoilageItemOut`, `ReorderBundleOut`/`ReorderLineOut`, `PurchaseOrderOut`/`POLineOut`,
+  `UnsourcedOut`), plus the result wrappers (`ProductListOut`, `LotListOut`, `DraftListOut`,
+  `SpoilageReportOut`, `ReorderReportOut`, `PurchaseOrderListOut`). Money fields typed `str`.
+  Nullable stays nullable. `DraftOut.payload` stays `dict[str, Any]` — polymorphic by
+  `draft_type` (finding 10); the gate-34 card switches on `draft_type` at runtime. Deliberate
+  hole, documented in the model.
+- `backend/mcp_server/server.py` — `_describe*` helpers return their models; each tool's return
+  annotation becomes its model; list tools build the wrapper. `translated` decorator unchanged
+  (it passes return values straight through — verified 2026-09-10).
+- `backend/mcp_server/dump_schemas.py` (new) — see Q2.
+- `agent/mcp_client.py:call_tool` — success path returns `result.structured_content` when
+  present, else the current text join (covers any future tool with no model). Error path
+  unchanged. Stays inside the gate-17 isolation cluster; no auth, no `conversation.py`, no
+  `app.py`. The module docstring line listing "structured content" among things "we do not do"
+  is updated.
+- `frontend/package.json` — `mcp:types`, `mcp:types:check` scripts + the generator dev dep.
+- `frontend/src/lib/api/mcp-schema.json`, `frontend/src/lib/api/mcp-types.d.ts` — generated,
+  committed.
+
+**Test (backend pytest — TDD applies here; frontend has no test runner — `tsc`/`lint` only).**
+Per tool: `structured_content` validates against its model; `list_products.total` is correct;
+wrapper keys present. A test that regenerates the schema in-process and compares to the committed
+`mcp-schema.json` (so CI catches drift even without the npm step). Existing MCP tests still pass.
+Agent: `call_tool` returns an object when `structured_content` exists and the text fallback still
+works when it does not.
+
+**What gate 33 owes the demo box: nothing.** No new permission, no new setting, no migration.
+State this explicitly in `docs/DEPLOY-PLAN.md`'s "what a new feature has to update in the box".
+
+**Deferred / verify-at-implementation (durable — do not drop across a compaction):**
+- `DraftOut.payload` left as a loose object; a discriminated union keyed on `draft_type` is a
+  later refinement, not gate 33.
+- Verify how Pydantic-AI's `VercelAIAdapter` (`dump_messages` / `encode_stream`) serializes a
+  **dict** tool-return into the streamed `tool-output-available.output` field — expected to be a
+  clean JSON value, must confirm at implementation. (This is the pre-existing open question in
+  the section below, now owned by gate 33.)
+- Verify the chosen JSON-Schema→TS generator resolves `$ref`/`$defs` and keeps string-typed money
+  as `string` (never widened to `number`).
+- Bare-list / non-str-key returns still trigger the SDK's `{"result": …}` auto-wrap. We avoid it
+  by using models everywhere; `call_tool` keeps only the text fallback, not a de-wrap. If a
+  future tool returns a bare collection, revisit.
+- Gate 34 consumes `mcp-types.d.ts` for the card registry and the reload-persistence work — it is
+  a hard dependency, tracked in the phasing table.
 
 ### Gate 34 — the cards, reload persistence, prompt tuning
 
@@ -344,11 +423,12 @@ and even then, structured tool output is preferred.
 
 ## Open items to verify at implementation (verify-docs rule)
 
-- Streamdown vs `react-markdown` current versions + Tailwind v4 compat (gate 32).
-- Installed `mcp` SDK `outputSchema` / `structuredContent` API and how Pydantic AI's
-  `VercelAIAdapter` surfaces structured content in `tool-output-available` (gate 33). Open
-  question: does `structuredContent` change the `tool-output-available.output` field in place, or
-  add a sibling field the client must read instead?
+- Streamdown vs `react-markdown` current versions + Tailwind v4 compat (gate 32). **Resolved —
+  gate 32 shipped on Streamdown 2.6.0.**
+- Gate 33's verify-at-implementation items now live in the **Gate 33** section above ("Deferred /
+  verify-at-implementation"). The `mcp` SDK's structured-output behaviour was read from source
+  2026-09-10 and written up there; the one still-open question — how `VercelAIAdapter` serializes
+  a dict tool-return into the streamed `output` field — is listed there.
 - Whether `VercelAIAdapter.dump_messages` on the GET path already round-trips tool parts when
   they are present in `provider_data` (gate 34).
 - Tool dict shapes are captured (table above); re-capture at gate 33 start only if `server.py`
