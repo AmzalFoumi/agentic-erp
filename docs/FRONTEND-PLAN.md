@@ -782,6 +782,20 @@ Design in `docs/superpowers/specs/2026-09-09-chatbot-overhaul-design.md`; plan i
 `docs/superpowers/plans/2026-09-09-gate31-chat-fullscreen.md`. Gates 32–34 (Markdown, structured
 tool output, response cards) build on this.
 
+**Amended 2026-09-09 (Gate 32): assistant chat text renders as Markdown.** The first new frontend
+runtime dependency since the design system: `streamdown` (v2.6.0), Vercel's streaming-hardened
+drop-in for `react-markdown` — it renders a half-streamed ` ``` ` fence or `| table |` without
+crashing. The wrapper is `frontend/src/components/shell/agent-panel/markdown.tsx`; it is what
+Gate 34's response cards will reuse for any model prose. `message-list.tsx` sends assistant text
+through it; user messages stay plain (assistant-only, per the spec). `globals.css` gained two lines
+near the top — `@import "streamdown/styles.css"` and a Tailwind v4 `@source` directive so the
+build emits Streamdown's utility classes (including the streaming caret's
+`after:content-[var(--streamdown-caret)]`). Streamdown inherits the shadcn tokens this file already
+maps, so dark mode and both densities work without extra CSS; the only component-level style is a
+`[&_a]:text-primary` link tint. Images are dropped (`disallowedElements={["img"]}`);
+sanitization (`rehype-sanitize` + `rehype-harden`) is on by default. Plan:
+`docs/superpowers/plans/2026-09-09-gate32-markdown.md`.
+
 **Known issues carried out of Gate 31:**
 
 - **`density-toggle.tsx` throws when `localStorage` is blocked** (private windows, some embedded
