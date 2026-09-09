@@ -8,6 +8,7 @@ Two layers of check live here:
 """
 
 from contextlib import contextmanager
+from pathlib import Path
 
 import anyio
 import pytest
@@ -155,6 +156,26 @@ def test_draft_tool_results_validate_against_their_models(call, registered_type)
     listed = call("list_pending_drafts", limit=50).structured_content
     parsed = DraftListOut.model_validate(listed)
     assert any(d.id == created["id"] for d in parsed.drafts)
+
+
+_COMMITTED = (
+    Path(__file__).resolve().parents[2]
+    / "frontend" / "src" / "lib" / "api" / "mcp-schema.json"
+)
+
+
+def test_committed_schema_matches_the_models():
+    """Rename a field in schemas.py without running `python -m
+    mcp_server.dump_schemas` and this fails - the frontend types would be stale.
+    Fix: regenerate and commit the result."""
+    from mcp_server.dump_schemas import render
+
+    on_disk = _COMMITTED.read_text(encoding="utf-8")
+    regenerated = render()
+    assert on_disk == regenerated, (
+        "mcp-schema.json is out of date - run `python -m mcp_server.dump_schemas` "
+        "from backend/ and commit frontend/src/lib/api/mcp-schema.json"
+    )
 
 
 def test_reorder_and_spoilage_reports_validate_against_their_models(call):

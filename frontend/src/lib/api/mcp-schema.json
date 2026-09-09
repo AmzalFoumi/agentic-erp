@@ -1,0 +1,816 @@
+{
+  "$defs": {
+    "DraftListOut": {
+      "additionalProperties": false,
+      "properties": {
+        "drafts": {
+          "items": {
+            "$ref": "#/$defs/DraftOut"
+          },
+          "title": "Drafts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "drafts"
+      ],
+      "title": "DraftListOut",
+      "type": "object"
+    },
+    "DraftOut": {
+      "additionalProperties": false,
+      "properties": {
+        "cost_at_risk": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cost At Risk"
+        },
+        "created_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Created By"
+        },
+        "created_via": {
+          "title": "Created Via",
+          "type": "string"
+        },
+        "decided_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Decided By"
+        },
+        "decided_via": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Decided Via"
+        },
+        "draft_type": {
+          "title": "Draft Type",
+          "type": "string"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expires At"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "is_expired": {
+          "title": "Is Expired",
+          "type": "boolean"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "projected_recovery": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Projected Recovery"
+        },
+        "reasoning": {
+          "title": "Reasoning",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "draft_type",
+        "status",
+        "payload",
+        "reasoning",
+        "cost_at_risk",
+        "projected_recovery",
+        "expires_at",
+        "is_expired",
+        "created_by",
+        "created_via",
+        "decided_by",
+        "decided_via"
+      ],
+      "title": "DraftOut",
+      "type": "object"
+    },
+    "LotListOut": {
+      "additionalProperties": false,
+      "properties": {
+        "lots": {
+          "items": {
+            "$ref": "#/$defs/LotOut"
+          },
+          "title": "Lots",
+          "type": "array"
+        }
+      },
+      "required": [
+        "lots"
+      ],
+      "title": "LotListOut",
+      "type": "object"
+    },
+    "LotOut": {
+      "additionalProperties": false,
+      "properties": {
+        "cost_price": {
+          "title": "Cost Price",
+          "type": "string"
+        },
+        "discount_percent": {
+          "title": "Discount Percent",
+          "type": "integer"
+        },
+        "expiry_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expiry Date"
+        },
+        "is_expired": {
+          "title": "Is Expired",
+          "type": "boolean"
+        },
+        "lot_code": {
+          "title": "Lot Code",
+          "type": "string"
+        },
+        "lot_id": {
+          "title": "Lot Id",
+          "type": "integer"
+        },
+        "product_id": {
+          "title": "Product Id",
+          "type": "integer"
+        },
+        "quantity": {
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "sell_price": {
+          "title": "Sell Price",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lot_id",
+        "product_id",
+        "lot_code",
+        "expiry_date",
+        "quantity",
+        "cost_price",
+        "sell_price",
+        "discount_percent",
+        "is_expired"
+      ],
+      "title": "LotOut",
+      "type": "object"
+    },
+    "POLineOut": {
+      "additionalProperties": false,
+      "properties": {
+        "line_total": {
+          "title": "Line Total",
+          "type": "string"
+        },
+        "product_id": {
+          "title": "Product Id",
+          "type": "integer"
+        },
+        "quantity_ordered": {
+          "title": "Quantity Ordered",
+          "type": "integer"
+        },
+        "unit_cost": {
+          "title": "Unit Cost",
+          "type": "string"
+        }
+      },
+      "required": [
+        "product_id",
+        "quantity_ordered",
+        "unit_cost",
+        "line_total"
+      ],
+      "title": "POLineOut",
+      "type": "object"
+    },
+    "ProductListOut": {
+      "additionalProperties": false,
+      "properties": {
+        "products": {
+          "items": {
+            "$ref": "#/$defs/ProductOut"
+          },
+          "title": "Products",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "products",
+        "total"
+      ],
+      "title": "ProductListOut",
+      "type": "object"
+    },
+    "ProductOut": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        },
+        "cost_price": {
+          "title": "Cost Price",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "needs_reorder": {
+          "title": "Needs Reorder",
+          "type": "boolean"
+        },
+        "quantity_on_hand": {
+          "title": "Quantity On Hand",
+          "type": "integer"
+        },
+        "reorder_level": {
+          "title": "Reorder Level",
+          "type": "integer"
+        },
+        "sell_price": {
+          "title": "Sell Price",
+          "type": "string"
+        },
+        "sku": {
+          "title": "Sku",
+          "type": "string"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        },
+        "updated_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updated By"
+        }
+      },
+      "required": [
+        "id",
+        "sku",
+        "name",
+        "category",
+        "unit",
+        "cost_price",
+        "sell_price",
+        "quantity_on_hand",
+        "reorder_level",
+        "needs_reorder",
+        "updated_by"
+      ],
+      "title": "ProductOut",
+      "type": "object"
+    },
+    "PurchaseOrderListOut": {
+      "additionalProperties": false,
+      "properties": {
+        "orders": {
+          "items": {
+            "$ref": "#/$defs/PurchaseOrderOut"
+          },
+          "title": "Orders",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "orders",
+        "total"
+      ],
+      "title": "PurchaseOrderListOut",
+      "type": "object"
+    },
+    "PurchaseOrderOut": {
+      "additionalProperties": false,
+      "properties": {
+        "created_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Created By"
+        },
+        "expected_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expected Date"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/POLineOut"
+          },
+          "title": "Lines",
+          "type": "array"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Notes"
+        },
+        "source_draft_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Draft Id"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "supplier_id": {
+          "title": "Supplier Id",
+          "type": "integer"
+        },
+        "total_value": {
+          "title": "Total Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "supplier_id",
+        "status",
+        "expected_date",
+        "total_value",
+        "notes",
+        "source_draft_id",
+        "created_by",
+        "lines"
+      ],
+      "title": "PurchaseOrderOut",
+      "type": "object"
+    },
+    "ReorderBundleOut": {
+      "additionalProperties": false,
+      "properties": {
+        "below_minimum": {
+          "title": "Below Minimum",
+          "type": "boolean"
+        },
+        "bundle_value": {
+          "title": "Bundle Value",
+          "type": "string"
+        },
+        "lead_time_days": {
+          "title": "Lead Time Days",
+          "type": "integer"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/ReorderLineOut"
+          },
+          "title": "Lines",
+          "type": "array"
+        },
+        "minimum_order_value": {
+          "title": "Minimum Order Value",
+          "type": "string"
+        },
+        "shortfall": {
+          "title": "Shortfall",
+          "type": "string"
+        },
+        "supplier_id": {
+          "title": "Supplier Id",
+          "type": "integer"
+        },
+        "supplier_name": {
+          "title": "Supplier Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "supplier_id",
+        "supplier_name",
+        "lead_time_days",
+        "minimum_order_value",
+        "bundle_value",
+        "below_minimum",
+        "shortfall",
+        "lines"
+      ],
+      "title": "ReorderBundleOut",
+      "type": "object"
+    },
+    "ReorderLineOut": {
+      "additionalProperties": false,
+      "properties": {
+        "is_top_up": {
+          "title": "Is Top Up",
+          "type": "boolean"
+        },
+        "line_total": {
+          "title": "Line Total",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "pack_size": {
+          "title": "Pack Size",
+          "type": "integer"
+        },
+        "product_id": {
+          "title": "Product Id",
+          "type": "integer"
+        },
+        "quantity": {
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "quantity_on_hand": {
+          "title": "Quantity On Hand",
+          "type": "integer"
+        },
+        "reorder_level": {
+          "title": "Reorder Level",
+          "type": "integer"
+        },
+        "sku": {
+          "title": "Sku",
+          "type": "string"
+        },
+        "unit_cost": {
+          "title": "Unit Cost",
+          "type": "string"
+        }
+      },
+      "required": [
+        "product_id",
+        "sku",
+        "name",
+        "quantity_on_hand",
+        "reorder_level",
+        "quantity",
+        "unit_cost",
+        "pack_size",
+        "line_total",
+        "is_top_up"
+      ],
+      "title": "ReorderLineOut",
+      "type": "object"
+    },
+    "ReorderReportOut": {
+      "additionalProperties": false,
+      "properties": {
+        "bundles": {
+          "items": {
+            "$ref": "#/$defs/ReorderBundleOut"
+          },
+          "title": "Bundles",
+          "type": "array"
+        },
+        "total_value": {
+          "title": "Total Value",
+          "type": "string"
+        },
+        "unsourced": {
+          "items": {
+            "$ref": "#/$defs/UnsourcedOut"
+          },
+          "title": "Unsourced",
+          "type": "array"
+        }
+      },
+      "required": [
+        "total_value",
+        "bundles",
+        "unsourced"
+      ],
+      "title": "ReorderReportOut",
+      "type": "object"
+    },
+    "SpoilageItemOut": {
+      "additionalProperties": false,
+      "properties": {
+        "cost_at_risk": {
+          "title": "Cost At Risk",
+          "type": "string"
+        },
+        "current_price": {
+          "title": "Current Price",
+          "type": "string"
+        },
+        "days_remaining": {
+          "title": "Days Remaining",
+          "type": "integer"
+        },
+        "discount_percent": {
+          "title": "Discount Percent",
+          "type": "integer"
+        },
+        "expiry_date": {
+          "title": "Expiry Date",
+          "type": "string"
+        },
+        "lot_code": {
+          "title": "Lot Code",
+          "type": "string"
+        },
+        "lot_id": {
+          "title": "Lot Id",
+          "type": "integer"
+        },
+        "product_id": {
+          "title": "Product Id",
+          "type": "integer"
+        },
+        "product_name": {
+          "title": "Product Name",
+          "type": "string"
+        },
+        "projected_recovery": {
+          "title": "Projected Recovery",
+          "type": "string"
+        },
+        "proposed_price": {
+          "title": "Proposed Price",
+          "type": "string"
+        },
+        "quantity": {
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "sku": {
+          "title": "Sku",
+          "type": "string"
+        },
+        "why": {
+          "title": "Why",
+          "type": "string"
+        }
+      },
+      "required": [
+        "lot_id",
+        "product_id",
+        "sku",
+        "product_name",
+        "lot_code",
+        "expiry_date",
+        "days_remaining",
+        "quantity",
+        "current_price",
+        "proposed_price",
+        "discount_percent",
+        "why",
+        "cost_at_risk",
+        "projected_recovery"
+      ],
+      "title": "SpoilageItemOut",
+      "type": "object"
+    },
+    "SpoilageReportOut": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/SpoilageItemOut"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "scanned_on": {
+          "title": "Scanned On",
+          "type": "string"
+        },
+        "total_cost_at_risk": {
+          "title": "Total Cost At Risk",
+          "type": "string"
+        },
+        "total_projected_recovery": {
+          "title": "Total Projected Recovery",
+          "type": "string"
+        },
+        "within_days": {
+          "title": "Within Days",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "scanned_on",
+        "within_days",
+        "total_cost_at_risk",
+        "total_projected_recovery",
+        "items"
+      ],
+      "title": "SpoilageReportOut",
+      "type": "object"
+    },
+    "UnsourcedOut": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "product_id": {
+          "title": "Product Id",
+          "type": "integer"
+        },
+        "quantity_on_hand": {
+          "title": "Quantity On Hand",
+          "type": "integer"
+        },
+        "reorder_level": {
+          "title": "Reorder Level",
+          "type": "integer"
+        },
+        "sku": {
+          "title": "Sku",
+          "type": "string"
+        }
+      },
+      "required": [
+        "product_id",
+        "sku",
+        "name",
+        "quantity_on_hand",
+        "reorder_level"
+      ],
+      "title": "UnsourcedOut",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Generated by backend/mcp_server/dump_schemas.py - do not edit.",
+  "properties": {
+    "adjust_stock": {
+      "$ref": "#/$defs/ProductOut"
+    },
+    "check_spoilage_risk": {
+      "$ref": "#/$defs/SpoilageReportOut"
+    },
+    "create_action_draft": {
+      "$ref": "#/$defs/DraftOut"
+    },
+    "create_product": {
+      "$ref": "#/$defs/ProductOut"
+    },
+    "get_product": {
+      "$ref": "#/$defs/ProductOut"
+    },
+    "get_product_by_sku": {
+      "$ref": "#/$defs/ProductOut"
+    },
+    "list_pending_drafts": {
+      "$ref": "#/$defs/DraftListOut"
+    },
+    "list_product_lots": {
+      "$ref": "#/$defs/LotListOut"
+    },
+    "list_products": {
+      "$ref": "#/$defs/ProductListOut"
+    },
+    "list_purchase_orders": {
+      "$ref": "#/$defs/PurchaseOrderListOut"
+    },
+    "propose_delivery_receipt": {
+      "$ref": "#/$defs/DraftOut"
+    },
+    "propose_reorder_order": {
+      "$ref": "#/$defs/DraftOut"
+    },
+    "propose_spoilage_markdown": {
+      "$ref": "#/$defs/DraftOut"
+    },
+    "receive_stock_lot": {
+      "$ref": "#/$defs/LotOut"
+    },
+    "suggest_reorder_bundles": {
+      "$ref": "#/$defs/ReorderReportOut"
+    },
+    "update_product": {
+      "$ref": "#/$defs/ProductOut"
+    }
+  },
+  "required": [
+    "adjust_stock",
+    "check_spoilage_risk",
+    "create_action_draft",
+    "create_product",
+    "get_product",
+    "get_product_by_sku",
+    "list_pending_drafts",
+    "list_product_lots",
+    "list_products",
+    "list_purchase_orders",
+    "propose_delivery_receipt",
+    "propose_reorder_order",
+    "propose_spoilage_markdown",
+    "receive_stock_lot",
+    "suggest_reorder_bundles",
+    "update_product"
+  ],
+  "title": "MCPToolOutputs",
+  "type": "object"
+}
