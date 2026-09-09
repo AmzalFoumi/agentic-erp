@@ -42,7 +42,9 @@ export function Markdown({
   return (
     <Streamdown
       className={cn(
-        // `max-w-none` because the chat bubble is already the width constraint;
+        // `text-sm` is repeated from the chat bubble on purpose: gate 34
+        // renders <Markdown> inside cards that have no bubble around them.
+        // `max-w-none` because the bubble is already the width constraint;
         // Streamdown's default prose max-width would double-constrain it.
         "text-sm leading-relaxed max-w-none",
         "[&_a]:text-primary [&_a:hover]:underline",
