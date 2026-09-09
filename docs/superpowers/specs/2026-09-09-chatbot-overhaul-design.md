@@ -1,6 +1,7 @@
 # Chatbot overhaul — design spec
 
-> **Status:** DRAFT for review (2026-09-09). Not yet approved; no implementation started.
+> **Status:** IMPLEMENTATION IN PROGRESS (2026-09-09). Chat mode (gate 31) and Markdown rendering
+> (gate 32) are complete and pending review; gates 33–34 have not started, per `docs/PLAN.md`.
 > **Owner doc.** This is the single source of truth for the chatbot overhaul. `docs/PLAN.md`
 > gates 31–34 point here and carry only one-line summaries. Do not restate decisions in other
 > docs — link to this file.

@@ -142,7 +142,7 @@ as before; type-checks, lints, builds.
 
 **Interfaces:**
 - Produces: `markdown.tsx` exports
-  `export function Markdown({ children, className }: { children: string; className?: string }): JSX.Element`.
+  `export function Markdown({ children, className }: { children: string; className?: string }): React.JSX.Element`.
   `children` is a Markdown source string. `className` is merged onto Streamdown's root and is how a
   caller (gate 34 card) tightens spacing.
 - Consumes: `cn` from `@/lib/utils`; `Streamdown` from `streamdown`.

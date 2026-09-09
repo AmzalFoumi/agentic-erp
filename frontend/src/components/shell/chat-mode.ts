@@ -13,39 +13,44 @@
  *              (display:none), still mounted. Top nav + side nav stay visible.
  *
  * Persistence: `localStorage` under `CHAT_MODE_STORAGE_KEY`, no TTL, a bad
- * value falls back to the default. `localStorage` is the only source of truth
- * on the happy path, so a cross-tab `storage` event stays authoritative. Only
- * when `localStorage` is blocked (private mode, some embedded webviews) is the
- * choice held in `memoryMode` for the session instead — the toggle still
+ * value falls back to the default. Successful reads keep the in-memory value
+ * synchronized, so a cross-tab `storage` event stays authoritative. If any
+ * storage access fails (private mode, some embedded webviews), the in-memory
+ * value becomes authoritative for the rest of the session — the toggle still
  * works, it just does not survive a reload.
  */
 export type ChatMode = "docked" | "expanded";
 
 export const CHAT_MODE_STORAGE_KEY = "agent-panel-mode";
 
-// Session fallback, used ONLY when localStorage is unavailable (private mode,
-// some embedded webviews). The happy path never touches this — it always goes
-// through localStorage — so a cross-tab `storage` event stays authoritative.
-let memoryMode: ChatMode | null = null;
+// Keep a synchronized snapshot so a later storage failure can fall back to the
+// last known mode. Once storage fails, avoid it for the rest of the session.
+let memoryMode: ChatMode = "docked";
+let storageUnavailable = false;
 
 export function readStoredMode(): ChatMode {
   if (typeof window === "undefined") return "docked";
+  if (storageUnavailable) return memoryMode;
+
   try {
-    return window.localStorage.getItem(CHAT_MODE_STORAGE_KEY) === "expanded"
+    memoryMode = window.localStorage.getItem(CHAT_MODE_STORAGE_KEY) === "expanded"
       ? "expanded"
       : "docked";
+    return memoryMode;
   } catch {
-    // Storage blocked — use the session fallback.
-    return memoryMode ?? "docked";
+    storageUnavailable = true;
+    return memoryMode;
   }
 }
 
 export function writeStoredMode(mode: ChatMode): void {
+  memoryMode = mode;
+  if (storageUnavailable) return;
+
   try {
     window.localStorage.setItem(CHAT_MODE_STORAGE_KEY, mode);
   } catch {
-    // Storage blocked — hold the choice in memory for this session.
-    memoryMode = mode;
+    storageUnavailable = true;
   }
 }
 
