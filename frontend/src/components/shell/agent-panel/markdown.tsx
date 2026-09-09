@@ -1,7 +1,6 @@
 "use client";
 
 import { Streamdown } from "streamdown";
-import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -16,34 +15,21 @@ import { cn } from "@/lib/utils";
  * this project maps in globals.css (--foreground, --primary, --border,
  * --radius, --muted...), so headings, lists, tables, blockquotes and code
  * inherit the design system, dark mode, and both densities for free. The only
- * override is link colour (to match every other link in the app) and the
- * container type size. No colours, radii or raw lengths live here — see the
- * plan's Global Constraints.
+ * addition is the link colour, applied as a descendant utility on the root so
+ * it matches every other link in the app without a custom element renderer.
+ * No colours, radii or raw lengths live here — see the plan's Global
+ * Constraints. Streamdown already renders links with
+ * rel="noreferrer" target="_blank", so nothing here needs to.
  *
  * Safety: Streamdown's default pipeline (rehype-sanitize + rehype-harden)
- * strips <script>/<iframe>/event handlers and javascript:/data: script URLs;
- * every link it renders already gets rel="noreferrer" target="_blank". We also
- * drop images entirely — the agent answers about internal stock, it has no
- * reason to embed remote media, and an <img> is the one easy exfiltration
- * pixel that survives sanitization.
+ * strips <script>/<iframe>/event handlers and javascript:/data: script URLs.
+ * We also drop images entirely — the agent answers about internal stock, it
+ * has no reason to embed remote media, and an <img> is the one easy
+ * exfiltration pixel that survives sanitization.
  *
  * Reused by gate 34's response cards for any model prose inside a card; pass
  * `className` to tighten the spacing there.
  */
-
-const components = {
-  a: ({ className, ...props }: ComponentProps<"a"> & { node?: unknown }) => (
-    <a
-      {...props}
-      // target/rel are already set by Streamdown; repeating them is harmless
-      // and makes the intent obvious at the call site.
-      target="_blank"
-      rel="noreferrer"
-      className={cn("text-primary hover:underline", className)}
-    />
-  ),
-};
-
 export function Markdown({
   children,
   className,
@@ -59,9 +45,9 @@ export function Markdown({
         // `max-w-none` because the chat bubble is already the width constraint;
         // Streamdown's default prose max-width would double-constrain it.
         "text-sm leading-relaxed max-w-none",
+        "[&_a]:text-primary [&_a:hover]:underline",
         className,
       )}
-      components={components}
       disallowedElements={["img"]}
       unwrapDisallowed
       caret="block"
