@@ -772,6 +772,16 @@ assumed.
    client-side sorting a paginated-from-server list would only sort the visible page, which is
    misleading. Left out entirely rather than half-implemented.
 
+**Amended 2026-09-09 (Gate 31): the agent panel gained an expand/fullscreen mode.** A new
+`frontend/src/components/shell/chat-shell.tsx` client wrapper now owns the signed-in layout row
+(`<main>` + the agent panel); `layout.tsx` stays a Server Component. The panel toggles between the
+256px right rail and filling the content area (top nav + side nav stay put); `<main>` is hidden with
+`display:none`, not unmounted, so there is no route change or refetch. The mode is a `localStorage`
+concept with no library — same pattern as the density toggle — read via `useSyncExternalStore`.
+Design in `docs/superpowers/specs/2026-09-09-chatbot-overhaul-design.md`; plan in
+`docs/superpowers/plans/2026-09-09-gate31-chat-fullscreen.md`. Gates 32–34 (Markdown, structured
+tool output, response cards) build on this.
+
 ---
 
 ## Deferred, as decisions rather than oversights
