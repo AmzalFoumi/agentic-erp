@@ -13,42 +13,39 @@
  *              (display:none), still mounted. Top nav + side nav stay visible.
  *
  * Persistence: `localStorage` under `CHAT_MODE_STORAGE_KEY`, no TTL, a bad
- * value falls back to the default. When `localStorage` is blocked (private
- * mode, some embedded webviews), the choice is held in `memoryMode` for the
- * session instead — the toggle still works, it just does not survive a reload.
+ * value falls back to the default. `localStorage` is the only source of truth
+ * on the happy path, so a cross-tab `storage` event stays authoritative. Only
+ * when `localStorage` is blocked (private mode, some embedded webviews) is the
+ * choice held in `memoryMode` for the session instead — the toggle still
+ * works, it just does not survive a reload.
  */
 export type ChatMode = "docked" | "expanded";
 
 export const CHAT_MODE_STORAGE_KEY = "agent-panel-mode";
 
-// Session fallback for when localStorage is unavailable. Once set (either by a
-// write, or because a read threw), it is the source of truth for this tab so
-// the store's snapshot actually changes and React re-renders.
+// Session fallback, used ONLY when localStorage is unavailable (private mode,
+// some embedded webviews). The happy path never touches this — it always goes
+// through localStorage — so a cross-tab `storage` event stays authoritative.
 let memoryMode: ChatMode | null = null;
 
 export function readStoredMode(): ChatMode {
-  if (memoryMode !== null) return memoryMode;
   if (typeof window === "undefined") return "docked";
   try {
     return window.localStorage.getItem(CHAT_MODE_STORAGE_KEY) === "expanded"
       ? "expanded"
       : "docked";
   } catch {
-    // Storage blocked — fall back to memory (still null here, so "docked").
-    memoryMode = "docked";
-    return "docked";
+    // Storage blocked — use the session fallback.
+    return memoryMode ?? "docked";
   }
 }
 
 export function writeStoredMode(mode: ChatMode): void {
-  // Set the in-memory value first so it is correct whether or not the
-  // localStorage write below succeeds.
-  memoryMode = mode;
   try {
     window.localStorage.setItem(CHAT_MODE_STORAGE_KEY, mode);
   } catch {
-    // Storage blocked — the memory value above carries the choice for this
-    // session.
+    // Storage blocked — hold the choice in memory for this session.
+    memoryMode = mode;
   }
 }
 

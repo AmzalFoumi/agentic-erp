@@ -216,8 +216,8 @@ function ConnectedAgentPanel({
   return (
     <aside
       className={cn(
-        "flex h-full min-h-0 flex-col gap-stack border-l border-border bg-card p-section",
-        mode === "expanded" ? "flex-1" : "w-64 shrink-0",
+        "flex h-full min-h-0 flex-col gap-stack border-border bg-card p-section",
+        mode === "expanded" ? "min-w-0 flex-1" : "w-64 shrink-0 border-l",
       )}
     >
       <div className="flex items-center justify-between gap-2">
