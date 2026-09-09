@@ -59,7 +59,7 @@ def render() -> str:
 
 
 def main() -> None:
-    _TARGET.write_text(render(), encoding="utf-8")
+    _TARGET.write_text(render(), encoding="utf-8", newline="\n")
     print(f"wrote {_TARGET}")
 
 
