@@ -550,6 +550,10 @@ Two rules that do not bend:
 - **A secret never becomes a `NEXT_PUBLIC_*` variable.** That prefix means "compile this into every
   visitor's browser".
 
+### Gate checklist: what each feature owes the box
+
+**Gate 33 (structured tool-output contract): nothing.** No new permission, no new setting, no migration — it changes only the JSON shape MCP tools return.
+
 ### A correction to this plan's own account of the seed
 
 The design spec says removing `Test Agent` "also removes a `Product Reader` assignment". In the seed

@@ -799,6 +799,8 @@ to — low risk for a single-tenant internal tool, but if link-target confirmati
 Streamdown's `linkSafety` prop is the lever (a later gate, not 32). Plan:
 `docs/superpowers/plans/2026-09-09-gate32-markdown.md`.
 
+**Amended 2026-09-10 (Gate 33): MCP tools return structured data, with generated TypeScript types.** Two new generated-and-committed files under `src/lib/api/`: `mcp-schema.json` (from `python -m mcp_server.dump_schemas`, run offline against the backend) and `mcp-types.d.ts` (from `npm run mcp:types`, which wraps `json-schema-to-typescript` v16 as a dev dependency). The drift check has two halves: `backend/tests/test_mcp_schemas.py::test_committed_schema_matches_the_models` in the backend pytest job guards the JSON Schema, and `npm run mcp:types:check` guards the `.d.ts` locally (not yet in CI, same status as the existing `api:types:check`). Gate 34's response cards will import types from `mcp-types.d.ts` to render tool results. Plan: `docs/superpowers/plans/2026-09-10-gate33-structured-tool-output.md`.
+
 **Known issues carried out of Gate 31:**
 
 - **`density-toggle.tsx` throws when `localStorage` is blocked** (private windows, some embedded

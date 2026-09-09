@@ -1,9 +1,8 @@
 # Chatbot overhaul — design spec
 
-> **Status:** IMPLEMENTATION IN PROGRESS. Gate 31 (chat mode) and gate 32 (Markdown rendering)
-> complete on branch `feat/client/chatbot`, pending review. Gate 33 (structured tool-output
-> contract) design finalised 2026-09-10 — see that section; plan at
-> `docs/superpowers/plans/2026-09-10-gate33-structured-tool-output.md`. Gate 34 not started.
+> **Status:** IMPLEMENTATION IN PROGRESS. Gate 31 (chat mode), 32 (Markdown rendering), and 33
+> (structured tool-output contract) complete on branch `feat/client/chatbot`, pending review
+> (commits `e306d05..72f8ded` for gate 33). Gate 34 (response cards) depends on 33 and is next.
 > **Owner doc.** This is the single source of truth for the chatbot overhaul. `docs/PLAN.md`
 > gates 31–34 point here and carry only one-line summaries. Do not restate decisions in other
 > docs — link to this file.
