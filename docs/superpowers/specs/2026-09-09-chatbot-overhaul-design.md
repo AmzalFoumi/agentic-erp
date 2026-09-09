@@ -1,8 +1,9 @@
 # Chatbot overhaul — design spec
 
-> **Status:** IMPLEMENTATION IN PROGRESS. Gate 31 (chat mode), 32 (Markdown rendering), and 33
-> (structured tool-output contract) complete on branch `feat/client/chatbot`, pending review
-> (commits `e306d05..72f8ded` for gate 33). Gate 34 (response cards) depends on 33 and is next.
+> **Status:** IMPLEMENTATION IN PROGRESS. Gates 31 (chat mode), 32 (Markdown), and 33 (structured
+> tool-output contract) shipped on branch `feat/client/chatbot` (gate 33: commits
+> `e306d05..09b5714`). Gate 34 (response cards) is next; **trimmed 2026-09-10** — reload
+> persistence and the two parked gate-33 items split out into a follow-up **gate 34b**.
 > **Owner doc.** This is the single source of truth for the chatbot overhaul. `docs/PLAN.md`
 > gates 31–34 point here and carry only one-line summaries. Do not restate decisions in other
 > docs — link to this file.
@@ -335,58 +336,140 @@ State this explicitly in `docs/DEPLOY-PLAN.md`'s "what a new feature has to upda
 - Bare-list / non-str-key returns still trigger the SDK's `{"result": …}` auto-wrap. We avoid it
   by using models everywhere; `call_tool` keeps only the text fallback, not a de-wrap. If a
   future tool returns a bare collection, revisit.
-- Gate 34 consumes `mcp-types.d.ts` for the card registry and the reload-persistence work — it is
-  a hard dependency, tracked in the phasing table.
+- Gate 34 consumes `mcp-types.d.ts` for the card registry (and gate 34b for the reload-persistence
+  round-trip) — a hard dependency, tracked in the phasing table.
 
-### Gate 34 — the cards, reload persistence, prompt tuning
+### Gate 34 — response cards + prompt line
 
-**Card registry.** `frontend/src/components/shell/agent-panel/cards/` — a map
-`tool-<name>` → component. In the message list, iterate **every** `tool-*` part in the assistant
-message (a turn can have several — finding 8); each part with `state:"output-available"` and no
-pending approval renders `registry[part.type]?.(parsed output) ?? <FallbackCard>`, in order.
-No tool name is hardcoded outside the registry (matches the existing Global Constraint in
-`use-panel-state.ts`). Cards with line items resolve `product_id` → name via the existing
-`getProductSummary` path (finding 9), not by assuming a name in the payload.
+> **Trimmed 2026-09-10** (brainstorm this session; user on a 6-hour deadline for a demo
+> recording). Gate 34 ships the visible card work only. **Reload persistence** and the two parked
+> gate-33 items (**R3, R4**) move to **gate 34b** — same `agent/` file cluster, done together
+> after the demo.
+>
+> *Why the split:* reload persistence touches the `agent/` isolation cluster
+> (`conversation.py:_completed`, `Message`, `to_model_history`, `app.py`'s GET path) and has
+> near-zero demo value — nobody reloads mid-demo. Cutting it from the critical path is the
+> largest time saving at the lowest cost. **Consequence accepted:** after a browser reload, a
+> past turn shows only the model's text summary (the tool parts are not in stored history yet);
+> live turns show full cards. The prompt line below keeps that summary short so the reloaded view
+> still reads well.
 
-**Cards** (hand-built from shadcn/base-nova primitives + tokens; reuse `StockBadge`,
-`format.ts`, `Skeleton`; inspiration only from Vercel `ai-elements`, `assistant-ui`, shadcn chat
-blocks):
+**In scope for gate 34** (all frontend except one prompt-string line):
 
-| Card | Content | Row cap / link |
-|---|---|---|
-| `ProductListCard` | table: SKU · name · stock · `StockBadge` · sell price | ~5 rows, then "view all N in Products →" (`/products?search=`) |
-| `ProductCard` | all fields, `needs_reorder` badge, money via `format.ts` | links: product detail / edit / adjust-stock / lots |
-| `SpoilageCard` | at-risk lots, expiry, recoverable value, markdown ladder | `/inventory/spoilage` |
-| `LotsCard` | batches soonest-expiry-first: qty · expiry · cost | product page |
-| `ReorderBundlesCard` | grouped by supplier: lines, MOQ top-up, order total | `/purchasing` |
-| `PendingDraftsCard` | draft type · summary · age | `/approvals` |
-| `PurchaseOrdersCard` | PO · supplier · status · total | `/purchasing/orders/[id]` |
-| `FallbackCard` | collapsible key/value / JSON for any unregistered tool | — |
+- Card registry + `MessageList` rework
+- `ChatCard` shell + `ChatCardTable`
+- `FallbackCard`
+- The 7 read cards
+- Restyle `ToolCallCard` + `SuccessCard` onto `ChatCard`
+- One `INSTRUCTIONS` line in `agent/conversation.py` — the only `agent/` change; pure prompt
+  text, no type or cluster change
 
-**Shared:** `ChatCard` shell (border, `bg-card`, padding, title slot) + `ChatCardTable` (dense,
-`tabular-nums`, row cap + overflow link). Restyle existing `ToolCallCard` (approval) and
-`SuccessCard` (mutation) to the `ChatCard` shell — they stay the write-side.
+**Card registry.** `frontend/src/components/shell/agent-panel/cards/` — a map `tool-<name>` →
+component. `MessageList` iterates **every** part of each assistant message *in order*: a `tool-*`
+part with `state:"output-available"` and no pending approval renders
+`registry[part.type]?.(output) ?? <FallbackCard>`; `text` parts render through `<Markdown>` as
+today. A turn can carry several tool parts (finding 8) — a card each, in order. No tool name is
+hardcoded outside the registry (existing Global Constraint in `use-panel-state.ts`).
+
+`MessageList` today early-returns on any message with no text (`if (!text) return null`); the
+rework must drop that so a tool-only assistant message still renders.
+
+**Output parsing.** Post-gate-33 the streamed `tool-output-available.output` is a JSON
+object/array (verified at `tool_return_output`). Cards still guard defensively: a shared
+`parseToolOutput` helper accepts an already-parsed object *or* a JSON string (the pattern
+`SuccessCard.updatedBy` already uses) and returns `unknown`; each card narrows with a small type
+guard against its `MCPToolOutputs` entry from `mcp-types.d.ts`. A parse failure or shape mismatch
+falls to `<FallbackCard>` — never throws.
+
+**Name resolution.** Nested rows carry `product_id` only (finding 9). Extract the existing
+`useProductLabel` hook out of `tool-call-card.tsx` into a shared `cards/use-product-label.ts`;
+line-item cards use it, showing the raw id while the lookup is in flight or on failure. Reorder
+bundles already include `name`/`sku` — use those directly.
+
+**Layout / panel mode.** One roomy layout per card (the table). The panel `mode`
+(`"docked" | "expanded"`) already reaches `AgentPanel` as a prop from `chat-shell.tsx` but stops
+there; gate 34 carries it down to the cards through a small `ChatModeContext` provided in
+`AgentPanel`, not prop-drilling through `MessageList`. **Docked (256px rail): CSS degradation
+only** —
+`ChatCardTable` switches to block-display label/value rows below its container width; no separate
+render path. **Expanded: full table** (this is how the demo will be recorded). Row cap +
+"view all N →" overflow link per the table below.
+
+**Cards** (hand-built from the existing `frontend/src/components/ui/` primitives + tokens; reuse
+`StockBadge`, `format.ts`, `Skeleton`; `<Markdown>` for any in-card prose). Each ships a fixture
+file typed as its `MCPToolOutputs[...]` entry.
+
+| Card | Tool(s) | Content | Overflow link |
+|---|---|---|---|
+| `ProductListCard` | `list_products` | SKU · name · stock · `StockBadge` · sell price; `total` in the header | ~5 rows, then "view all N in Products →" (`/products?search=`) |
+| `ProductCard` | `get_product`, `get_product_by_sku` | all fields, `needs_reorder` badge, money via `format.ts` | product detail / edit / adjust-stock / lots |
+| `SpoilageCard` | `check_spoilage_risk` | at-risk lots: expiry · qty · current→proposed price · recoverable value; totals in header | `/inventory/spoilage` |
+| `LotsCard` | `list_product_lots` | batches soonest-expiry-first: lot code · expiry · qty · cost | product page |
+| `ReorderBundlesCard` | `suggest_reorder_bundles` | grouped by supplier: lines, below-minimum flag, bundle total; `total_value` in header; `unsourced` listed | `/purchasing` |
+| `PendingDraftsCard` | `list_pending_drafts` | per draft: type · one-line summary (switch on `draft_type`, finding 10) · age · expired flag | `/approvals` |
+| `PurchaseOrdersCard` | `list_purchase_orders` | PO · supplier · status · total; `total` in header | `/purchasing` |
+| `FallbackCard` | any unregistered / unparseable | collapsible key/value; raw JSON behind a toggle | — |
+
+Verify the exact route paths against `docs/FRONTEND-PLAN.md`'s screen inventory at
+implementation — some detail routes may not exist yet; link to the list page then.
+
+**Shared.** `ChatCard` (border, `bg-card`, token padding, title slot + optional header-right slot
+for totals/counts) and `ChatCardTable` (dense, `tabular-nums` via `[data-numeric]`, row cap,
+block-display fallback when narrow). `ToolCallCard` and `SuccessCard` re-parented onto `ChatCard`
+— same shell; their approval buttons / success text / `updated_by` display are unchanged and
+must stay green through the walkthrough.
+
+**Prompt tuning.** One line appended to `INSTRUCTIONS` in `agent/conversation.py`: when a tool
+returns a list, give a one-sentence summary and do not re-type its rows — the interface shows the
+detail. Accept that Flash-Lite / Gemma will not obey 100%; the card is correct regardless, and on
+a reload the short summary is what shows.
+
+**New design tokens:** none expected — `--card`, `--border`, `--radius`, the `--stock-*` set, and
+`format.ts` cover the cards. If one is genuinely needed it goes in `frontend/src/app/globals.css`
+(both `:root` and `.dark`), never inline (user rule, 2026-09-10).
+
+**Test / acceptance.** No test runner (repo rule holds — `tsc`/`lint` only). Two checks:
+
+1. **Compile:** `npx tsc --noEmit` and `npm run lint` (restricted-import rules) clean, with every
+   card's typed fixture file in the tree.
+2. **Browser walkthrough** (after a `npm run dev` restart, signed in as `amzal`): ask the 7 read
+   questions; each renders its card in expanded mode and degrades sanely docked; a garbled /
+   unregistered output → `FallbackCard` with no crash; the approval flow (create a product) and
+   the success card still work; `<Markdown>` prose still renders. Doubles as the demo rehearsal.
+
+**What gate 34 owes the demo box: nothing.** Frontend-only, no new permission/setting/migration.
+State this in `docs/DEPLOY-PLAN.md`'s "what a new feature has to update in the box".
+
+### Gate 34b — reload persistence + gate-33 cleanup (deferred, after the demo)
 
 **Reload persistence.** Today `conversation.py:_completed` persists only
-`result.new_messages()[-1]` (the final text), so tool parts — and therefore cards — vanish on
-refresh. Persist enough of the run for cards to re-render:
-- Extend what `_completed` serializes into `Message.provider_data` (or an additional field) to
-  include the tool-call / tool-return messages, keeping `providerMetadata` / `thought_signature`
-  intact (finding 6).
-- `Message` type and `to_model_history` / `VercelAIAdapter.dump_messages` on the GET path must
-  round-trip the tool parts. Stay inside the isolation cluster; `store.py` still persists opaque
-  bytes.
-- Decide at gate start: persist the whole `result.all_messages()` for the turn vs. just the
-  tool-call/return + final text. Whole-turn is simpler and matches what `_paused` already does
-  for the pending case.
+`result.new_messages()[-1]`, so tool parts — and cards — vanish on refresh. Persist enough of the
+run for cards to re-render:
 
-**Prompt tuning.** One line in `agent/conversation.py`'s `INSTRUCTIONS`: when a tool returns a
-list, give a one-sentence summary and do not re-type its rows — the interface shows the detail.
-Accept that Flash-Lite / Gemma will not obey 100%; the card is correct regardless.
+- Extend what `_completed` serializes into `Message.provider_data` to include the
+  tool-call / tool-return messages, `providerMetadata` / `thought_signature` intact (finding 6).
+  `to_model_history` already `.extend()`s a multi-message `provider_data`, so the infra is mostly
+  there; the open question is de-duplicating the leading user prompt (it already has its own
+  `role="user"` row).
+- `Message` / `to_model_history` / `VercelAIAdapter.dump_messages` (GET path) must round-trip the
+  tool parts. Stay inside the isolation cluster; `store.py` still persists opaque bytes.
+- **Decide at gate start, both written into the plan:** (a) serialize the whole turn
+  (`new_messages()` minus the leading user prompt); (b) serialize only the
+  tool-call/return + final `ModelResponse`. Decide once real message shapes from a live turn are
+  in front of us.
+- **Verify at implementation:** whether `dump_messages` on the GET path already round-trips tool
+  parts when they are present in `provider_data`, and whether `output` comes back structured or
+  as a string there (cards' `parseToolOutput` already tolerates both).
 
-**Test:** each card renders from a fixture matching gate 33's schema; unregistered tool →
-fallback; card survives a page reload (new persistence); approval + success cards still work;
-`npm run lint` (restricted-import rules) and `npx tsc --noEmit` clean; agent tests pass.
+**R3.** Restore the dropped "revisit at Gate 19" / `NotFoundError`-vs-`ToolFailed` design
+rationale into `agent/mcp_client.py`'s `_tool_output` docstring or `docs/AGENT-PLAN.md`.
+
+**R4.** Fix the unreachable `str(exc) or f"Tool {name!r} returned an error"` fallback in
+`agent/mcp_client.py:call_tool` (the `ModelRetry` message is never empty by the time it is
+re-raised).
+
+R3 and R4 are tiny but sit in the same file the persistence work opens — cheaper to do together
+than to touch `mcp_client.py` twice.
 
 ---
 
@@ -397,7 +480,8 @@ fallback; card survives a page reload (new persistence); approval + success card
 | 31 | Fullscreen/expand mode | — | yes, ship first |
 | 32 | Markdown rendering | — | yes |
 | 33 | MCP `outputSchema` + generated TS types + drift check | — | backend, yes |
-| 34 | Card registry + cards + reload persistence + prompt line | 32, 33 | no |
+| 34 | Card registry + 7 cards + `FallbackCard` + restyle 2 cards + prompt line | 32, 33 | no |
+| 34b | Reload persistence (whole-turn serialization) + R3 + R4 | 34 | no — after the demo |
 
 Each gate ends with the standard stop-and-commit discipline (`docs/PLAN.md`).
 
@@ -434,6 +518,11 @@ and even then, structured tool output is preferred.
   JSON object). End-to-end browser check deferred — the frontend dev server was not hydrating at
   the time; the wire behaviour was confirmed at the serializer instead.
 - Whether `VercelAIAdapter.dump_messages` on the GET path already round-trips tool parts when
-  they are present in `provider_data` (gate 34).
-- Tool dict shapes are captured (table above); re-capture at gate 33 start only if `server.py`
-  changed since 2026-09-09.
+  they are present in `provider_data` — **moved to gate 34b** (reload persistence). Not needed
+  for gate 34: live turns carry the tool parts on the wire already.
+- Gate 34: exact route paths for card overflow links — check `docs/FRONTEND-PLAN.md`'s screen
+  inventory; link to the list page where a detail route does not exist.
+- Gate 34: the frontend dev server needs a `npm run dev` restart before the browser walkthrough
+  (it was not hydrating during the gate-33 session).
+- Tool dict shapes are captured (table above); re-capture at gate 34 start only if `server.py`
+  changed since gate 33 shipped.
