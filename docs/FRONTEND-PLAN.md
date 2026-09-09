@@ -782,6 +782,18 @@ Design in `docs/superpowers/specs/2026-09-09-chatbot-overhaul-design.md`; plan i
 `docs/superpowers/plans/2026-09-09-gate31-chat-fullscreen.md`. Gates 32–34 (Markdown, structured
 tool output, response cards) build on this.
 
+**Known issues carried out of Gate 31:**
+
+- **`density-toggle.tsx` throws when `localStorage` is blocked** (private windows, some embedded
+  webviews). It reads storage in a lazy `useState` initialiser with no `try/catch`, so the whole
+  shell fails to render there. Latent since Gate 11, not introduced here — noticed because Gate 31
+  needed the same storage pattern and deliberately wrapped every access. `chat-mode.ts` now has the
+  correct catch-only fallback shape. **Recommended before Gate 32:** extract a shared
+  `useLocalStorageValue` hook from `chat-mode.ts` and move `density-toggle` onto it, so there is one
+  audited storage path instead of three hand-rolled ones (density, conversation id, chat mode).
+- **Cosmetic, unfixed:** `agent-panel.tsx` has a `type` import ordered above the value imports.
+  Lint is clean; left as-is to keep the Gate 31 diff minimal.
+
 ---
 
 ## Deferred, as decisions rather than oversights
