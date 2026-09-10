@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type { ToolUIPart } from "../use-panel-state";
 import { CardErrorBoundary } from "./card-error-boundary";
 import { FallbackCard } from "./fallback-card";
+import { ProductCard, ProductListCard } from "./product-cards";
 
 /**
  * The one place a tool name maps to a card. Every entry is keyed by the wire
@@ -16,7 +17,11 @@ import { FallbackCard } from "./fallback-card";
  */
 export type ToolCard = (props: { output: unknown }) => ReactNode;
 
-export const CARD_REGISTRY: Record<string, ToolCard> = {};
+export const CARD_REGISTRY: Record<string, ToolCard> = {
+  "tool-list_products": ProductListCard,
+  "tool-get_product": ProductCard,
+  "tool-get_product_by_sku": ProductCard,
+};
 
 /**
  * Render the card for one `output-available` tool part. Read tools have no
