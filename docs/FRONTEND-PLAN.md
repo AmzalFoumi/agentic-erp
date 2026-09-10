@@ -836,6 +836,20 @@ browser pass over all seven cards in both panel modes. Plan:
 - **`ProductCard`'s key/value grid** stores JSX values in a tuple array, which trips ESLint
   `react/jsx-key` (a false positive here — they are data, not rendered siblings); suppressed
   per-line. A render-prop value shape would avoid the suppressions.
+- **`ProductListCard` overflow link drops `?search=`.** The spec names `/products?search=<term>`;
+  the card can only see `part.output`, never the tool's `input`, so the search term is genuinely
+  unavailable. Links to bare `/products`. Forced deviation, not carelessness.
+- **`PendingDraftsCard` header says "N waiting" where N is the rows returned**, not the true pending
+  count — `list_pending_drafts` defaults to `limit=20`. With >20 pending the header understates.
+  `DraftOut` carries no `created_at`, so the spec's "age" column is also not implementable without a
+  schema change.
+- **Streaming caret can briefly animate on a settled text bubble** when the model emits text, calls
+  a tool, then streams more text (`message-list.tsx` pins the caret to the last text-part index).
+  Cosmetic.
+- **Confirmed write-tool cards (`ToolCallCard`/`SuccessCard`) still render only for the last
+  message** (`agent-panel.tsx`), so a confirmed mutation drops out of the transcript on the next
+  turn. Pre-existing since gate 33; gate 34 makes it more visible because read-tool cards now
+  persist inline. A candidate for gate 34b.
 
 **Known issues carried out of Gate 31:**
 
