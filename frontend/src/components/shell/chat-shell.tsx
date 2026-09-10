@@ -63,6 +63,13 @@ export function ChatShell({ children }: { children: ReactNode }) {
     setMode(nextMode(readStoredMode()));
   }, []);
 
+  // Drop back to the docked rail. Used when the user follows a link out of the
+  // chat: in expanded mode the panel covers the whole content area, so the
+  // page they just navigated to would otherwise stay hidden behind it.
+  const collapse = useCallback(() => {
+    setMode("docked");
+  }, []);
+
   // Esc collapses, but only while expanded, so it never competes with a
   // dialog/menu Esc handler in the docked layout.
   useEffect(() => {
@@ -88,7 +95,7 @@ export function ChatShell({ children }: { children: ReactNode }) {
       >
         {children}
       </main>
-      <AgentPanel mode={mode} onToggleMode={toggleMode} />
+      <AgentPanel mode={mode} onToggleMode={toggleMode} onCollapse={collapse} />
     </div>
   );
 }

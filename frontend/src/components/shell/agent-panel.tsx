@@ -36,9 +36,11 @@ const CONVERSATION_STORAGE_KEY = "agent-panel-conversation-id";
 export function AgentPanel({
   mode,
   onToggleMode,
+  onCollapse,
 }: {
   mode: ChatMode;
   onToggleMode: () => void;
+  onCollapse: () => void;
 }) {
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
@@ -110,6 +112,7 @@ export function AgentPanel({
       initialMessages={initialMessages}
       mode={mode}
       onToggleMode={onToggleMode}
+      onCollapse={onCollapse}
       onConversationChange={(newId) => {
         setInitialMessages([]);
         setConversationId(newId);
@@ -123,12 +126,14 @@ function ConnectedAgentPanel({
   initialMessages,
   mode,
   onToggleMode,
+  onCollapse,
   onConversationChange,
 }: {
   conversationId: number;
   initialMessages: UIMessage[];
   mode: ChatMode;
   onToggleMode: () => void;
+  onCollapse: () => void;
   onConversationChange: (id: number) => void;
 }) {
   const [input, setInput] = useState("");
@@ -267,7 +272,18 @@ function ConnectedAgentPanel({
         </div>
       )}
 
-      <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+        onClickCapture={(event) => {
+          // Following a link out of the chat while expanded: the panel covers
+          // the whole content area, so collapse to the rail or the user never
+          // sees the page they just opened. Docked mode leaves the page
+          // visible already, so it does nothing there.
+          if (mode !== "expanded") return;
+          if ((event.target as HTMLElement).closest("a[href]")) onCollapse();
+        }}
+      >
         <div
           className={cn(
             "flex flex-col gap-stack",
