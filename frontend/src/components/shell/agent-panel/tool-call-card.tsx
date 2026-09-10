@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { ToolUIPart } from "./use-panel-state";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChatCard } from "./cards/chat-card";
 import { getProductSummary } from "@/lib/api/products";
 
 // "tool-adjust_stock" -> "adjust stock". Generic across every mutating tool —
@@ -64,10 +65,7 @@ export function ToolCallCard({
   const productLabel = useProductLabel((input as Record<string, unknown>).product_id);
 
   return (
-    <div className="flex flex-col gap-2 rounded-(--radius) border border-border bg-card p-3 text-sm">
-      <div className="text-xs font-semibold uppercase text-muted-foreground">
-        {actionLabel(part.type)}
-      </div>
+    <ChatCard title={actionLabel(part.type)}>
       <dl className="grid grid-cols-2 gap-x-2 gap-y-1" data-numeric>
         {Object.entries(input).map(([key, value]) => {
           if (key === "product_id") {
@@ -100,6 +98,6 @@ export function ToolCallCard({
           Cancel
         </Button>
       </div>
-    </div>
+    </ChatCard>
   );
 }
