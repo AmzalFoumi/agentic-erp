@@ -74,6 +74,7 @@ export function ProductCard({ output }: { output: unknown }) {
     // eslint-disable-next-line react/jsx-key
     ["SKU", <span className="font-mono text-xs">{p.sku}</span>],
     ["Category", p.category ?? "—"],
+    ["Unit", p.unit],
     // eslint-disable-next-line react/jsx-key
     ["On hand", <span className="tabular-nums">{p.quantity_on_hand}</span>],
     // eslint-disable-next-line react/jsx-key
