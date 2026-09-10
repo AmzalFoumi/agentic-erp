@@ -27,7 +27,7 @@ export function FallbackCard({ output }: { output: unknown }) {
           {entries.map(([key, value]) => (
             <div key={key} className="contents">
               <dt className="text-muted-foreground">{key}</dt>
-              <dd>{String(value)}</dd>
+              <dd>{value == null ? "—" : String(value)}</dd>
             </div>
           ))}
         </dl>

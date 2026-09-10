@@ -8,6 +8,7 @@ import { FallbackCard } from "./fallback-card";
 import { ProductCard, ProductListCard } from "./product-cards";
 import { LotsCard, SpoilageCard } from "./inventory-cards";
 import {
+  DraftCard,
   PendingDraftsCard,
   PurchaseOrdersCard,
   ReorderBundlesCard,
@@ -18,8 +19,6 @@ import {
  * part type — "tool-<mcp_tool_name>" — so a new backend tool renders through
  * <FallbackCard> until someone deliberately adds a row here. No tool name is
  * hardcoded anywhere else (Global Constraint, see use-panel-state.ts).
- *
- * Populated by the card tasks that follow. Empty here on purpose.
  */
 export type ToolCard = (props: { output: unknown }) => ReactNode;
 
@@ -32,6 +31,10 @@ export const CARD_REGISTRY: Record<string, ToolCard> = {
   "tool-suggest_reorder_bundles": ReorderBundlesCard,
   "tool-list_pending_drafts": PendingDraftsCard,
   "tool-list_purchase_orders": PurchaseOrdersCard,
+  "tool-create_action_draft": DraftCard,
+  "tool-propose_spoilage_markdown": DraftCard,
+  "tool-propose_reorder_order": DraftCard,
+  "tool-propose_delivery_receipt": DraftCard,
 };
 
 /**

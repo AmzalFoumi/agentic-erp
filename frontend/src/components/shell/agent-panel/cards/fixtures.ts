@@ -173,3 +173,23 @@ export const listPurchaseOrdersFixture: MCPToolOutputs["list_purchase_orders"] =
     },
   ],
 };
+
+export const proposeReorderOrderFixture: MCPToolOutputs["propose_reorder_order"] = {
+  id: 42,
+  draft_type: "SUPPLIER_REORDER",
+  status: "PENDING",
+  payload: {
+    supplier_id: 3,
+    expected_date: "2026-09-15",
+    lines: [{ product_id: 1, quantity: 48, unit_cost: "262.50" }],
+  },
+  reasoning: "Full Cream Milk 1L is below its reorder level; 2-day lead time.",
+  cost_at_risk: null,
+  projected_recovery: null,
+  expires_at: "2026-09-13",
+  is_expired: false,
+  created_by: "01a02d8f-1111-2222-3333-444455556666",
+  created_via: "agent",
+  decided_by: null,
+  decided_via: null,
+};

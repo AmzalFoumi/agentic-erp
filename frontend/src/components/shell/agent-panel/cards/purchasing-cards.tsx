@@ -50,7 +50,7 @@ function BundleSection({ bundle }: { bundle: ReorderBundleOut }) {
         columns={BUNDLE_LINE_COLUMNS}
         rows={bundle.lines}
         rowKey={(l) => String(l.product_id)}
-        cap={4}
+        cap={20}
       />
     </div>
   );
@@ -143,6 +143,53 @@ export function PendingDraftsCard({ output }: { output: unknown }) {
       )}
       <Link href="/approvals" className="self-start text-xs text-primary hover:underline">
         Open approvals →
+      </Link>
+    </ChatCard>
+  );
+}
+
+/* ---------- create_action_draft / propose_* (single DraftOut) ---------- */
+
+function isDraftOut(v: unknown): v is DraftOut {
+  return (
+    v != null &&
+    typeof v === "object" &&
+    typeof (v as DraftOut).draft_type === "string" &&
+    typeof (v as DraftOut).status === "string" &&
+    "payload" in (v as DraftOut)
+  );
+}
+
+/**
+ * The four draft-creating tools (create_action_draft, propose_spoilage_markdown,
+ * propose_reorder_order, propose_delivery_receipt) run staging-only, so their
+ * wire part has no approval object and would otherwise fall through to the
+ * generic Result card. Show the same one-line summary PendingDraftsCard uses,
+ * plus the money-at-stake line, and point at the approvals queue.
+ */
+export function DraftCard({ output }: { output: unknown }) {
+  const d = parseToolOutput(output);
+  if (!isDraftOut(d)) return <FallbackCard output={output} />;
+
+  return (
+    <ChatCard
+      title="Draft proposed"
+      headerRight={d.is_expired ? "expired" : d.status.toLowerCase()}
+    >
+      <div className="font-medium">{draftSummary(d)}</div>
+      {d.reasoning && (
+        <p className="text-xs text-muted-foreground">{d.reasoning}</p>
+      )}
+      {(d.cost_at_risk != null || d.projected_recovery != null) && (
+        <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
+          {d.cost_at_risk != null && <span>At risk: {formatMoney(d.cost_at_risk)}</span>}
+          {d.projected_recovery != null && (
+            <span>Recoverable: {formatMoney(d.projected_recovery)}</span>
+          )}
+        </div>
+      )}
+      <Link href="/approvals" className="self-start text-xs text-primary hover:underline">
+        Review in approvals →
       </Link>
     </ChatCard>
   );

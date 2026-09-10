@@ -19,6 +19,12 @@ export class CardErrorBoundary extends Component<
     return { failed: true };
   }
 
+  componentDidCatch(error: unknown) {
+    // The fallback is silent by design; log so a card that throws mid-demo is
+    // at least debuggable from the console.
+    console.error("Response card threw, showing fallback:", error);
+  }
+
   render() {
     return this.state.failed ? this.props.fallback : this.props.children;
   }
