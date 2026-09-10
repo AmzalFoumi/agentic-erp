@@ -10,11 +10,10 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-09-chatbot-overhaul-design.md` — section **"Gate 34 — response cards + prompt line"**. Read it alongside this plan. Reload persistence and the parked items R3/R4 are **out of scope** — they are gate 34b.
 
-> **Execution status (2026-09-10, paused for the night):** SDD run in progress on `feat/client/chatbot`.
-> **Task 1 COMPLETE** — commit `88b04ae`, reviewed clean, `tsc`/`lint` green. Tasks 2–8 not started.
-> SDD ledger + full RESUME-HERE block: `.superpowers/sdd/2026-09-10-gate34-response-cards/progress.md`
-> (git-ignored — also mirrored in memory `project_chatbot_overhaul.md`). All 8 task briefs pre-extracted
-> in that dir. Resume by dispatching Task 2 (BASE `88b04ae`); do **not** re-run Task 1.
+> **Execution status (2026-09-10, COMPLETE):** SDD run finished on `feat/client/chatbot`.
+> All 8 tasks done (`88b04ae..809661f`, plus follow-up `d078ddd`), browser walkthrough passed,
+> `tsc`/`lint` green. Reload persistence and parked items R3/R4 are gate 34b (not started).
+> SDD ledger: `.superpowers/sdd/2026-09-10-gate34-response-cards/progress.md` (git-ignored).
 
 ## Global Constraints
 
@@ -34,7 +33,7 @@ Every task's requirements implicitly include this section. Values are copied ver
 - **No new npm or pip dependencies.** If a task appears to need one, stop and raise it.
 - **Branch:** `feat/client/chatbot`. Commit after every task. Do **not** push. Commit-message trailer, verbatim:
 
-  ```
+  ```text
   Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_01XruycPu9FKxDpuCES3GRC6
   ```

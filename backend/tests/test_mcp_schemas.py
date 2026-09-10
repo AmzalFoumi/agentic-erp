@@ -1,10 +1,14 @@
 """Gate 33: the MCP tool-output models mirror what the tools actually return.
 
-Two layers of check live here:
-  - each model accepts a representative dict (fast, no DB) - this file, below
-  - every real tool call's `structured_content` validates against its model
-    (test_mcp_products.py / a fixture-backed test in Task 2)
-  - the generated JSON-Schema matches the committed copy (Task 3)
+The checks here come in two styles:
+  - ProductOut / ProductListOut are validated from a representative dict -
+    fast, no DB. The other models are not: their nested field lists could
+    not be confirmed from the Task 1 diff, so they are exercised through a
+    live tool call instead (below).
+  - every real tool call's `structured_content` validates against its model:
+    ProductOut, ProductListOut, LotOut, LotListOut, DraftOut, DraftListOut,
+    ReorderReportOut, SpoilageReportOut and PurchaseOrderListOut.
+  - the generated JSON-Schema matches the committed copy.
 """
 
 from contextlib import contextmanager
@@ -12,7 +16,7 @@ from pathlib import Path
 
 import anyio
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from core.enums import DraftStatus
@@ -99,7 +103,7 @@ def test_product_list_out_wraps_rows_and_a_total():
 def test_money_is_never_coerced_to_a_number():
     # A model that typed cost_price as float would accept 380.0 here and the
     # precision guarantee would be gone.
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ProductOut.model_validate({**_PRODUCT, "cost_price": 380.0})
 
 
@@ -122,6 +126,11 @@ def test_every_tool_result_validates_against_its_model(call, unique_sku):
     parsed = ProductListOut.model_validate(listed)
     assert parsed.total >= 1
     assert any(p.sku == unique_sku for p in parsed.products)
+
+    # PurchaseOrderListOut has no representative-dict check; an empty live
+    # call still validates the wrapper, and any seeded rows the nested items.
+    orders = call("list_purchase_orders").structured_content
+    PurchaseOrderListOut.model_validate(orders)
 
 
 def test_lot_tool_results_validate_against_their_models(call, unique_sku):

@@ -202,7 +202,7 @@ def _actor() -> Actor:
 
 
 def _describe(product: Product) -> ProductOut:
-    """Turn a Product ORM object into a plain dict the protocol can send.
+    """Turn a Product ORM object into a `ProductOut` the protocol can send.
 
     This is the MCP counterpart of a Pydantic response schema: the boundary
     where an internal object becomes an external contract. It exists for two
@@ -593,7 +593,7 @@ def _describe_spoilage(report: Any) -> SpoilageReportOut:
 
 
 def _describe_draft(draft: ActionDraft) -> DraftOut:
-    """Turn an ActionDraft into a plain dict the protocol can send.
+    """Turn an ActionDraft into a `DraftOut` the protocol can send.
 
     Same job as `_describe` above, same two reasons - a SQLAlchemy object is
     not serialisable and holds a live session link, and choosing the fields by

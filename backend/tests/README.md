@@ -134,10 +134,12 @@ failing on a table that doesn't exist.
   tests in the suite (10 minutes vs. 5.53 seconds, measured 2026-08-28).
 - **Before pushing, or when you want the closest thing to a real check:**
   `PYTEST_ALLOW_REMOTE_DB=1 pytest` against Supabase. It's the same database
-  `backend/`, `mcp_server/`, and the deployed box actually share, and CI runs
-  against it too (see `docs/CI-PLAN.md`). The `PYTEST_ALLOW_REMOTE_DB=1` prefix
-  is the deliberate opt-in — without it a plain `pytest` whose `DATABASE_URL`
-  is Supabase stops with an error instead of connecting.
+  `backend/`, `mcp_server/`, and the deployed box actually share. This is an
+  explicit shared-Supabase check you run by hand — not what CI does: CI runs
+  plain `pytest` against its own `localhost` Postgres (see `docs/CI-PLAN.md`).
+  The `PYTEST_ALLOW_REMOTE_DB=1` prefix is the deliberate opt-in — without it
+  a plain `pytest` whose `DATABASE_URL` is Supabase stops with an error
+  instead of connecting.
 
 ## For Claude Code / an agent running these tests
 

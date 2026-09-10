@@ -488,4 +488,11 @@ class ErpToolset(AbstractToolset[Any]):
             return _tool_output(result)
         except ModelRetry as exc:
             # Re-raise with the tool name, which _tool_output does not have.
-            raise ModelRetry(str(exc) or f"Tool {name!r} returned an error") from exc
+            # `_tool_output` always raises with non-empty text, so prefix it
+            # rather than fall back - otherwise the name is never shown.
+            detail = str(exc).strip()
+            raise ModelRetry(
+                f"Tool {name!r} returned an error: {detail}"
+                if detail
+                else f"Tool {name!r} returned an error"
+            ) from exc
