@@ -78,7 +78,7 @@ export function ChatCardTable<Row>({
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  className={cn("py-1 pr-3 font-medium", col.numeric && "text-right pr-0")}
+                  className={cn("py-1 pr-3 font-medium", col.numeric && "text-right")}
                 >
                   {col.header}
                 </th>
@@ -93,7 +93,7 @@ export function ChatCardTable<Row>({
                     key={col.key}
                     className={cn(
                       "py-1 pr-3 align-top",
-                      col.numeric && "text-right pr-0 tabular-nums",
+                      col.numeric && "text-right tabular-nums",
                     )}
                   >
                     {col.cell(row)}

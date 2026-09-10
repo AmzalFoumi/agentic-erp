@@ -49,7 +49,16 @@ export function SuccessCard({ part }: { part: ToolUIPart }) {
 
   return (
     <ChatCard title="Done">
-      <div>{String(part.output ?? "the change was applied")}.</div>
+      {/* Post-gate-33 the tool output is a JSON object, not a sentence, so
+          String() it would print "[object Object]". Only show it when the tool
+          actually returned a human string; otherwise say so plainly and let the
+          updated_by line and the link carry the detail. */}
+      <div>
+        {typeof part.output === "string" && part.output
+          ? part.output
+          : "The change was applied"}
+        .
+      </div>
       {sku && (
         <Link href={`/products?search=${encodeURIComponent(sku)}`} className="text-primary hover:underline">
           View product →
