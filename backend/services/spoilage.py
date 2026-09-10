@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from core.actor import Actor
@@ -81,6 +81,12 @@ class SpoilageItem:
     discount_percent: int
     tier_label: str
 
+    # True when the lot is already past its expiry date. The proposal for it is
+    # a write-off - `proposed_price` is 0.00 and `discount_percent` is 100 - not
+    # a discount. Kept as its own flag so a reader (a screen, the agent) does
+    # not have to infer "this is spoiled, not cheap" from the price being zero.
+    write_off: bool
+
     cost_at_risk: Decimal
     projected_recovery: Decimal
 
@@ -120,10 +126,29 @@ class MarkdownLine(BaseModel):
     lot_id: int = Field(gt=0)
     product_id: int = Field(gt=0)
 
-    # `gt=0` rather than `ge=0`: a proposed price of zero is a giveaway, not a
-    # markdown, and `pricing.MINIMUM_PRICE` already floors the generated value.
-    # This bound is what stops an EDITED payload going below it.
-    new_price: Decimal = Field(gt=0)
+    # `ge=0`, not `gt=0`: a price of exactly zero is allowed, but ONLY on a
+    # write-off line (see the validator below). A normal markdown line priced at
+    # zero is still refused - a giveaway is not a markdown - and so is any
+    # sub-penny value. This is what keeps an EDITED payload from slipping below
+    # the floor while still letting expired stock be taken off sale at 0.00.
+    new_price: Decimal = Field(ge=0)
+
+    # Set by `scan_spoilage` for a lot that is already past its expiry date. A
+    # write-off line prices the lot at 0.00 and drops it to 100% off; every
+    # other line must stay a real, sellable price.
+    write_off: bool = False
+
+    @model_validator(mode="after")
+    def _price_matches_kind(self) -> "MarkdownLine":
+        if self.write_off:
+            if self.new_price != 0:
+                raise ValueError("A write-off line must be priced at 0.")
+        elif self.new_price < pricing.MINIMUM_PRICE:
+            raise ValueError(
+                f"A markdown line must be priced at {pricing.MINIMUM_PRICE} or more; "
+                "use write_off for expired stock."
+            )
+        return self
 
 
 class MarkdownPayload(BaseModel):
@@ -233,6 +258,7 @@ def scan_spoilage(
                 proposed_price=proposed,
                 discount_percent=int(tier.discount * 100),
                 tier_label=tier.label,
+                write_off=tier is pricing.WRITE_OFF_TIER,
                 cost_at_risk=pricing.cost_at_risk(lot.quantity, lot.cost_price),
                 projected_recovery=pricing.projected_recovery(lot.quantity, proposed),
             )
@@ -321,6 +347,7 @@ def _lines_for(report: SpoilageReport) -> list[MarkdownLine]:
             lot_id=item.lot_id,
             product_id=item.product_id,
             new_price=item.proposed_price,
+            write_off=item.write_off,
         )
         for item in report.items
     ]
@@ -336,11 +363,18 @@ def _default_reasoning(report: SpoilageReport) -> str:
     count = len(report.items)
     soonest = min(item.days_remaining for item in report.items)
     when = "today" if soonest <= 0 else f"in {soonest} day(s)"
+    written_off = sum(1 for item in report.items if item.write_off)
+    tail = (
+        f" {written_off} of them are already past their expiry date and are proposed "
+        "as write-offs (priced at 0.00, taken off sale)."
+        if written_off
+        else ""
+    )
     return (
         f"{count} lot(s) expire within {report.within_days} day(s), the soonest {when}. "
         f"Together they cost {report.total_cost_at_risk} to buy and will be thrown away "
         f"if they do not sell. Marking them down as proposed would bring in "
-        f"{report.total_projected_recovery} if the discounted stock all sells."
+        f"{report.total_projected_recovery} if the discounted stock all sells.{tail}"
     )
 
 
@@ -401,9 +435,15 @@ def _apply_markdown(
             raise ValidationError(f"Product {line.product_id} no longer exists.")
 
         new_price = pricing.to_money(line.new_price)
-        base = product.sell_price or new_price
         lot.sell_price = new_price
-        lot.discount_percent = max(0, int(round((1 - new_price / base) * 100)))
+        if line.write_off:
+            # Expired stock coming off sale. 100% off by definition - not
+            # computed from a ratio, which would divide by zero if the
+            # catalogue price were ever 0.
+            lot.discount_percent = 100
+        else:
+            base = product.sell_price or new_price
+            lot.discount_percent = max(0, int(round((1 - new_price / base) * 100)))
         lot.updated_by = actor.id
         touched_products[product.id] = product
 

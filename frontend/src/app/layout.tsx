@@ -4,10 +4,9 @@ import "./globals.css";
 
 import { ThunderIDProvider } from "@thunderid/nextjs/server";
 
-import { AgentPanel } from "@/components/shell/agent-panel";
+import { ChatShell } from "@/components/shell/chat-shell";
 import { DensityToggle } from "@/components/shell/density-toggle";
 import { Logo } from "@/components/shell/logo";
-import { Nav } from "@/components/shell/nav";
 import { ThemeProvider } from "@/components/shell/theme-provider";
 import { ThemeToggle } from "@/components/shell/theme-toggle";
 import { UserMenu } from "@/components/shell/user-menu";
@@ -126,13 +125,7 @@ export default function RootLayout({
                 </div>
               </div>
 
-              <div className="flex flex-1 min-h-0">
-                <Nav />
-                <main className="flex-1 min-w-0 overflow-auto p-section">
-                  {children}
-                </main>
-                <AgentPanel />
-              </div>
+              <ChatShell>{children}</ChatShell>
             </SignedIn>
 
             <SignedOut>

@@ -78,6 +78,35 @@ if _test_database_url:
 else:
     from core.database import engine
 
+# Guard against silently running the whole suite against a hosted database -
+# whichever variable selected `engine` above. `TEST_DATABASE_URL` and a plain
+# `pytest` (which falls back to `DATABASE_URL`, historically the live Supabase
+# project) both land here. The rollback-per-test mechanism keeps a remote run
+# *safe*, but it is slow (a network hop per query) and needlessly loads a
+# shared resource, so it must be a deliberate choice, not an accident.
+#
+# Allowed without ceremony: a loopback address or the literal hostname
+# `localhost`. That covers the local Docker container and CI (which sets
+# DATABASE_URL to its own localhost Postgres and runs plain `pytest`). An
+# mDNS `.local` name is NOT allowed - it can resolve to another machine.
+# Anything else must be forced with PYTEST_ALLOW_REMOTE_DB=1, the deliberate
+# pre-push check against real Supabase described in backend/tests/README.md.
+_host = (engine.url.host or "").lower()
+_is_local = _host in {"localhost", "127.0.0.1", "::1"}
+if not _is_local and os.environ.get("PYTEST_ALLOW_REMOTE_DB") != "1":
+    raise RuntimeError(
+        f"Refusing to run the test suite against a remote database "
+        f"({_host!r}). Set TEST_DATABASE_URL to the local container "
+        f"(postgresql+psycopg://aisle:aisle@127.0.0.1:5433/aisle_test - see "
+        f"backend/tests/README.md), or export PYTEST_ALLOW_REMOTE_DB=1 for "
+        f"the deliberate pre-push run against real Supabase."
+    )
+if not _is_local:
+    print(
+        f"\n[conftest] PYTEST_ALLOW_REMOTE_DB=1 - running against remote "
+        f"database {_host!r}. Expect this to be slow.\n"
+    )
+
 if TYPE_CHECKING:
     # Imported for the type annotation only. `TYPE_CHECKING` is False at
     # runtime, so this line never executes - it exists so a type checker and an

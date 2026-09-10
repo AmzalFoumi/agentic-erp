@@ -19,7 +19,8 @@ type Report = components["schemas"]["SpoilageReportRead"];
  * timezones must not disagree about whether stock expires today.
  */
 function urgency(days: number) {
-  if (days <= 0) return { className: "bg-stock-out-surface text-stock-out", label: "Now" };
+  if (days < 0) return { className: "bg-stock-out-surface text-stock-out", label: "Expired" };
+  if (days === 0) return { className: "bg-stock-out-surface text-stock-out", label: "Now" };
   if (days === 1) return { className: "bg-stock-low-surface text-stock-low", label: "Urgent" };
   return { className: "bg-muted text-muted-foreground", label: "Soon" };
 }
@@ -139,10 +140,16 @@ export function SpoilageTable({ report }: { report: Report }) {
                     <MoneyDisplay value={item.current_price} />
                   </td>
                   <td className="p-3 text-right">
-                    <MoneyDisplay value={item.proposed_price} />
-                    <div className="text-xs text-muted-foreground">
-                      −{item.discount_percent}%
-                    </div>
+                    {item.discount_percent >= 100 ? (
+                      <span className="text-stock-out">Write off</span>
+                    ) : (
+                      <>
+                        <MoneyDisplay value={item.proposed_price} />
+                        <div className="text-xs text-muted-foreground">
+                          −{item.discount_percent}%
+                        </div>
+                      </>
+                    )}
                   </td>
                   <td className="p-3 text-right text-stock-out">
                     <MoneyDisplay value={item.cost_at_risk} />

@@ -64,6 +64,35 @@ def test_a_lot_expiring_tomorrow_is_reported_at_half_price(
     assert items[0].current_price == Decimal("4.00")
 
 
+def test_an_already_expired_lot_is_reported_as_a_write_off(session, actor, unique_sku):
+    """Past its expiry date -> price 0.00, 100% off, flagged as a write-off,
+    and nothing recoverable."""
+    product, _ = _product_with_lot(session, actor, unique_sku, days=-3)
+
+    item = _mine(spoilage.scan_spoilage(session, actor, today=TODAY), product.id)[0]
+
+    assert item.write_off is True
+    assert item.proposed_price == Decimal("0.00")
+    assert item.discount_percent == 100
+    assert item.projected_recovery == Decimal("0.00")
+
+
+def test_approving_a_write_off_takes_the_lot_off_sale(session, actor, unique_sku):
+    product, lot = _product_with_lot(session, actor, unique_sku, days=-3)
+    draft = spoilage.propose_markdown(
+        session, actor, client=ClientType.WEB_UI, today=TODAY
+    )
+
+    drafts.approve_draft(session, actor, client=ClientType.WEB_UI, draft_id=draft.id)
+
+    session.refresh(lot)
+    assert lot.sell_price == Decimal("0.00")
+    assert lot.discount_percent == 100
+    # The quantity is left alone - the stock is still physically on the shelf
+    # until someone removes it.
+    assert lot.quantity == 10
+
+
 def test_stock_beyond_the_horizon_is_not_reported(session, actor, unique_sku):
     product, _ = _product_with_lot(session, actor, unique_sku, days=9)
     report = spoilage.scan_spoilage(session, actor, today=TODAY)
@@ -282,7 +311,8 @@ def test_an_edited_payload_cannot_price_a_lot_onto_another_product(
 
 
 def test_an_edited_payload_cannot_price_at_zero(session, actor, unique_sku):
-    """`gt=0` on the schema. A giveaway is not a markdown."""
+    """A giveaway is not a markdown: a normal line priced at 0 is refused.
+    Only a write-off line (expired stock) may be 0 - covered separately."""
     product, lot = _product_with_lot(session, actor, unique_sku, days=1)
     draft = spoilage.propose_markdown(
         session, actor, client=ClientType.WEB_UI, today=TODAY

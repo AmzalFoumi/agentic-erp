@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { ToolUIPart } from "./use-panel-state";
+import { ChatCard } from "./cards/chat-card";
 
 /**
  * Who the ERP recorded as having made this change.
@@ -47,8 +48,17 @@ export function SuccessCard({ part }: { part: ToolUIPart }) {
   const who = updatedBy(part.output);
 
   return (
-    <div className="flex flex-col gap-1 rounded-(--radius) border border-border bg-card p-3 text-sm">
-      <div>Done — {String(part.output ?? "the change was applied")}.</div>
+    <ChatCard title="Done">
+      {/* Post-gate-33 the tool output is a JSON object, not a sentence, so
+          String() it would print "[object Object]". Only show it when the tool
+          actually returned a human string; otherwise say so plainly and let the
+          updated_by line and the link carry the detail. */}
+      <div>
+        {typeof part.output === "string" && part.output
+          ? part.output
+          : "The change was applied"}
+        .
+      </div>
       {sku && (
         <Link href={`/products?search=${encodeURIComponent(sku)}`} className="text-primary hover:underline">
           View product →
@@ -57,6 +67,6 @@ export function SuccessCard({ part }: { part: ToolUIPart }) {
       {who && (
         <div className="font-mono text-xs text-muted-foreground">updated_by: {who}</div>
       )}
-    </div>
+    </ChatCard>
   );
 }

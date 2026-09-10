@@ -83,6 +83,18 @@ MARKDOWN_TIERS: tuple[MarkdownTier, ...] = (
 # `MARKDOWN_TIERS[-1].within_days` at three call sites.
 MARKDOWN_HORIZON_DAYS: int = max(tier.within_days for tier in MARKDOWN_TIERS)
 
+# Stock that is ALREADY past its expiry date is not a markdown candidate - it
+# cannot legally be sold at any price. `tier_for()` returns this instead of the
+# most-urgent rung so the spoilage feature proposes a write-off (price 0.00,
+# 100% off), not a 70%-off discount on stock nobody may buy. It is deliberately
+# NOT a member of MARKDOWN_TIERS: `within_days=-1` is not a rung of the ladder,
+# and `discount=1` is the signal `discounted_price()` reads to skip the floor.
+WRITE_OFF_TIER = MarkdownTier(
+    within_days=-1,
+    discount=Decimal("1.00"),
+    label="Expired - remove from sale",
+)
+
 
 def days_until(expiry: date, *, today: date) -> int:
     """Whole days from `today` to `expiry`. Negative once it is past.
@@ -99,13 +111,14 @@ def days_until(expiry: date, *, today: date) -> int:
 def tier_for(expiry: date, *, today: date) -> MarkdownTier | None:
     """The discount rung `expiry` falls into, or None if it is not close enough.
 
-    Already-expired stock (a negative day count) returns the most urgent rung.
-    That is deliberate rather than an oversight: the alternative is returning
-    None, which would quietly *exclude* the worst stock in the shop from a
-    spoilage report. Whether expired stock may still be sold is a different
-    question, and it belongs to whoever writes the handler, not here.
+    Already-expired stock (a negative day count) returns `WRITE_OFF_TIER`, not
+    a discount rung: it cannot be sold, so the only honest proposal is to take
+    it off sale at 0.00. Returning None instead would quietly exclude the worst
+    stock in the shop from the report whose whole job is to find it.
     """
     remaining = days_until(expiry, today=today)
+    if remaining < 0:
+        return WRITE_OFF_TIER
     for tier in MARKDOWN_TIERS:
         if remaining <= tier.within_days:
             return tier
@@ -125,7 +138,15 @@ def to_money(value: Decimal) -> Decimal:
 
 
 def discounted_price(sell_price: Decimal, tier: MarkdownTier) -> Decimal:
-    """`sell_price` with `tier`'s discount taken off, floored at MINIMUM_PRICE."""
+    """`sell_price` with `tier`'s discount taken off.
+
+    Floored at MINIMUM_PRICE for a real markdown - 70% off a penny is not free.
+    A full write-off (`tier.discount >= 1`, i.e. `WRITE_OFF_TIER`) is the one
+    exception: expired stock is priced at exactly 0.00, because it is coming off
+    the shelf, not going on it cheap.
+    """
+    if tier.discount >= 1:
+        return Decimal("0.00")
     reduced = to_money(sell_price * (Decimal(1) - tier.discount))
     return max(reduced, MINIMUM_PRICE)
 

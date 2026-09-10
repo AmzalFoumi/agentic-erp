@@ -22,10 +22,12 @@ about eighty lines.
 
 **What that decision costs, plainly.** These two methods are now ours to
 maintain, and Pydantic AI's own implementation is where bug fixes will land -
-task support, structured content, result mapping we do not do. The exit
-condition is a Pydantic AI release whose `mcp` extra permits `fastmcp-slim>=4`;
-at that point this file should shrink to a `MCPToolset` construction and the
-schema normalisation below moved into a `PreparedToolset` wrapper.
+task support, and result mapping we do not do. Gate 33 added `structured_content`
+preference in `_tool_output` (still no task support, still no full result mapping).
+The exit condition is a Pydantic AI release whose `mcp` extra permits
+`fastmcp-slim>=4`; at that point this file should shrink to a `MCPToolset`
+construction and the schema normalisation below moved into a `PreparedToolset`
+wrapper.
 
 **One thing it buys back, which is not a consolation prize.** The `anyOf` schema
 normalisation that Gate 15 found to be necessary (docs/AGENT-PLAN.md, finding 2)
@@ -215,6 +217,31 @@ def normalise_tool_schema(schema: dict[str, Any]) -> dict[str, Any]:
         properties[name] = spec
 
     return {**schema, "properties": properties}
+
+
+def _tool_output(result: Any) -> Any:
+    """What the model should see for one tool call.
+
+    Gate 33: prefer `structured_content`. The `mcp` SDK builds it from each
+    tool's Pydantic return model (backend/mcp_server/schemas.py), so a list tool
+    arrives as a real array/object rather than the `}\n{`-concatenated text that
+    `result.content` carries for backwards compatibility. The text join stays as
+    the fallback for any tool with no output model - `structured_content` is
+    `None` then, and the unstructured blocks are all there is.
+
+    `mcp_server/errors.py` reports a domain failure ("no product has that SKU")
+    as `is_error=True` with human-readable text, never a protocol error.
+    `ModelRetry` is how that reaches the model in Pydantic AI; `max_retries`
+    (set in `get_tools`) stops a loop.
+    """
+    text = "\n".join(
+        block.text for block in result.content if getattr(block, "text", None)
+    )
+    if result.is_error:
+        raise ModelRetry(text or "Tool returned an error")
+    if result.structured_content is not None:
+        return result.structured_content
+    return text
 
 
 class ErpToolset(AbstractToolset[Any]):
@@ -457,24 +484,15 @@ class ErpToolset(AbstractToolset[Any]):
 
         result = await self._connected.call_tool(name, tool_args)
 
-        # `mcp_server/errors.py` reports a domain failure - "no product has that
-        # SKU" - as a normal result with is_error=True, never a protocol error.
-        # Deliberate on MCP's part and it converges with Gemini's own choice
-        # (finding 4): both decided a failed tool is information the model reads
-        # and recovers from.
-        #
-        # `ModelRetry` is how that text reaches the model in Pydantic AI, and
-        # `max_retries` above is what stops a loop. It is not a perfect fit for
-        # every case - a NotFoundError is something to adapt to rather than
-        # retry, which is closer to `ToolFailed` - but telling those apart means
-        # parsing the message, and the error vocabulary is not currently
-        # distinguishable over the wire. Revisit at Gate 19 if the model is seen
-        # retrying a lookup that cannot succeed.
-        text = "\n".join(
-            block.text for block in result.content if getattr(block, "text", None)
-        )
-
-        if result.is_error:
-            raise ModelRetry(text or f"Tool {name!r} returned an error")
-
-        return text
+        try:
+            return _tool_output(result)
+        except ModelRetry as exc:
+            # Re-raise with the tool name, which _tool_output does not have.
+            # `_tool_output` always raises with non-empty text, so prefix it
+            # rather than fall back - otherwise the name is never shown.
+            detail = str(exc).strip()
+            raise ModelRetry(
+                f"Tool {name!r} returned an error: {detail}"
+                if detail
+                else f"Tool {name!r} returned an error"
+            ) from exc

@@ -772,6 +772,97 @@ assumed.
    client-side sorting a paginated-from-server list would only sort the visible page, which is
    misleading. Left out entirely rather than half-implemented.
 
+**Amended 2026-09-09 (Gate 31): the agent panel gained an expand/fullscreen mode.** A new
+`frontend/src/components/shell/chat-shell.tsx` client wrapper now owns the signed-in layout row
+(`<main>` + the agent panel); `layout.tsx` stays a Server Component. The panel toggles between the
+256px right rail and filling the content area (top nav + side nav stay put); `<main>` is hidden with
+`display:none`, not unmounted, so there is no route change or refetch. The mode is a `localStorage`
+concept with no library — same pattern as the density toggle — read via `useSyncExternalStore`.
+Design in `docs/superpowers/specs/2026-09-09-chatbot-overhaul-design.md`; plan in
+`docs/superpowers/plans/2026-09-09-gate31-chat-fullscreen.md`. Gates 32–34 (Markdown, structured
+tool output, response cards) build on this.
+
+**Amended 2026-09-09 (Gate 32): assistant chat text renders as Markdown.** New dependency
+`streamdown` (v2.6.0), Vercel's streaming-hardened drop-in for `react-markdown` — it renders a
+half-streamed ` ``` ` fence or `| table |` without crashing. The wrapper is
+`frontend/src/components/shell/agent-panel/markdown.tsx`; it is what Gate 34's response cards will
+reuse for any model prose. `message-list.tsx` sends assistant text through it; user messages stay
+plain (assistant-only, per the spec). `globals.css` gained two lines near the top —
+`@import "streamdown/styles.css"` and a Tailwind v4 `@source` directive so the build emits
+Streamdown's utility classes (including the streaming caret's
+`after:content-[var(--streamdown-caret)]`). Streamdown inherits the shadcn tokens this file already
+maps, so dark mode and both densities work without extra CSS; the only component-level style is a
+`[&_a]:text-primary` link tint. Images are dropped (`disallowedElements={["img"]}`); Streamdown's
+built-in HTML/URL sanitization is on by default, which neutralises `<script>` and `javascript:`
+links (verified in-browser). It does **not** restrict which hosts a plain `https://` link may point
+to — low risk for a single-tenant internal tool, but if link-target confirmation is ever wanted,
+Streamdown's `linkSafety` prop is the lever (a later gate, not 32). Plan:
+`docs/superpowers/plans/2026-09-09-gate32-markdown.md`.
+
+**Amended 2026-09-10 (Gate 33): MCP tools return structured data, with generated TypeScript types.** Two new generated-and-committed files under `src/lib/api/`: `mcp-schema.json` (from `python -m mcp_server.dump_schemas`, run offline against the backend) and `mcp-types.d.ts` (from `npm run mcp:types`, which wraps `json-schema-to-typescript` v16 as a dev dependency). The drift check has two halves: `backend/tests/test_mcp_schemas.py::test_committed_schema_matches_the_models` in the backend pytest job guards the JSON Schema, and `npm run mcp:types:check` guards the `.d.ts` locally (not yet in CI, same status as the existing `api:types:check`). Gate 34's response cards will import types from `mcp-types.d.ts` to render tool results. Plan: `docs/superpowers/plans/2026-09-10-gate33-structured-tool-output.md`.
+
+**Amended 2026-09-10 (Gate 34): the agent panel renders tool results as cards.** New directory
+`frontend/src/components/shell/agent-panel/cards/`. `registry.tsx` maps a wire part type
+(`"tool-<mcp_tool_name>"`) to a React component; a tool with no row renders through `FallbackCard`
+(top-level scalar fields + a "show raw data" toggle), so a new backend tool never breaks the panel,
+it just looks generic until someone adds a row. `message-list.tsx` was rewritten to walk **every**
+part of an assistant turn in order and render a card for each `output-available` read-tool part
+inline — the old `if (!text) return null` early-return (which hid tool-only turns) is gone.
+`ChatCard` is the shared shell (uppercase title, optional right slot, tokened border/bg);
+`ChatCardTable` is one component that renders a real `<table>` when the panel is expanded and
+stacked label/value blocks when it is docked (256px), branching on `useChatMode()` — cards never
+think about panel width. Seven typed cards ship: `ProductListCard`, `ProductCard`, `SpoilageCard`,
+`LotsCard`, `ReorderBundlesCard`, `PendingDraftsCard`, `PurchaseOrdersCard`. Each has a runtime type
+guard and falls back to `FallbackCard` on a shape mismatch; each is wrapped in a `CardErrorBoundary`
+so a render throw degrades to the fallback rather than blanking the panel. `ToolCallCard` (approval)
+and `SuccessCard` were re-parented onto `ChatCard` with no behaviour change.
+
+**No card test runner** — the frontend still has none. The shape contract is `cards/fixtures.ts`:
+one typed sample payload per card, `MCPToolOutputs["<tool>"]`-typed, that nothing imports at
+runtime — `tsc --noEmit` type-checks it against the generated gate-33 contract, and it doubles as a
+paste-ready payload for the manual walkthrough. So the gate is `tsc` + `lint` + typed fixtures + a
+browser pass over all seven cards in both panel modes. Plan:
+`docs/superpowers/plans/2026-09-10-gate34-response-cards.md`.
+
+**Known issues carried out of Gate 34 (follow-ups, not blockers):**
+
+- **Card type guards are shallow** — each `is<X>Out` guard checks ~4 fields, so a half-valid object
+  could pass and reach e.g. `p.id` (rendering `/products/undefined`). `CardErrorBoundary` still
+  contains any actual throw. Tighten the guards, or generate them from the schema, in a later gate.
+- **Reload persistence of tool cards is gate 34b.** After a reload the panel restores the
+  conversation as text only (the model's summary sentence), not the cards — the agent persists text,
+  not tool parts. Whole-turn serialization in `agent/conversation.py` `_completed` is the fix and is
+  scheduled as gate 34b.
+- **`ProductCard`'s key/value grid** stores JSX values in a tuple array, which trips ESLint
+  `react/jsx-key` (a false positive here — they are data, not rendered siblings); suppressed
+  per-line. A render-prop value shape would avoid the suppressions.
+- **`ProductListCard` overflow link drops `?search=`.** The spec names `/products?search=<term>`;
+  the card can only see `part.output`, never the tool's `input`, so the search term is genuinely
+  unavailable. Links to bare `/products`. Forced deviation, not carelessness.
+- **`PendingDraftsCard` header says "N waiting" where N is the rows returned**, not the true pending
+  count — `list_pending_drafts` defaults to `limit=20`. With >20 pending the header understates.
+  `DraftOut` carries no `created_at`, so the spec's "age" column is also not implementable without a
+  schema change.
+- **Streaming caret can briefly animate on a settled text bubble** when the model emits text, calls
+  a tool, then streams more text (`message-list.tsx` pins the caret to the last text-part index).
+  Cosmetic.
+- **Confirmed write-tool cards (`ToolCallCard`/`SuccessCard`) still render only for the last
+  message** (`agent-panel.tsx`), so a confirmed mutation drops out of the transcript on the next
+  turn. Pre-existing since gate 33; gate 34 makes it more visible because read-tool cards now
+  persist inline. A candidate for gate 34b.
+
+**Known issues carried out of Gate 31:**
+
+- **`density-toggle.tsx` throws when `localStorage` is blocked** (private windows, some embedded
+  webviews). It reads storage in a lazy `useState` initialiser with no `try/catch`, so the whole
+  shell fails to render there. Latent since Gate 11, not introduced here — noticed because Gate 31
+  needed the same storage pattern and deliberately wrapped every access. `chat-mode.ts` now has the
+  correct catch-only fallback shape. **Recommended before Gate 32:** extract a shared
+  `useLocalStorageValue` hook from `chat-mode.ts` and move `density-toggle` onto it, so there is one
+  audited storage path instead of three hand-rolled ones (density, conversation id, chat mode).
+- **Cosmetic, unfixed:** `agent-panel.tsx` has a `type` import ordered above the value imports.
+  Lint is clean; left as-is to keep the Gate 31 diff minimal.
+
 ---
 
 ## Deferred, as decisions rather than oversights

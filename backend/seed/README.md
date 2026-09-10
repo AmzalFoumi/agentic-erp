@@ -61,6 +61,19 @@ Three things about it are deliberate and easy to get wrong if it is ever rewritt
 The `2026-08-27-products-snapshot.sql` in this folder remains the "before" copy of the
 catalogue, taken before any of this.
 
+## 2026-09-10-more-dated-lots.sql
+
+Widens the perishable batch data added by `2026-08-27-dated-lots.sql`: more
+products, a longer spread of future expiry dates, and two batches that are
+**already past their expiry date** so the write-off behaviour (added the same
+day — an expired lot is proposed at 0.00 / 100% off, not a discount) has
+something to demonstrate. Run it **after** migration `a7f3c1e94b28`.
+
+Unlike the 2026-08-27 file it is **additive, not a split**: each row is a new
+delivery, so the product's `quantity_on_hand` goes up. It needs no OPENING lot
+to draw from and cannot drive any lot negative. Idempotent — every insert is
+guarded on `(product_id, lot_code)` not already existing.
+
 ## 2026-08-27-suppliers.sql
 
 Gives the shop five suppliers and a price list, so gate 29's reorder bundler has something to

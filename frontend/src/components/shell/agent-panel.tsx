@@ -3,8 +3,10 @@
 import { useChat, type UIMessage } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { Maximize2, Minimize2, X } from "lucide-react";
 
+import type { ChatMode } from "./chat-mode";
+import { ChatModeProvider } from "./agent-panel/chat-mode-context";
 import { IdleState } from "./agent-panel/idle-state";
 import { MessageList } from "./agent-panel/message-list";
 import { SuccessCard } from "./agent-panel/success-card";
@@ -14,6 +16,7 @@ import { classifyPanelState, type ToolUIPart } from "./agent-panel/use-panel-sta
 import { getAgentConversation, startAgentConversation } from "@/lib/api/agent";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 // localStorage key holding the id of the conversation currently open in the
 // panel, so a page reload can resume it (parked approval or plain history)
@@ -30,7 +33,15 @@ const CONVERSATION_STORAGE_KEY = "agent-panel-conversation-id";
  * the proxy itself reports (see route.ts's 503 branch), not a state this
  * component distinguishes.
  */
-export function AgentPanel() {
+export function AgentPanel({
+  mode,
+  onToggleMode,
+  onCollapse,
+}: {
+  mode: ChatMode;
+  onToggleMode: () => void;
+  onCollapse: () => void;
+}) {
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -75,8 +86,16 @@ export function AgentPanel() {
 
   if (conversationId === null) {
     return (
-      <aside className="flex h-full w-64 min-h-0 shrink-0 flex-col gap-stack border-l border-border bg-card p-section">
-        <div className="text-sm font-semibold">Assistant</div>
+      <aside
+        className={cn(
+          "flex h-full min-h-0 flex-col gap-stack border-border bg-card p-section",
+          mode === "expanded" ? "min-w-0 flex-1" : "w-64 shrink-0 border-l",
+        )}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm font-semibold">Assistant</div>
+          <ExpandToggle mode={mode} onToggleMode={onToggleMode} />
+        </div>
         {error ? (
           <div className="text-sm text-destructive">{error}</div>
         ) : (
@@ -91,6 +110,9 @@ export function AgentPanel() {
       key={conversationId}
       conversationId={conversationId}
       initialMessages={initialMessages}
+      mode={mode}
+      onToggleMode={onToggleMode}
+      onCollapse={onCollapse}
       onConversationChange={(newId) => {
         setInitialMessages([]);
         setConversationId(newId);
@@ -102,10 +124,16 @@ export function AgentPanel() {
 function ConnectedAgentPanel({
   conversationId,
   initialMessages,
+  mode,
+  onToggleMode,
+  onCollapse,
   onConversationChange,
 }: {
   conversationId: number;
   initialMessages: UIMessage[];
+  mode: ChatMode;
+  onToggleMode: () => void;
+  onCollapse: () => void;
   onConversationChange: (id: number) => void;
 }) {
   const [input, setInput] = useState("");
@@ -192,19 +220,28 @@ function ConnectedAgentPanel({
   }, [messages.length, lastText, state, pendingApprovalPart]);
 
   return (
-    <aside className="flex h-full w-64 min-h-0 shrink-0 flex-col gap-stack border-l border-border bg-card p-section">
+    <ChatModeProvider mode={mode}>
+    <aside
+      className={cn(
+        "flex h-full min-h-0 flex-col gap-stack border-border bg-card p-section",
+        mode === "expanded" ? "min-w-0 flex-1" : "w-64 shrink-0 border-l",
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">Assistant</div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowClearConfirm(true)}
-          title="Clear chat"
-          className="h-6 w-6 p-0"
-        >
-          <X className="size-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <ExpandToggle mode={mode} onToggleMode={onToggleMode} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowClearConfirm(true)}
+            title="Clear chat"
+            className="h-6 w-6 p-0"
+          >
+            <X className="size-4" />
+          </Button>
+        </div>
       </div>
 
       {showClearConfirm && (
@@ -235,53 +272,74 @@ function ConnectedAgentPanel({
         </div>
       )}
 
-      <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col gap-stack overflow-y-auto">
-        {state === "idle" && <IdleState onPickExample={setInput} />}
-        {messages.length > 0 && (
-          <MessageList messages={messages} isStreaming={status === "streaming"} />
-        )}
-        {showThinking && <ThinkingIndicator />}
-        {state === "approval" && pendingApprovalPart && (
-          <ToolCallCard
-            part={pendingApprovalPart}
-            onRespond={(approved) => {
-              if (pendingApprovalPart.approval?.id) {
-                addToolApprovalResponse({ id: pendingApprovalPart.approval.id, approved });
-              }
-            }}
-          />
-        )}
-        {state === "success" &&
-          (() => {
-            const outputPart = last?.parts
-              .filter((part) => part.type.startsWith("tool-"))
-              .findLast((part) => {
-                const toolPart = part as unknown as ToolUIPart;
-                return toolPart.state === "output-available" && toolPart.approval?.approved === true;
-              }) as ToolUIPart | undefined;
-            return outputPart ? <SuccessCard part={outputPart} /> : null;
-          })()}
-        {status === "error" && (
-          <div className="flex flex-col gap-2 rounded-(--radius) border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <div className="font-semibold">Error</div>
-            <div>{error?.message ?? "An error occurred"}</div>
-            {refetchError && <div className="text-xs">Refetch failed: {refetchError}</div>}
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={handleRefetch}
-              disabled={isRefetching}
-              className="mt-1"
-            >
-              {isRefetching ? "Refetching…" : "Retry"}
-            </Button>
-          </div>
-        )}
+      <div
+        ref={scrollRef}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+        onClickCapture={(event) => {
+          // Following a link out of the chat while expanded: the panel covers
+          // the whole content area, so collapse to the rail or the user never
+          // sees the page they just opened. Docked mode leaves the page
+          // visible already, so it does nothing there.
+          if (mode !== "expanded") return;
+          if ((event.target as HTMLElement).closest("a[href]")) onCollapse();
+        }}
+      >
+        <div
+          className={cn(
+            "flex flex-col gap-stack",
+            mode === "expanded" && "mx-auto w-full max-w-3xl",
+          )}
+        >
+          {state === "idle" && <IdleState onPickExample={setInput} />}
+          {messages.length > 0 && (
+            <MessageList messages={messages} isStreaming={status === "streaming"} />
+          )}
+          {showThinking && <ThinkingIndicator />}
+          {state === "approval" && pendingApprovalPart && (
+            <ToolCallCard
+              part={pendingApprovalPart}
+              onRespond={(approved) => {
+                if (pendingApprovalPart.approval?.id) {
+                  addToolApprovalResponse({ id: pendingApprovalPart.approval.id, approved });
+                }
+              }}
+            />
+          )}
+          {state === "success" &&
+            (() => {
+              const outputPart = last?.parts
+                .filter((part) => part.type.startsWith("tool-"))
+                .findLast((part) => {
+                  const toolPart = part as unknown as ToolUIPart;
+                  return toolPart.state === "output-available" && toolPart.approval?.approved === true;
+                }) as ToolUIPart | undefined;
+              return outputPart ? <SuccessCard part={outputPart} /> : null;
+            })()}
+          {status === "error" && (
+            <div className="flex flex-col gap-2 rounded-(--radius) border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <div className="font-semibold">Error</div>
+              <div>{error?.message ?? "An error occurred"}</div>
+              {refetchError && <div className="text-xs">Refetch failed: {refetchError}</div>}
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={handleRefetch}
+                disabled={isRefetching}
+                className="mt-1"
+              >
+                {isRefetching ? "Refetching…" : "Retry"}
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
       <form
-        className="mt-auto flex shrink-0 gap-2 pt-stack"
+        className={cn(
+          "mt-auto flex shrink-0 gap-2 pt-stack",
+          mode === "expanded" && "mx-auto w-full max-w-3xl",
+        )}
         onSubmit={(event) => {
           event.preventDefault();
           submit(input);
@@ -299,5 +357,29 @@ function ConnectedAgentPanel({
         </Button>
       </form>
     </aside>
+    </ChatModeProvider>
+  );
+}
+
+function ExpandToggle({
+  mode,
+  onToggleMode,
+}: {
+  mode: ChatMode;
+  onToggleMode: () => void;
+}) {
+  const expanded = mode === "expanded";
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      onClick={onToggleMode}
+      title={expanded ? "Collapse chat to the side" : "Expand chat to full screen"}
+      aria-label={expanded ? "Collapse chat" : "Expand chat"}
+      className="h-6 w-6 p-0"
+    >
+      {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+    </Button>
   );
 }

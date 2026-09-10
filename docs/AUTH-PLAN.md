@@ -1093,6 +1093,39 @@ unreachable. Added: `INFO` for a rejected token (routine — every session expir
 hourly), `WARNING` for a key set that could not be reached (not the caller's
 fault, and the only signal that the identity provider is the broken thing).
 
+#### ⚠️ Known bug, unfixed — session expiry mid-request becomes a redirect loop (found 2026-09-09)
+
+Found while walking the gate 31 chat work in a browser. **Nothing in gate 31
+caused it** — that gate touched no routing and no auth, confirmed by its final
+review — but the browser run is what surfaced it, so it is recorded here where
+`src/proxy.ts` behaviour is owned.
+
+**What was observed.** A ThunderID session was left to sit until the access
+token expired, then a chat message was sent (a `POST` to
+`/api/agent/conversations/<id>/turns`). Instead of a clean bounce to the hosted
+sign-in page and back, the browser ended on `ERR_TOO_MANY_REDIRECTS` and the
+user was signed out. The redirect chain cycled through `/products` (the
+`NEXT_PUBLIC_THUNDERID_AFTER_SIGN_IN_URL` value — see the redirect-mode notes
+earlier in this file).
+
+**What is confirmed:** the loop is pre-existing `src/proxy.ts` / ThunderID-SDK
+behaviour on an expired session, independent of the chat panel.
+
+**Hypothesis, not yet proven** (needs the network trace to confirm): the proxy's
+proactive near-expiry token refresh either failed or the session was already
+dead; `protectRoute()` returned `307 → /`; `app/page.tsx`'s `<SignedIn>` branch
+still read the stale session cookie as valid and its
+`after-sign-in-redirect` component pushed to `/products`; `/products` is
+protected, the session is invalid, so `307 → /` again — loop. The expected
+behaviour is a single `307` to the ThunderID authorize URL.
+
+**Repro to capture next time:** sign in, wait out the token lifetime (~1 h, or
+shorten it in the ThunderID config), send a chat message with the Network panel
+recording (preserve log), and save the full redirect chain.
+
+**Out of scope for the chatbot overhaul (gates 31–34)** — those gates are
+forbidden from touching routing or auth. This is its own fix, on its own branch.
+
 ### Gate 25 — agent delegation and the MCP server as a resource server
 
 The risky one. This is where "the agent can only do what you can do" stops being a design and starts

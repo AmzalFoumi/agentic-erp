@@ -225,4 +225,4 @@ def test_list_pending_drafts_returns_what_was_just_proposed(call, registered_typ
 
     listed = call("list_pending_drafts", limit=50).structured_content
 
-    assert any(d["id"] == created["id"] for d in listed["result"])
+    assert any(d["id"] == created["id"] for d in listed["drafts"])
