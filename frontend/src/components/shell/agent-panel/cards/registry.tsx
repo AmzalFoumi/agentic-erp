@@ -6,6 +6,7 @@ import type { ToolUIPart } from "../use-panel-state";
 import { CardErrorBoundary } from "./card-error-boundary";
 import { FallbackCard } from "./fallback-card";
 import { ProductCard, ProductListCard } from "./product-cards";
+import { LotsCard, SpoilageCard } from "./inventory-cards";
 
 /**
  * The one place a tool name maps to a card. Every entry is keyed by the wire
@@ -21,6 +22,8 @@ export const CARD_REGISTRY: Record<string, ToolCard> = {
   "tool-list_products": ProductListCard,
   "tool-get_product": ProductCard,
   "tool-get_product_by_sku": ProductCard,
+  "tool-check_spoilage_risk": SpoilageCard,
+  "tool-list_product_lots": LotsCard,
 };
 
 /**
