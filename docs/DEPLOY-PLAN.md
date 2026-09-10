@@ -554,6 +554,10 @@ Two rules that do not bend:
 
 **Gate 33 (structured tool-output contract): nothing.** No new permission, no new setting, no migration — it changes only the JSON shape MCP tools return.
 
+**Gate 34 (response cards): nothing.** Frontend-only bar one sentence appended to `agent/conversation.py`'s `INSTRUCTIONS` string. No new permission, no new setting, no migration, no new dependency. The card registry, `ChatCard`/`ChatCardTable`, and the seven typed cards are all client components under `frontend/src/components/shell/agent-panel/cards/`.
+
+**Gate 34b (reload persistence, when built): expected nothing.** Whole-turn serialization is internal to `agent/conversation.py` and the agent's own `messages` store; it adds no permission, setting, or migration. Re-confirm when the gate lands.
+
 ### A correction to this plan's own account of the seed
 
 The design spec says removing `Test Agent` "also removes a `Product Reader` assignment". In the seed

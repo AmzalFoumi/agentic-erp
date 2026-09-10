@@ -1,9 +1,11 @@
 # Chatbot overhaul — design spec
 
-> **Status:** IMPLEMENTATION IN PROGRESS. Gates 31 (chat mode), 32 (Markdown), and 33 (structured
-> tool-output contract) shipped on branch `feat/client/chatbot` (gate 33: commits
-> `e306d05..09b5714`). Gate 34 (response cards) is next; **trimmed 2026-09-10** — reload
-> persistence and the two parked gate-33 items split out into a follow-up **gate 34b**.
+> **Status:** IMPLEMENTATION IN PROGRESS. Gates 31 (chat mode), 32 (Markdown), 33 (structured
+> tool-output contract), and **34 (response cards)** shipped on branch `feat/client/chatbot`
+> (gate 33: `e306d05..09b5714`; gate 34: `88b04ae..809661f`, browser walkthrough done — all
+> seven cards + approval/success verified in both panel modes). Gate 34 was **trimmed 2026-09-10**:
+> reload persistence and the two parked gate-33 items (R3, R4) are split out into a follow-up
+> **gate 34b** (not started).
 > **Owner doc.** This is the single source of truth for the chatbot overhaul. `docs/PLAN.md`
 > gates 31–34 point here and carry only one-line summaries. Do not restate decisions in other
 > docs — link to this file.
@@ -381,10 +383,10 @@ object/array (verified at `tool_return_output`). Cards still guard defensively: 
 guard against its `MCPToolOutputs` entry from `mcp-types.d.ts`. A parse failure or shape mismatch
 falls to `<FallbackCard>` — never throws.
 
-**Name resolution.** Nested rows carry `product_id` only (finding 9). Extract the existing
-`useProductLabel` hook out of `tool-call-card.tsx` into a shared `cards/use-product-label.ts`;
-line-item cards use it, showing the raw id while the lookup is in flight or on failure. Reorder
-bundles already include `name`/`sku` — use those directly.
+**Name resolution.** No card resolves `product_id` → name in this gate — bundles/unsourced carry
+`name`/`sku`, spoilage carries `product_name`, and the PO / draft cards show summary counts rather
+than line items. `useProductLabel` stays inline in `tool-call-card.tsx` (the extraction sketched
+here was dropped as unnecessary — ruled during planning, 2026-09-10).
 
 **Layout / panel mode.** One roomy layout per card (the table). The panel `mode`
 (`"docked" | "expanded"`) already reaches `AgentPanel` as a prop from `chat-shell.tsx` but stops
@@ -520,9 +522,13 @@ and even then, structured tool output is preferred.
 - Whether `VercelAIAdapter.dump_messages` on the GET path already round-trips tool parts when
   they are present in `provider_data` — **moved to gate 34b** (reload persistence). Not needed
   for gate 34: live turns carry the tool parts on the wire already.
-- Gate 34: exact route paths for card overflow links — check `docs/FRONTEND-PLAN.md`'s screen
-  inventory; link to the list page where a detail route does not exist.
-- Gate 34: the frontend dev server needs a `npm run dev` restart before the browser walkthrough
-  (it was not hydrating during the gate-33 session).
+- Gate 34: exact route paths for card overflow links — **resolved**; cards link to `/products`,
+  `/products/[id]`, `/inventory/spoilage`, `/purchasing`, `/approvals`, `/purchasing/orders`, all
+  confirmed against the running app during the walkthrough.
+- Gate 34: the frontend dev server needs a `npm run dev` restart before the browser walkthrough —
+  **done**; walkthrough completed 2026-09-10 against the full dev stack, all seven cards + the
+  approval/success cards verified in docked and expanded modes. Two findings fixed in `809661f`
+  (`SuccessCard` `String()`-ing a JSON object → `[object Object]`; expanded-table numeric header
+  spacing).
 - Tool dict shapes are captured (table above); re-capture at gate 34 start only if `server.py`
   changed since gate 33 shipped.

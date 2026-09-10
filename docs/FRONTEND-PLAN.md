@@ -801,6 +801,42 @@ Streamdown's `linkSafety` prop is the lever (a later gate, not 32). Plan:
 
 **Amended 2026-09-10 (Gate 33): MCP tools return structured data, with generated TypeScript types.** Two new generated-and-committed files under `src/lib/api/`: `mcp-schema.json` (from `python -m mcp_server.dump_schemas`, run offline against the backend) and `mcp-types.d.ts` (from `npm run mcp:types`, which wraps `json-schema-to-typescript` v16 as a dev dependency). The drift check has two halves: `backend/tests/test_mcp_schemas.py::test_committed_schema_matches_the_models` in the backend pytest job guards the JSON Schema, and `npm run mcp:types:check` guards the `.d.ts` locally (not yet in CI, same status as the existing `api:types:check`). Gate 34's response cards will import types from `mcp-types.d.ts` to render tool results. Plan: `docs/superpowers/plans/2026-09-10-gate33-structured-tool-output.md`.
 
+**Amended 2026-09-10 (Gate 34): the agent panel renders tool results as cards.** New directory
+`frontend/src/components/shell/agent-panel/cards/`. `registry.tsx` maps a wire part type
+(`"tool-<mcp_tool_name>"`) to a React component; a tool with no row renders through `FallbackCard`
+(top-level scalar fields + a "show raw data" toggle), so a new backend tool never breaks the panel,
+it just looks generic until someone adds a row. `message-list.tsx` was rewritten to walk **every**
+part of an assistant turn in order and render a card for each `output-available` read-tool part
+inline — the old `if (!text) return null` early-return (which hid tool-only turns) is gone.
+`ChatCard` is the shared shell (uppercase title, optional right slot, tokened border/bg);
+`ChatCardTable` is one component that renders a real `<table>` when the panel is expanded and
+stacked label/value blocks when it is docked (256px), branching on `useChatMode()` — cards never
+think about panel width. Seven typed cards ship: `ProductListCard`, `ProductCard`, `SpoilageCard`,
+`LotsCard`, `ReorderBundlesCard`, `PendingDraftsCard`, `PurchaseOrdersCard`. Each has a runtime type
+guard and falls back to `FallbackCard` on a shape mismatch; each is wrapped in a `CardErrorBoundary`
+so a render throw degrades to the fallback rather than blanking the panel. `ToolCallCard` (approval)
+and `SuccessCard` were re-parented onto `ChatCard` with no behaviour change.
+
+**No card test runner** — the frontend still has none. The shape contract is `cards/fixtures.ts`:
+one typed sample payload per card, `MCPToolOutputs["<tool>"]`-typed, that nothing imports at
+runtime — `tsc --noEmit` type-checks it against the generated gate-33 contract, and it doubles as a
+paste-ready payload for the manual walkthrough. So the gate is `tsc` + `lint` + typed fixtures + a
+browser pass over all seven cards in both panel modes. Plan:
+`docs/superpowers/plans/2026-09-10-gate34-response-cards.md`.
+
+**Known issues carried out of Gate 34 (follow-ups, not blockers):**
+
+- **Card type guards are shallow** — each `is<X>Out` guard checks ~4 fields, so a half-valid object
+  could pass and reach e.g. `p.id` (rendering `/products/undefined`). `CardErrorBoundary` still
+  contains any actual throw. Tighten the guards, or generate them from the schema, in a later gate.
+- **Reload persistence of tool cards is gate 34b.** After a reload the panel restores the
+  conversation as text only (the model's summary sentence), not the cards — the agent persists text,
+  not tool parts. Whole-turn serialization in `agent/conversation.py` `_completed` is the fix and is
+  scheduled as gate 34b.
+- **`ProductCard`'s key/value grid** stores JSX values in a tuple array, which trips ESLint
+  `react/jsx-key` (a false positive here — they are data, not rendered siblings); suppressed
+  per-line. A render-prop value shape would avoid the suppressions.
+
 **Known issues carried out of Gate 31:**
 
 - **`density-toggle.tsx` throws when `localStorage` is blocked** (private windows, some embedded
