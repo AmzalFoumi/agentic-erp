@@ -7,6 +7,11 @@ import { CardErrorBoundary } from "./card-error-boundary";
 import { FallbackCard } from "./fallback-card";
 import { ProductCard, ProductListCard } from "./product-cards";
 import { LotsCard, SpoilageCard } from "./inventory-cards";
+import {
+  PendingDraftsCard,
+  PurchaseOrdersCard,
+  ReorderBundlesCard,
+} from "./purchasing-cards";
 
 /**
  * The one place a tool name maps to a card. Every entry is keyed by the wire
@@ -24,6 +29,9 @@ export const CARD_REGISTRY: Record<string, ToolCard> = {
   "tool-get_product_by_sku": ProductCard,
   "tool-check_spoilage_risk": SpoilageCard,
   "tool-list_product_lots": LotsCard,
+  "tool-suggest_reorder_bundles": ReorderBundlesCard,
+  "tool-list_pending_drafts": PendingDraftsCard,
+  "tool-list_purchase_orders": PurchaseOrdersCard,
 };
 
 /**

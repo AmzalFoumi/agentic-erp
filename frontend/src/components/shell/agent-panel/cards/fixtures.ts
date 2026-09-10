@@ -92,3 +92,84 @@ export const listProductLotsFixture: MCPToolOutputs["list_product_lots"] = {
     },
   ],
 };
+
+export const suggestReorderBundlesFixture: MCPToolOutputs["suggest_reorder_bundles"] = {
+  total_value: "18400.00",
+  bundles: [
+    {
+      supplier_id: 3,
+      supplier_name: "Highland Dairy Co.",
+      lead_time_days: 2,
+      minimum_order_value: "10000.00",
+      bundle_value: "12600.00",
+      below_minimum: false,
+      shortfall: "0.00",
+      lines: [
+        {
+          product_id: 1,
+          sku: "2002-1001",
+          name: "Full Cream Milk 1L",
+          quantity_on_hand: 6,
+          reorder_level: 24,
+          quantity: 48,
+          unit_cost: "262.50",
+          pack_size: 12,
+          line_total: "12600.00",
+          is_top_up: false,
+        },
+      ],
+    },
+  ],
+  unsourced: [
+    {
+      product_id: 7,
+      sku: "3001-2002",
+      name: "House Blend Coffee 250g",
+      quantity_on_hand: 2,
+      reorder_level: 10,
+    },
+  ],
+};
+
+export const listPendingDraftsFixture: MCPToolOutputs["list_pending_drafts"] = {
+  drafts: [
+    {
+      id: 41,
+      draft_type: "SUPPLIER_REORDER",
+      status: "PENDING",
+      payload: {
+        supplier_id: 3,
+        expected_date: "2026-09-15",
+        lines: [{ product_id: 1, quantity: 48, unit_cost: "262.50" }],
+      },
+      reasoning: "Milk is below reorder level with a 2-day lead time.",
+      cost_at_risk: null,
+      projected_recovery: null,
+      expires_at: "2026-09-12",
+      is_expired: false,
+      created_by: "01a02d8f-1111-2222-3333-444455556666",
+      created_via: "agent",
+      decided_by: null,
+      decided_via: null,
+    },
+  ],
+};
+
+export const listPurchaseOrdersFixture: MCPToolOutputs["list_purchase_orders"] = {
+  total: 1,
+  orders: [
+    {
+      id: 12,
+      supplier_id: 3,
+      status: "PLACED",
+      expected_date: "2026-09-15",
+      total_value: "12600.00",
+      notes: null,
+      source_draft_id: 41,
+      created_by: "01a02d8f-1111-2222-3333-444455556666",
+      lines: [
+        { product_id: 1, quantity_ordered: 48, unit_cost: "262.50", line_total: "12600.00" },
+      ],
+    },
+  ],
+};
