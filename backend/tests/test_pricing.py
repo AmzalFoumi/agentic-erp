@@ -39,15 +39,25 @@ def test_stock_beyond_the_horizon_is_not_marked_down():
     assert pricing.tier_for(date(2026, 8, 30), today=TODAY) is None
 
 
-def test_already_expired_stock_gets_the_most_urgent_rung():
-    """Not None, and this is the point of the test.
+def test_already_expired_stock_is_a_write_off_not_a_discount():
+    """Past its expiry date, stock cannot be sold at any price.
 
-    Returning None for expired stock would quietly exclude the worst stock in
-    the shop from the report whose whole job is to find it.
+    `tier_for` returns `WRITE_OFF_TIER` (not None, not a discount rung): None
+    would exclude the worst stock in the shop from the report whose whole job
+    is to find it, and a 70%-off rung would propose selling stock nobody may
+    buy.
     """
     tier = pricing.tier_for(date(2026, 8, 20), today=TODAY)
-    assert tier is not None
-    assert tier.discount == Decimal("0.70")
+    assert tier is pricing.WRITE_OFF_TIER
+    assert tier.discount == Decimal("1.00")
+
+
+def test_a_write_off_prices_at_zero_not_the_floor():
+    """The MINIMUM_PRICE floor is for real markdowns; a write-off is 0.00."""
+    assert (
+        pricing.discounted_price(Decimal("480.00"), pricing.WRITE_OFF_TIER)
+        == Decimal("0.00")
+    )
 
 
 def test_the_ladder_is_ordered_most_urgent_first():

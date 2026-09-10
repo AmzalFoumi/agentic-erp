@@ -42,7 +42,10 @@ const SPOILAGE_COLUMNS: ChatCardColumn<SpoilageItemOut>[] = [
     key: "price",
     header: "Now → markdown",
     numeric: true,
-    cell: (i) => `${formatMoney(i.current_price)} → ${formatMoney(i.proposed_price)}`,
+    cell: (i) =>
+      i.discount_percent >= 100
+        ? `${formatMoney(i.current_price)} → write off`
+        : `${formatMoney(i.current_price)} → ${formatMoney(i.proposed_price)}`,
   },
   {
     key: "risk",

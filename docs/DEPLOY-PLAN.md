@@ -525,6 +525,14 @@ Supabase is safe (idempotent) and makes the seeded lots price-consistent, but is
 the box to start. **No new permission and no new setting** — markdown approval still uses
 `product.update`, receiving still uses `stock.adjust`, so sections 1 and 3 have nothing to carry.
 
+**2026-09-10: expired stock is a write-off, and `backend/seed/2026-09-10-more-dated-lots.sql` is
+added.** The code change (spoilage proposes expired lots at 0.00 / 100% off instead of 70% off) is
+pure `services/` logic — **no migration, no new permission, no new setting, no generated-type
+change**, so sections 1–3 carry nothing. The seed file is additive and idempotent: run it against
+Supabase by hand before a judge runs the box, the same way as the files above. Missing it is the
+quiet failure — the box starts fine, but the spoilage screen has no already-expired batch to
+demonstrate the write-off with.
+
 ### 3. A new setting has to be added to the compose file by hand
 
 `backend/`, `agent/` and `frontend/` each read settings from their own `.env`, which the box does

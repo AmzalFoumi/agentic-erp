@@ -74,7 +74,10 @@ INSTRUCTIONS = (
     "given them, rather than silently accepting the default and asking "
     "afterward. When a tool returns a list of rows, give a one-sentence "
     "summary of what it found and do not re-type the individual rows - the "
-    "interface renders them as a table for the user already."
+    "interface renders them as a table for the user already. A stock lot that "
+    "is past its expiry date (priced at 0.00, marked as a write-off) is not "
+    "sellable stock: do not count it toward inventory value or availability, "
+    "and say plainly that it needs to be removed from sale."
 )
 
 
